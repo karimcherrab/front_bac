@@ -1,46 +1,69 @@
- // SignUpForm.jsx
-
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
 import {
-  User,
-  Mail,
-  Lock,
-  Eye,
-  EyeOff,
-  ArrowRight,
-  LoaderCircle,
-} from "lucide-react";
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import {
+  Link,
+  useNavigate,
+} from "react-router-dom";
+
 import axios from "axios";
 import Select from "react-select";
-import Cookies from "js-cookie";
 
-import Alert from "../UI/Alert";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  LoaderCircle,
+  Lock,
+  Mail,
+  User,
+  X,
+  XCircle,
+} from "lucide-react";
+
+import {
+  UserContext,
+} from "../../Utils/UserContext";
+
+const INITIAL_VALUES = {
+  username: "",
+  email: "",
+  password: "",
+  branch: "",
+  acceptTerms: false,
+};
 
 export default function SignUpForm() {
   const navigate = useNavigate();
-  const STUDENT_URL = import.meta.env.VITE_STUDENT_URL;
-  const COURSE_URL = import.meta.env.VITE_COURSE_URL;
 
-  const URL_SIGNUP = `${STUDENT_URL}signup/`;
-  const URL_BRANCHES = `${COURSE_URL}branches/`;
+  /*
+   * login تحفظ Cookies وتحدث token داخل Context
+   * فوراً، لذلك لا نحتاج إلى Refresh.
+   */
+  const { login } =
+    useContext(UserContext);
 
-  // const URL_SIGNUP =
-  //   "http://127.0.0.1:8000/api/account/signup/";
+  const studentUrl =
+    import.meta.env.VITE_STUDENT_URL;
 
-  // const URL_BRANCHES =
-  //   "http://127.0.0.1:8000/api/course/branches/";
+  const courseUrl =
+    import.meta.env.VITE_COURSE_URL;
 
-  const initialValues = {
-    username: "",
-    email: "",
-    password: "",
-    branch: "",
-    acceptTerms: false,
-  };
+  const signupUrl = studentUrl
+    ? `${studentUrl.replace(/\/+$/, "")}/signup/`
+    : "";
+
+  const branchesUrl = courseUrl
+    ? `${courseUrl.replace(/\/+$/, "")}/branches/`
+    : "";
 
   const [formValues, setFormValues] =
-    useState(initialValues);
+    useState(INITIAL_VALUES);
 
   const [formErrors, setFormErrors] =
     useState({});
@@ -53,54 +76,201 @@ export default function SignUpForm() {
     setIsLoadingBranches,
   ] = useState(false);
 
-  const [branchesError, setBranchesError] =
-    useState("");
+  const [
+    branchesError,
+    setBranchesError,
+  ] = useState("");
 
   const [isLoading, setIsLoading] =
     useState(false);
 
-  const [showPassword, setShowPassword] =
-    useState(false);
+  const [
+    showPassword,
+    setShowPassword,
+  ] = useState(false);
 
-  const [alert, setAlert] = useState({
+  const [
+    notification,
+    setNotification,
+  ] = useState({
     show: false,
     type: "success",
     message: "",
   });
 
-  useEffect(() => {
-    getBranches();
-  }, []);
+  const showNotification = (
+    type,
+    message,
+  ) => {
+    setNotification({
+      show: true,
+      type,
+      message,
+    });
+  };
 
-  const getBranches = async () => {
+  const closeNotification = () => {
+    setNotification((previous) => ({
+      ...previous,
+      show: false,
+    }));
+  };
+
+  useEffect(() => {
+    const controller =
+      new AbortController();
+
+    const getBranches = async () => {
+      if (!branchesUrl) {
+        setBranches([]);
+        setBranchesError(
+          "VITE_COURSE_URL غير موجود داخل ملف .env.",
+        );
+
+        return;
+      }
+
+      setIsLoadingBranches(true);
+      setBranchesError("");
+
+      try {
+        const response = await axios.get(
+          branchesUrl,
+          {
+            signal: controller.signal,
+            headers: {
+              Accept: "application/json",
+            },
+            timeout: 15000,
+          },
+        );
+
+        const branchesData =
+          Array.isArray(
+            response.data?.branches,
+          )
+            ? response.data.branches
+            : Array.isArray(response.data)
+              ? response.data
+              : [];
+
+        const formattedBranches =
+          branchesData.map((branch) => ({
+            value:
+              branch.code ||
+              String(branch.id),
+
+            label:
+              branch.name ||
+              branch.title ||
+              branch.code,
+
+            id: branch.id,
+            code: branch.code,
+          }));
+
+        setBranches(formattedBranches);
+      } catch (error) {
+        if (
+          error.code === "ERR_CANCELED" ||
+          error.name === "CanceledError"
+        ) {
+          return;
+        }
+
+        console.error(
+          "Branches loading error:",
+          error,
+        );
+
+        setBranches([]);
+
+        if (
+          error.code === "ECONNABORTED"
+        ) {
+          setBranchesError(
+            "انتهت مدة الاتصال أثناء تحميل الشعب.",
+          );
+        } else if (!error.response) {
+          setBranchesError(
+            "تعذر الاتصال بالخادم لتحميل الشعب.",
+          );
+        } else {
+          setBranchesError(
+            error.response?.data?.message ||
+              error.response?.data?.detail ||
+              "تعذر تحميل الشعب.",
+          );
+        }
+      } finally {
+        setIsLoadingBranches(false);
+      }
+    };
+
+    getBranches();
+
+    return () => {
+      controller.abort();
+    };
+  }, [branchesUrl]);
+
+  const retryGetBranches = async () => {
+    if (!branchesUrl) {
+      setBranchesError(
+        "VITE_COURSE_URL غير موجود داخل ملف .env.",
+      );
+
+      return;
+    }
+
     setIsLoadingBranches(true);
     setBranchesError("");
 
     try {
       const response = await axios.get(
-        URL_BRANCHES
+        branchesUrl,
+        {
+          headers: {
+            Accept: "application/json",
+          },
+          timeout: 15000,
+        },
       );
 
       const branchesData =
-        response.data?.branches || [];
+        Array.isArray(
+          response.data?.branches,
+        )
+          ? response.data.branches
+          : Array.isArray(response.data)
+            ? response.data
+            : [];
 
-      const formattedBranches =
+      setBranches(
         branchesData.map((branch) => ({
-          value: branch.code,
-          label: branch.name,
+          value:
+            branch.code ||
+            String(branch.id),
+
+          label:
+            branch.name ||
+            branch.title ||
+            branch.code,
+
           id: branch.id,
           code: branch.code,
-        }));
-
-      setBranches(formattedBranches);
+        })),
+      );
     } catch (error) {
       console.error(
-        "Erreur chargement branches :",
-        error
+        "Retry branches error:",
+        error,
       );
 
       setBranchesError(
-        "تعذر تحميل الشعب. تحقق من تشغيل الخادم."
+        error.response?.data?.message ||
+          error.response?.data?.detail ||
+          "تعذر تحميل الشعب. تحقق من تشغيل الخادم.",
       );
     } finally {
       setIsLoadingBranches(false);
@@ -115,84 +285,92 @@ export default function SignUpForm() {
       checked,
     } = event.target;
 
-    setFormValues((previousValues) => ({
-      ...previousValues,
+    setFormValues((previous) => ({
+      ...previous,
       [name]:
         type === "checkbox"
           ? checked
           : value,
     }));
 
-    setFormErrors((previousErrors) => ({
-      ...previousErrors,
+    setFormErrors((previous) => ({
+      ...previous,
       [name]: "",
       general: "",
     }));
+
+    if (notification.show) {
+      closeNotification();
+    }
   };
 
   const handleBranchChange = (
-    selectedOption
+    selectedOption,
   ) => {
-    setFormValues((previousValues) => ({
-      ...previousValues,
+    setFormValues((previous) => ({
+      ...previous,
       branch:
         selectedOption?.value || "",
     }));
 
-    setFormErrors((previousErrors) => ({
-      ...previousErrors,
+    setFormErrors((previous) => ({
+      ...previous,
       branch: "",
       general: "",
     }));
+
+    if (notification.show) {
+      closeNotification();
+    }
   };
 
-  const validate = (values) => {
+  const validateForm = () => {
     const errors = {};
 
     const username =
-      values.username.trim();
+      formValues.username.trim();
 
     const email =
-      values.email.trim();
+      formValues.email.trim();
 
     if (!username) {
       errors.username =
-        "الاسم الكامل إجباري";
+        "الاسم الكامل إجباري.";
     } else if (username.length < 2) {
       errors.username =
-        "الاسم يجب أن يحتوي على حرفين على الأقل";
+        "الاسم يجب أن يحتوي على حرفين على الأقل.";
     }
 
     if (!email) {
       errors.email =
-        "البريد الإلكتروني إجباري";
+        "البريد الإلكتروني إجباري.";
     } else if (
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-        email
+        email,
       )
     ) {
       errors.email =
-        "البريد الإلكتروني غير صحيح";
+        "البريد الإلكتروني غير صحيح.";
     }
 
-    if (!values.password) {
+    if (!formValues.password) {
       errors.password =
-        "كلمة المرور إجبارية";
+        "كلمة المرور إجبارية.";
     } else if (
-      values.password.length < 8
+      formValues.password.length < 8
     ) {
       errors.password =
-        "كلمة المرور يجب أن تحتوي على 8 أحرف على الأقل";
+        "كلمة المرور يجب أن تحتوي على 8 أحرف على الأقل.";
     }
 
-    if (!values.branch) {
+    if (!formValues.branch) {
       errors.branch =
-        "يرجى اختيار الشعبة";
+        "يرجى اختيار الشعبة.";
     }
 
-    if (!values.acceptTerms) {
+    if (!formValues.acceptTerms) {
       errors.acceptTerms =
-        "يجب الموافقة على الشروط والأحكام";
+        "يجب الموافقة على الشروط والأحكام.";
     }
 
     return errors;
@@ -200,7 +378,7 @@ export default function SignUpForm() {
 
   const getFirstError = (value) => {
     if (Array.isArray(value)) {
-      return value[0];
+      return String(value[0] || "");
     }
 
     if (typeof value === "string") {
@@ -211,14 +389,24 @@ export default function SignUpForm() {
   };
 
   const extractApiErrors = (error) => {
-    const data = error.response?.data;
-
-    if (!data) {
+    if (
+      error.code === "ECONNABORTED"
+    ) {
       return {
         general:
-          "تعذر الاتصال بالخادم. تحقق من تشغيل Django.",
+          "انتهت مدة الاتصال بالخادم. حاول مجدداً.",
       };
     }
+
+    if (!error.response) {
+      return {
+        general:
+          "تعذر الاتصال بالخادم. تحقق من تشغيل Django والإنترنت.",
+      };
+    }
+
+    const data =
+      error.response.data || {};
 
     const errors = {};
 
@@ -245,7 +433,7 @@ export default function SignUpForm() {
     if (data.non_field_errors) {
       errors.general =
         getFirstError(
-          data.non_field_errors
+          data.non_field_errors,
         );
     }
 
@@ -268,18 +456,56 @@ export default function SignUpForm() {
     if (
       Object.keys(errors).length === 0
     ) {
-      errors.general =
-        "حدث خطأ أثناء إنشاء الحساب.";
+      if (
+        error.response.status >= 500
+      ) {
+        errors.general =
+          "حدث خطأ داخل الخادم أثناء إنشاء الحساب.";
+      } else {
+        errors.general =
+          "تعذر إنشاء الحساب. تحقق من المعلومات.";
+      }
     }
 
     return errors;
   };
 
+  const getAuthenticationData = (
+    responseData,
+  ) => {
+    const accessToken =
+      responseData?.tokens?.access ||
+      responseData?.access ||
+      responseData?.access_token;
+
+    const refreshToken =
+      responseData?.tokens?.refresh ||
+      responseData?.refresh ||
+      responseData?.refresh_token;
+
+    const userData =
+      responseData?.student ||
+      responseData?.user ||
+      responseData?.data?.student ||
+      null;
+
+    return {
+      accessToken,
+      refreshToken,
+      userData,
+    };
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    const errors =
-      validate(formValues);
+    if (isLoading) {
+      return;
+    }
+
+    closeNotification();
+
+    const errors = validateForm();
 
     setFormErrors(errors);
 
@@ -289,24 +515,18 @@ export default function SignUpForm() {
       return;
     }
 
+    if (!signupUrl) {
+      showNotification(
+        "error",
+        "VITE_STUDENT_URL غير موجود داخل ملف .env.",
+      );
+
+      return;
+    }
+
     setIsLoading(true);
-    setAlert((previousAlert) => ({
-      ...previousAlert,
-      show: false,
-    }));
 
     try {
-      /*
-       * StudentSerializer يستعمل:
-       *
-       * branch = serializers.SlugRelatedField(
-       *   slug_field="code",
-       *   queryset=Branch.objects.all(),
-       * )
-       *
-       * لذلك نرسل branch code مثل:
-       * "math" أو "science"
-       */
       const payload = {
         username:
           formValues.username.trim(),
@@ -319,114 +539,150 @@ export default function SignUpForm() {
         password:
           formValues.password,
 
+        /*
+         * نرسل branch code مثل:
+         * math أو science
+         */
         branch:
           formValues.branch,
       };
 
-      console.log(
-        "Signup payload:",
-        payload
-      );
-
       const response = await axios.post(
-        URL_SIGNUP,
+        signupUrl,
         payload,
         {
           headers: {
             "Content-Type":
               "application/json",
+
+            Accept:
+              "application/json",
           },
-        }
+          timeout: 15000,
+        },
       );
 
-      if (response.status === 201) {
-        const accessToken =
-          response.data?.tokens?.access;
+      const {
+        accessToken,
+        refreshToken,
+        userData,
+      } = getAuthenticationData(
+        response.data,
+      );
 
-        const refreshToken =
-          response.data?.tokens?.refresh;
+      /*
+       * بعض Endpoints ترجع 200،
+       * وبعضها ترجع 201.
+       */
+      if (
+        response.status !== 200 &&
+        response.status !== 201
+      ) {
+        throw new Error(
+          "UNEXPECTED_RESPONSE",
+        );
+      }
 
-        if (accessToken) {
-          Cookies.set(
-            "access_token",
-            accessToken,
-            {
-              expires: 1,
-              secure:
-                window.location
-                  .protocol === "https:",
-              sameSite: "Lax",
-            }
-          );
-        }
-
-        if (refreshToken) {
-          Cookies.set(
-            "refresh_token",
-            refreshToken,
-            {
-              expires: 7,
-              secure:
-                window.location
-                  .protocol === "https:",
-              sameSite: "Lax",
-            }
-          );
-        }
-
-        setFormValues(initialValues);
+      if (!accessToken) {
+        /*
+         * إذا كان Signup لا يرجع tokens،
+         * لا ندخل المستخدم تلقائياً.
+         */
+        setFormValues(INITIAL_VALUES);
         setFormErrors({});
 
-        setAlert({
-          show: true,
-          type: "success",
-          message:
-            "🎉 تم إنشاء حسابك بنجاح.",
-        });
+        showNotification(
+          "success",
+          "تم إنشاء حسابك بنجاح. يمكنك الآن تسجيل الدخول.",
+        );
 
-        setTimeout(() => {
-          navigate("/", {
+        window.setTimeout(() => {
+          navigate("/login", {
             replace: true,
           });
-        }, 1000);
+        }, 1200);
+
+        return;
       }
+
+      /*
+       * تحديث Context مباشرة.
+       * هذا يمنع مشكلة ظهور المواد فقط بعد Refresh.
+       */
+      login({
+        accessToken,
+        refreshToken,
+        userData,
+        rememberMe: true,
+      });
+
+      setFormValues(INITIAL_VALUES);
+      setFormErrors({});
+
+      showNotification(
+        "success",
+        "تم إنشاء حسابك وتسجيل دخولك بنجاح.",
+      );
+
+      window.setTimeout(() => {
+        navigate("/", {
+          replace: true,
+        });
+      }, 900);
     } catch (error) {
       console.error(
-        "Erreur inscription :",
-        error.response?.data || error
+        "Signup error:",
+        error.response?.data || error,
       );
+
+      if (
+        error.message ===
+        "UNEXPECTED_RESPONSE"
+      ) {
+        showNotification(
+          "error",
+          "أرجع الخادم استجابة غير متوقعة.",
+        );
+
+        return;
+      }
 
       const apiErrors =
         extractApiErrors(error);
 
       setFormErrors(apiErrors);
 
-      setAlert({
-        show: true,
-        type: "error",
-        message:
-          apiErrors.general ||
+      showNotification(
+        "error",
+        apiErrors.general ||
           apiErrors.username ||
           apiErrors.email ||
           apiErrors.password ||
           apiErrors.branch ||
           "تعذر إنشاء الحساب.",
-      });
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const selectedBranch =
-    branches.find(
-      (branch) =>
-        branch.value ===
-        formValues.branch
-    ) || null;
+  const selectedBranch = useMemo(
+    () =>
+      branches.find(
+        (branch) =>
+          branch.value ===
+          formValues.branch,
+      ) || null,
+    [
+      branches,
+      formValues.branch,
+    ],
+  );
 
   const passwordInputBox = `
-    flex items-center rounded-2xl border bg-slate-50 px-4
-    transition focus-within:bg-white focus-within:ring-4
+    flex items-center rounded-2xl border
+    bg-slate-50 px-4 transition
+    focus-within:bg-white focus-within:ring-4
     ${
       formErrors.password
         ? "border-red-400 focus-within:border-red-500 focus-within:ring-red-100"
@@ -437,26 +693,29 @@ export default function SignUpForm() {
   const selectStyles = {
     control: (
       provided,
-      state
+      state,
     ) => ({
       ...provided,
+
       minHeight: "50px",
       borderRadius: "16px",
       paddingLeft: "6px",
       paddingRight: "6px",
       backgroundColor: "#f8fafc",
 
-      borderColor: formErrors.branch
-        ? "#f87171"
-        : state.isFocused
-          ? "#3b82f6"
-          : "#e2e8f0",
+      borderColor:
+        formErrors.branch
+          ? "#f87171"
+          : state.isFocused
+            ? "#3b82f6"
+            : "#e2e8f0",
 
-      boxShadow: state.isFocused
-        ? formErrors.branch
-          ? "0 0 0 4px #fee2e2"
-          : "0 0 0 4px #dbeafe"
-        : "none",
+      boxShadow:
+        state.isFocused
+          ? formErrors.branch
+            ? "0 0 0 4px #fee2e2"
+            : "0 0 0 4px #dbeafe"
+          : "none",
 
       cursor: "pointer",
       direction: "rtl",
@@ -470,14 +729,14 @@ export default function SignUpForm() {
     }),
 
     valueContainer: (
-      provided
+      provided,
     ) => ({
       ...provided,
       padding: "4px 8px",
     }),
 
     placeholder: (
-      provided
+      provided,
     ) => ({
       ...provided,
       color: "#94a3b8",
@@ -485,7 +744,7 @@ export default function SignUpForm() {
     }),
 
     singleValue: (
-      provided
+      provided,
     ) => ({
       ...provided,
       color: "#0f172a",
@@ -503,9 +762,10 @@ export default function SignUpForm() {
 
     option: (
       provided,
-      state
+      state,
     ) => ({
       ...provided,
+
       cursor: "pointer",
       fontSize: "14px",
       textAlign: "right",
@@ -517,9 +777,10 @@ export default function SignUpForm() {
             ? "#eff6ff"
             : "white",
 
-      color: state.isSelected
-        ? "white"
-        : "#334155",
+      color:
+        state.isSelected
+          ? "white"
+          : "#334155",
     }),
 
     indicatorSeparator: () => ({
@@ -528,273 +789,442 @@ export default function SignUpForm() {
   };
 
   return (
-    <div
-      className="w-full max-w-md"
-      dir="rtl"
-    >
-      <Link
-        to="/"
-        className="mb-4 inline-flex items-center gap-2 text-sm text-slate-500 transition hover:text-brand-600"
-      >
-        <ArrowRight size={17} />
-        العودة إلى الرئيسية
-      </Link>
-
-      <div className="mb-6">
-        <h1 className="text-3xl font-black text-slate-900">
-          إنشاء حساب
-        </h1>
-
-        <p className="mt-2 text-sm text-slate-500">
-          ابدأ رحلتك نحو التفوق في
-          البكالوريا.
-        </p>
-      </div>
-
-      {formErrors.general && (
-        <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-          {formErrors.general}
-        </div>
-      )}
-
-      <form
-        className="space-y-3.5"
-        onSubmit={handleSubmit}
-        noValidate
-      >
-        <Field
-          label="الاسم الكامل"
-          icon={<User size={19} />}
-          error={formErrors.username}
+    <>
+      {notification.show && (
+        <div
+          dir="rtl"
+          className="
+            fixed left-1/2 top-6
+            z-[9999] w-[calc(100%-32px)]
+            max-w-md -translate-x-1/2
+          "
         >
-          <input
-            name="username"
-            type="text"
-            autoComplete="name"
-            placeholder="أدخل اسمك الكامل"
-            value={formValues.username}
-            onChange={handleChange}
-            disabled={isLoading}
-            className="w-full bg-transparent px-3 py-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
-          />
-        </Field>
-
-        <Field
-          label="البريد الإلكتروني"
-          icon={<Mail size={19} />}
-          error={formErrors.email}
-        >
-          <input
-            name="email"
-            type="email"
-            autoComplete="email"
-            placeholder="example@email.com"
-            value={formValues.email}
-            onChange={handleChange}
-            disabled={isLoading}
-            className="w-full bg-transparent px-3 py-3 text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
-            dir="ltr"
-          />
-        </Field>
-
-        <div>
-          <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-            كلمة المرور
-          </label>
-
           <div
-            className={
-              passwordInputBox
-            }
-          >
-            <Lock
-              className="shrink-0 text-slate-400"
-              size={19}
-            />
-
-            <input
-              name="password"
-              type={
-                showPassword
-                  ? "text"
-                  : "password"
+            role="alert"
+            className={`
+              flex items-start gap-3 rounded-2xl
+              border px-5 py-4 shadow-2xl
+              backdrop-blur-md
+              ${
+                notification.type ===
+                "success"
+                  ? "border-emerald-200 bg-emerald-50/95 text-emerald-800"
+                  : "border-red-200 bg-red-50/95 text-red-800"
               }
-              autoComplete="new-password"
-              placeholder="********"
-              value={formValues.password}
-              onChange={handleChange}
-              disabled={isLoading}
-              className="w-full bg-transparent px-3 py-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
-            />
+            `}
+          >
+            <div className="mt-0.5 shrink-0">
+              {notification.type ===
+              "success" ? (
+                <CheckCircle2 size={24} />
+              ) : (
+                <XCircle size={24} />
+              )}
+            </div>
+
+            <p
+              className="
+                flex-1 text-sm font-bold
+                leading-6
+              "
+            >
+              {notification.message}
+            </p>
 
             <button
               type="button"
-              onClick={() =>
-                setShowPassword(
-                  (previousValue) =>
-                    !previousValue
-                )
-              }
-              disabled={isLoading}
-              className="shrink-0 text-slate-400 transition hover:text-brand-600 disabled:cursor-not-allowed"
-              aria-label={
-                showPassword
-                  ? "إخفاء كلمة المرور"
-                  : "إظهار كلمة المرور"
-              }
+              onClick={closeNotification}
+              aria-label="إغلاق الرسالة"
+              className="
+                shrink-0 rounded-lg p-1
+                transition hover:bg-black/5
+              "
             >
-              {showPassword ? (
-                <EyeOff size={19} />
-              ) : (
-                <Eye size={19} />
-              )}
+              <X size={18} />
             </button>
           </div>
+        </div>
+      )}
 
-          {formErrors.password && (
-            <p className="mt-1.5 text-xs font-medium text-red-500">
-              {formErrors.password}
-            </p>
-          )}
+      <div
+        className="w-full max-w-md"
+        dir="rtl"
+      >
+        <Link
+          to="/"
+          className="
+            mb-4 inline-flex items-center
+            gap-2 text-sm text-slate-500
+            transition hover:text-brand-600
+          "
+        >
+          <ArrowRight size={17} />
+          العودة إلى الرئيسية
+        </Link>
+
+        <div className="mb-6">
+          <h1
+            className="
+              text-3xl font-black
+              text-slate-900
+            "
+          >
+            إنشاء حساب
+          </h1>
+
+          <p className="mt-2 text-sm text-slate-500">
+            ابدأ رحلتك نحو التفوق في
+            البكالوريا.
+          </p>
         </div>
 
-        <div className="space-y-2">
-          <label className="block text-sm font-semibold text-slate-700">
-            الشعبة
-          </label>
+        {formErrors.general && (
+          <div
+            className="
+              mb-4 rounded-2xl border
+              border-red-200 bg-red-50
+              px-4 py-3 text-sm
+              font-medium text-red-700
+            "
+          >
+            {formErrors.general}
+          </div>
+        )}
 
-          <Select
-            options={branches}
-            value={selectedBranch}
-            onChange={
-              handleBranchChange
-            }
-            placeholder={
-              isLoadingBranches
-                ? "جاري تحميل الشعب..."
-                : "🎓 اختر الشعبة"
-            }
-            isLoading={
-              isLoadingBranches
-            }
-            isDisabled={
-              isLoadingBranches ||
-              isLoading
-            }
-            isClearable
-            isSearchable
-            noOptionsMessage={() =>
-              branchesError
-                ? "تعذر تحميل الشعب"
-                : "لا توجد شعب"
-            }
-            loadingMessage={() =>
-              "جاري التحميل..."
-            }
-            styles={selectStyles}
-          />
+        <form
+          className="space-y-3.5"
+          onSubmit={handleSubmit}
+          noValidate
+        >
+          <Field
+            label="الاسم الكامل"
+            icon={<User size={19} />}
+            error={formErrors.username}
+          >
+            <input
+              name="username"
+              type="text"
+              autoComplete="name"
+              placeholder="أدخل اسمك الكامل"
+              value={formValues.username}
+              onChange={handleChange}
+              disabled={isLoading}
+              className="
+                w-full bg-transparent px-3
+                py-3 text-sm outline-none
+                disabled:cursor-not-allowed
+                disabled:opacity-60
+              "
+            />
+          </Field>
 
-          {branchesError && (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs font-medium text-red-500">
-                {branchesError}
-              </p>
+          <Field
+            label="البريد الإلكتروني"
+            icon={<Mail size={19} />}
+            error={formErrors.email}
+          >
+            <input
+              name="email"
+              type="email"
+              autoComplete="email"
+              placeholder="example@email.com"
+              value={formValues.email}
+              onChange={handleChange}
+              disabled={isLoading}
+              className="
+                w-full bg-transparent px-3
+                py-3 text-left text-sm
+                outline-none
+                disabled:cursor-not-allowed
+                disabled:opacity-60
+              "
+              dir="ltr"
+            />
+          </Field>
+
+          <div>
+            <label
+              className="
+                mb-1.5 block text-sm
+                font-semibold text-slate-700
+              "
+            >
+              كلمة المرور
+            </label>
+
+            <div
+              className={
+                passwordInputBox
+              }
+            >
+              <Lock
+                size={19}
+                className="
+                  shrink-0 text-slate-400
+                "
+              />
+
+              <input
+                name="password"
+                type={
+                  showPassword
+                    ? "text"
+                    : "password"
+                }
+                autoComplete="new-password"
+                placeholder="********"
+                value={
+                  formValues.password
+                }
+                onChange={handleChange}
+                disabled={isLoading}
+                className="
+                  w-full bg-transparent
+                  px-3 py-3 text-sm
+                  outline-none
+                  disabled:cursor-not-allowed
+                  disabled:opacity-60
+                "
+              />
 
               <button
                 type="button"
-                onClick={getBranches}
-                className="shrink-0 text-xs font-bold text-brand-600 hover:underline"
+                onClick={() =>
+                  setShowPassword(
+                    (previous) =>
+                      !previous,
+                  )
+                }
+                disabled={isLoading}
+                aria-label={
+                  showPassword
+                    ? "إخفاء كلمة المرور"
+                    : "إظهار كلمة المرور"
+                }
+                className="
+                  shrink-0 text-slate-400
+                  transition
+                  hover:text-brand-600
+                  disabled:cursor-not-allowed
+                "
               >
-                إعادة المحاولة
+                {showPassword ? (
+                  <EyeOff size={19} />
+                ) : (
+                  <Eye size={19} />
+                )}
               </button>
             </div>
-          )}
 
-          {formErrors.branch && (
-            <p className="text-xs font-medium text-red-500">
-              {formErrors.branch}
-            </p>
-          )}
-        </div>
+            {formErrors.password && (
+              <p
+                className="
+                  mt-1.5 text-xs
+                  font-medium text-red-500
+                "
+              >
+                {formErrors.password}
+              </p>
+            )}
+          </div>
 
-        <div>
-          <label className="flex cursor-pointer items-start gap-3 text-xs leading-6 text-slate-600">
-            <input
-              name="acceptTerms"
-              type="checkbox"
-              checked={
-                formValues.acceptTerms
+          <div className="space-y-2">
+            <label
+              className="
+                block text-sm font-semibold
+                text-slate-700
+              "
+            >
+              الشعبة
+            </label>
+
+            <Select
+              options={branches}
+              value={selectedBranch}
+              onChange={
+                handleBranchChange
               }
-              onChange={handleChange}
-              disabled={isLoading}
-              className="mt-1 h-4 w-4 rounded border-slate-300 accent-brand-600"
+              placeholder={
+                isLoadingBranches
+                  ? "جاري تحميل الشعب..."
+                  : "🎓 اختر الشعبة"
+              }
+              isLoading={
+                isLoadingBranches
+              }
+              isDisabled={
+                isLoadingBranches ||
+                isLoading
+              }
+              isClearable
+              isSearchable
+              noOptionsMessage={() =>
+                branchesError
+                  ? "تعذر تحميل الشعب"
+                  : "لا توجد شعب"
+              }
+              loadingMessage={() =>
+                "جاري التحميل..."
+              }
+              styles={selectStyles}
             />
 
-            <span>
-              أوافق على
-              <span className="font-bold text-brand-600">
-                {" "}
-                الشروط والأحكام{" "}
-              </span>
-              وسياسة الخصوصية.
-            </span>
-          </label>
+            {branchesError && (
+              <div
+                className="
+                  flex items-center
+                  justify-between gap-3
+                "
+              >
+                <p
+                  className="
+                    text-xs font-medium
+                    text-red-500
+                  "
+                >
+                  {branchesError}
+                </p>
 
-          {formErrors.acceptTerms && (
-            <p className="mt-1 text-xs font-medium text-red-500">
-              {formErrors.acceptTerms}
-            </p>
-          )}
-        </div>
+                <button
+                  type="button"
+                  onClick={
+                    retryGetBranches
+                  }
+                  disabled={
+                    isLoadingBranches
+                  }
+                  className="
+                    shrink-0 text-xs
+                    font-bold text-brand-600
+                    hover:underline
+                    disabled:cursor-not-allowed
+                    disabled:opacity-50
+                  "
+                >
+                  إعادة المحاولة
+                </button>
+              </div>
+            )}
 
-        <button
-          type="submit"
-          disabled={
-            isLoading ||
-            isLoadingBranches ||
-            branches.length === 0
-          }
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 py-3.5 text-base font-bold text-white shadow-lg shadow-brand-600/25 transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:shadow-none"
-        >
-          {isLoading ? (
-            <>
-              <LoaderCircle
-                size={20}
-                className="animate-spin"
+            {formErrors.branch && (
+              <p
+                className="
+                  text-xs font-medium
+                  text-red-500
+                "
+              >
+                {formErrors.branch}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label
+              className="
+                flex cursor-pointer
+                items-start gap-3 text-xs
+                leading-6 text-slate-600
+              "
+            >
+              <input
+                name="acceptTerms"
+                type="checkbox"
+                checked={
+                  formValues.acceptTerms
+                }
+                onChange={handleChange}
+                disabled={isLoading}
+                className="
+                  mt-1 h-4 w-4 rounded
+                  border-slate-300
+                  accent-brand-600
+                "
               />
-              جاري إنشاء الحساب...
-            </>
-          ) : (
-            "إنشاء الحساب"
-          )}
-        </button>
 
-        <p className="text-center text-sm text-slate-500">
-          لديك حساب بالفعل؟
-          <Link
-            to="/login"
-            className="mr-2 font-bold text-brand-600 hover:underline"
+              <span>
+                أوافق على{" "}
+
+                <span
+                  className="
+                    font-bold
+                    text-brand-600
+                  "
+                >
+                  الشروط والأحكام
+                </span>{" "}
+
+                وسياسة الخصوصية.
+              </span>
+            </label>
+
+            {formErrors.acceptTerms && (
+              <p
+                className="
+                  mt-1 text-xs
+                  font-medium text-red-500
+                "
+              >
+                {formErrors.acceptTerms}
+              </p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={
+              isLoading ||
+              isLoadingBranches ||
+              branches.length === 0
+            }
+            className="
+              flex w-full items-center
+              justify-center gap-2
+              rounded-2xl bg-brand-600
+              py-3.5 text-base font-bold
+              text-white shadow-lg
+              shadow-brand-600/25
+              transition hover:bg-brand-700
+              disabled:cursor-not-allowed
+              disabled:bg-slate-400
+              disabled:shadow-none
+            "
           >
-            تسجيل الدخول
-          </Link>
-        </p>
-      </form>
+            {isLoading ? (
+              <>
+                <LoaderCircle
+                  size={20}
+                  className="animate-spin"
+                />
 
-      {alert.show && (
-        <Alert
-          type={alert.type}
-          message={alert.message}
-          onClose={() =>
-            setAlert(
-              (previousAlert) => ({
-                ...previousAlert,
-                show: false,
-              })
-            )
-          }
-        />
-      )}
-    </div>
+                جاري إنشاء الحساب...
+              </>
+            ) : (
+              "إنشاء الحساب"
+            )}
+          </button>
+
+          <p
+            className="
+              text-center text-sm
+              text-slate-500
+            "
+          >
+            لديك حساب بالفعل؟
+
+            <Link
+              to="/login"
+              className="
+                mr-2 font-bold
+                text-brand-600
+                hover:underline
+              "
+            >
+              تسجيل الدخول
+            </Link>
+          </p>
+        </form>
+      </div>
+    </>
   );
 }
 
@@ -806,14 +1236,21 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+      <label
+        className="
+          mb-1.5 block text-sm
+          font-semibold text-slate-700
+        "
+      >
         {label}
       </label>
 
       <div
         className={`
-          flex items-center rounded-2xl border bg-slate-50 px-4
-          transition focus-within:bg-white focus-within:ring-4
+          flex items-center rounded-2xl
+          border bg-slate-50 px-4
+          transition focus-within:bg-white
+          focus-within:ring-4
           ${
             error
               ? "border-red-400 focus-within:border-red-500 focus-within:ring-red-100"
@@ -821,7 +1258,11 @@ function Field({
           }
         `}
       >
-        <span className="shrink-0 text-slate-400">
+        <span
+          className="
+            shrink-0 text-slate-400
+          "
+        >
           {icon}
         </span>
 
@@ -829,7 +1270,12 @@ function Field({
       </div>
 
       {error && (
-        <p className="mt-1.5 text-xs font-medium text-red-500">
+        <p
+          className="
+            mt-1.5 text-xs
+            font-medium text-red-500
+          "
+        >
           {error}
         </p>
       )}

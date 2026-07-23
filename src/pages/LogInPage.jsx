@@ -1,19 +1,29 @@
-import React from 'react'
-import LoginBrandPanel from '../components/LoginPage/LoginBrandPanel'
-import LoginForm from '../components/LoginPage/LoginForm'
+import React from "react";
 
-const LogInPage = () => {
-   return (
-    <div
+import LoginBrandPanel from "../components/LoginPage/LoginBrandPanel";
+import LoginForm from "../components/LoginPage/LoginForm";
+
+export default function LogInPage() {
+  return (
+    <main
       dir="rtl"
-      className="min-h-screen bg-[#f7f8ff] flex items-center justify-center px-6 py-8 font-sans"
+      className="
+        flex min-h-screen items-center justify-center
+        bg-[#f7f8ff] px-4 py-6 font-sans
+        sm:px-6 sm:py-8
+      "
     >
-      <div className="w-full max-w-6xl overflow-hidden rounded-[32px] bg-white shadow-2xl grid grid-cols-1 lg:grid-cols-2">
+      <div
+        className="
+          grid w-full max-w-6xl grid-cols-1
+          overflow-hidden rounded-[32px]
+          bg-white shadow-2xl
+          lg:grid-cols-2
+        "
+      >
         <LoginBrandPanel />
         <LoginForm />
       </div>
-    </div>
+    </main>
   );
 }
-
-export default LogInPage

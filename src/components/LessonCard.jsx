@@ -6,6 +6,7 @@ import IntroStep from "./IntroStep";
 import QuestionBac from "./QuestionBac";
 import GeneratedAIExercises from "./Questions/Generate_question";
 import BacChapterExercises from "./Questions/BacChapterExercises";
+import AxisRevisionPage from "./Course/AxisRevisionPage";
 
 import StepNavFooter from "./StepNavFooter";
 
@@ -348,6 +349,15 @@ export default function LessonCard() {
       return <IntroStep data={cour}  axisId={axisId} />;
     }
 
+        if (activeId === "resume") {
+                  return (
+            <AxisRevisionPage
+              axisId = {axisId}
+              
+            />
+          );
+            }
+
     if (activeId === "question_bac") {
       if (loadingQuestions && !questionBac) {
         return renderLoading(
@@ -398,6 +408,11 @@ export default function LessonCard() {
       );
         }
 
+
+  
+
+
+        
 
         
 

@@ -2488,9 +2488,11 @@ function ReExplainPanel({
   axis,
   axisId,
   initialHistory = [],
-  onReExplain,
-  reExplainEndpoint = "https://bac-test.onrender.com/api/course/axes/re-explication/",
+  onReExplain
 }) {
+    const COURSE_URL = import.meta.env.VITE_COURSE_URL;
+
+  const reExplainEndpoint = `${COURSE_URL}axes/re-explication/`;
   const [open, setOpen] = useState(false);
   const [loadingAction, setLoadingAction] = useState("");
   const [error, setError] = useState("");
@@ -3104,9 +3106,13 @@ function EmptyLessonCard() {
 export default function CourseAnswer({
   data,
   axisId,
-  onReExplain,
-  reExplainEndpoint = "https://bac-test.onrender.com/api/course/axes/re-explication/",
+  onReExplain
 }) {
+  const COURSE_URL = import.meta.env.VITE_COURSE_URL;
+
+  const reExplainEndpoint = `${COURSE_URL}axes/re-explication/`;
+
+
   const lesson = useMemo(() => normalizeLesson(data), [data]);
   const axis = useMemo(() => normalizeAxis(data, lesson), [data, lesson]);
 

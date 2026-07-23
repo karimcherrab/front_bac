@@ -32,9 +32,6 @@ import { UserContext } from "../Utils/UserContext";
 const COURSE_URL = import.meta.env.VITE_COURSE_URL;
 const URL_GET_SUBJECTS = `${COURSE_URL}subjects/my-branch/`;
 
-// const URL_GET_SUBJECTS =
-//   "http://127.0.0.1:8000/api/course/subjects/my-branch/";
-
 const iconMap = {
   Calculator,
   BookOpen,

@@ -31,8 +31,10 @@ export const lessonParts = [
 
 export const lessonSteps = [
   { id: "intro", label: "مدخل", icon: "lightbulb" },
-  { id: "question_bac", label: "تمارينات بكالوريا", icon: "sigma" },
-  { id: "question_generate", label: "تمرين موجه", icon: "pencil" },
+  { id: "question_bac", label: "تمارينات بكالوريا", icon: "trophy" },
+  { id: "question_generate", label: "تمرين موجه", icon: "sigma" },
+  { id: "resume", label: "ملخص ", icon: "pencil" },
+
   //  { id: "bac", label: "كتابة البكالوريا", icon: "trophy" },
 ];
 
