@@ -688,66 +688,125 @@ function MethodsOverviewStep({ content }) {
 function MethodTimeline({ items }) {
   if (!Array.isArray(items) || items.length === 0) return null;
 
+  const normalizedItems = items
+    .map((item, index) => {
+      // تدعم الخوارزمية الجديدة مصفوفة نصوص:
+      // algorithm: ["الخطوة الأولى", "الخطوة الثانية"]
+      if (typeof item === "string" || typeof item === "number") {
+        return {
+          stepNumber: index + 1,
+          instruction: String(item),
+          why: "",
+          calculation: "",
+          result: "",
+        };
+      }
+
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+
+      return {
+        stepNumber:
+          item.step_number ??
+          item.order ??
+          item.number ??
+          item.index ??
+          index + 1,
+        instruction:
+          item.instruction ||
+          item.action ||
+          item.text ||
+          item.title ||
+          item.name ||
+          item.step ||
+          item.description ||
+          "",
+        why:
+          item.why ||
+          item.reason ||
+          item.explanation ||
+          item.teacher_explanation ||
+          "",
+        calculation:
+          item.calculation ||
+          item.formula ||
+          item.operation ||
+          item.work ||
+          "",
+        result:
+          item.result ||
+          item.conclusion ||
+          item.answer ||
+          "",
+      };
+    })
+    .filter(Boolean)
+    .filter(
+      (item) =>
+        item.instruction || item.why || item.calculation || item.result,
+    );
+
+  if (normalizedItems.length === 0) return null;
+
   return (
     <div className="relative space-y-4">
       <div className="pointer-events-none absolute bottom-8 right-5 top-8 hidden w-px bg-gradient-to-b from-indigo-200 via-violet-300 to-transparent sm:block" />
 
-      {items.map((item, index) => {
-        const stepNumber = item?.step_number ?? index + 1;
-        const instruction =
-          item?.instruction ||
-          item?.text ||
-          item?.title ||
-          item?.step ||
-          "";
-        const why =
-          item?.why ||
-          item?.reason ||
-          item?.explanation ||
-          "";
+      {normalizedItems.map((item, index) => (
+        <div
+          key={`${item.stepNumber}-${index}`}
+          className="group relative overflow-hidden rounded-[26px] border border-slate-200/80 bg-white p-5 shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg sm:pr-20"
+        >
+          <div className="absolute inset-y-0 right-0 w-1.5 bg-gradient-to-b from-indigo-500 to-violet-600" />
 
-        if (!instruction && !why) return null;
-
-        return (
-          <div
-            key={`${stepNumber}-${index}`}
-            className="group relative overflow-hidden rounded-[26px] border border-slate-200/80 bg-white p-5 shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg sm:pr-20"
-          >
-            <div className="absolute inset-y-0 right-0 w-1.5 bg-gradient-to-b from-indigo-500 to-violet-600" />
-
-            <div className="mb-4 flex items-center gap-3 sm:absolute sm:right-5 sm:top-5 sm:mb-0">
-              <div className="flex h-11 min-w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 px-3 font-black text-white shadow-lg shadow-indigo-500/20">
-                {stepNumber}
-              </div>
-            </div>
-
-            <div className="min-w-0">
-              {instruction && (
-                <div>
-                  <p className="mb-1.5 text-[11px] font-black tracking-wide text-indigo-600">
-                    ماذا أفعل؟
-                  </p>
-                  <MathText className="font-black text-slate-950">
-                    {instruction}
-                  </MathText>
-                </div>
-              )}
-
-              {why && (
-                <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
-                  <div className="mb-1.5 flex items-center gap-2 text-xs font-black text-sky-700">
-                    <Lightbulb size={15} />
-                    لماذا نقوم بهذه الخطوة؟
-                  </div>
-                  <MathText className="text-sm font-semibold text-slate-700">
-                    {why}
-                  </MathText>
-                </div>
-              )}
+          <div className="mb-4 flex items-center gap-3 sm:absolute sm:right-5 sm:top-5 sm:mb-0">
+            <div className="flex h-11 min-w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 px-3 font-black text-white shadow-lg shadow-indigo-500/20">
+              {item.stepNumber}
             </div>
           </div>
-        );
-      })}
+
+          <div className="min-w-0 space-y-4">
+            {item.instruction && (
+              <div>
+                <p className="mb-1.5 text-[11px] font-black tracking-wide text-indigo-600">
+                  ماذا أفعل؟
+                </p>
+                <MathText className="font-black text-slate-950">
+                  {item.instruction}
+                </MathText>
+              </div>
+            )}
+
+            {item.why && (
+              <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                <div className="mb-1.5 flex items-center gap-2 text-xs font-black text-sky-700">
+                  <Lightbulb size={15} />
+                  لماذا نقوم بهذه الخطوة؟
+                </div>
+                <MathText className="text-sm font-semibold text-slate-700">
+                  {item.why}
+                </MathText>
+              </div>
+            )}
+
+            {item.calculation && (
+              <div>
+                <p className="mb-2 text-xs font-black text-violet-700">
+                  التطبيق الرياضي
+                </p>
+                <MathPanel>{item.calculation}</MathPanel>
+              </div>
+            )}
+
+            {item.result && (
+              <InfoBox title="نتيجة الخطوة" tone="emerald" icon={CheckCircle2}>
+                <MathText className="font-black">{item.result}</MathText>
+              </InfoBox>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1497,8 +1556,26 @@ function HintLevels({ items }) {
 }
 
 
-function MethodStep({ content }) {
-  const algorithm = Array.isArray(content.algorithm) ? content.algorithm : [];
+function MethodStep({ content = {} }) {
+  const algorithm = Array.isArray(content.algorithm)
+    ? content.algorithm
+    : Array.isArray(content.method)
+      ? content.method
+      : Array.isArray(content.steps)
+        ? content.steps
+        : [];
+
+  const usefulIdentities = Array.isArray(content.useful_identities)
+    ? content.useful_identities
+    : Array.isArray(content.identities)
+      ? content.identities
+      : Array.isArray(content.formulas)
+        ? content.formulas
+        : [];
+
+  const conclusionTemplates = Array.isArray(content.conclusion_templates)
+    ? content.conclusion_templates
+    : [];
 
   return (
     <div className="space-y-6">
@@ -1522,8 +1599,34 @@ function MethodStep({ content }) {
         )}
       </div>
 
+      {usefulIdentities.length > 0 && (
+        <section className="rounded-[28px] border border-violet-200 bg-gradient-to-b from-violet-50/80 to-white p-5 shadow-sm sm:p-6">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-500/20">
+              <Brain size={20} />
+            </div>
+            <div>
+              <p className="text-xs font-black text-violet-600">
+                أدوات ضرورية
+              </p>
+              <h3 className="text-lg font-black text-slate-950">
+                المتطابقات المفيدة
+              </h3>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {usefulIdentities.map((identity, index) => (
+              <MathPanel key={`${getDisplayText(identity)}-${index}`}>
+                {getDisplayText(identity)}
+              </MathPanel>
+            ))}
+          </div>
+        </section>
+      )}
+
       {algorithm.length > 0 && (
-        <div>
+        <section>
           <div className="mb-5 flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/20">
               <Route size={20} />
@@ -1539,19 +1642,18 @@ function MethodStep({ content }) {
           </div>
 
           <MethodTimeline items={algorithm} />
-        </div>
+        </section>
       )}
 
-      {Array.isArray(content.conclusion_templates) &&
-        content.conclusion_templates.length > 0 && (
-          <RevealBox label="قوالب جاهزة لكتابة الخاتمة" tone="emerald">
-            <BulletList
-              items={content.conclusion_templates}
-              tone="emerald"
-              icon={CheckCircle2}
-            />
-          </RevealBox>
-        )}
+      {conclusionTemplates.length > 0 && (
+        <RevealBox label="قوالب جاهزة لكتابة الخاتمة" tone="emerald">
+          <BulletList
+            items={conclusionTemplates}
+            tone="emerald"
+            icon={CheckCircle2}
+          />
+        </RevealBox>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {content.teacher_tip && (
@@ -1560,9 +1662,11 @@ function MethodStep({ content }) {
           </InfoBox>
         )}
 
-        {content.warning && (
+        {(content.warning || content.important_warning) && (
           <InfoBox title="انتبه" tone="rose" icon={AlertTriangle}>
-            <MathText className="font-bold">{content.warning}</MathText>
+            <MathText className="font-bold">
+              {content.warning || content.important_warning}
+            </MathText>
           </InfoBox>
         )}
       </div>
