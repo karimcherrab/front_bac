@@ -486,12 +486,79 @@ function MotivationStep({ content }) {
   );
 }
 
-function ObservationStep({ content }) {
+function ObservationStep({ content = {} }) {
+  const valueTable = Array.isArray(content.value_table)
+    ? content.value_table
+    : [];
+
+  const legacyTable = Array.isArray(content.table)
+    ? content.table
+    : [];
+
+  const discoveryText =
+    content.discovery ||
+    content.observation ||
+    content.conclusion ||
+    "";
+
+  const quickCheck = content.quick_check;
+
   return (
     <div className="space-y-5 sm:space-y-6">
-      <MathText className="text-slate-700">{content.situation}</MathText>
+      {(content.teacher || content.situation) && (
+        <div className="rounded-[28px] border border-sky-100 bg-gradient-to-l from-sky-50 via-white to-white p-5 shadow-sm sm:p-6">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-sky-100 px-3 py-1.5 text-xs font-black text-sky-800">
+            <Brain size={16} />
+            شرح الملاحظة
+          </div>
+          <MathText className="font-semibold text-slate-700">
+            {content.teacher || content.situation}
+          </MathText>
+        </div>
+      )}
 
-      {Array.isArray(content.table) && content.table.length > 0 && (
+      {valueTable.length > 0 && (
+        <div className="overflow-hidden rounded-[26px] border border-indigo-100 bg-white shadow-sm">
+          <div className="border-b border-indigo-100 bg-gradient-to-l from-indigo-50 to-white px-5 py-4">
+            <p className="text-xs font-black text-indigo-600">جدول القيم</p>
+            <h3 className="mt-1 font-black text-slate-950">
+              نراقب اقتراب قيم الدالة
+            </h3>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[440px] text-center text-sm">
+              <thead className="bg-gradient-to-l from-slate-950 to-indigo-950 text-white">
+                <tr>
+                  <th className="px-5 py-4 font-black">قيمة \(x\)</th>
+                  <th className="px-5 py-4 font-black">قيمة \(f(x)\)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {valueTable.map((row, index) => (
+                  <tr
+                    key={`${row?.x ?? index}-${index}`}
+                    className="border-t border-slate-200 even:bg-indigo-50/40"
+                  >
+                    <td className="px-5 py-4">
+                      <MathText className="font-black text-indigo-700">
+                        {row?.x ?? row?.input ?? row?.value ?? ""}
+                      </MathText>
+                    </td>
+                    <td className="px-5 py-4">
+                      <MathText className="font-black text-slate-900">
+                        {row?.f_x ?? row?.fx ?? row?.output ?? row?.result ?? ""}
+                      </MathText>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {legacyTable.length > 0 && (
         <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[540px] text-center text-sm">
@@ -503,7 +570,7 @@ function ObservationStep({ content }) {
                 </tr>
               </thead>
               <tbody>
-                {content.table.map((row, index) => (
+                {legacyTable.map((row, index) => (
                   <tr key={index} className="border-t border-slate-200 even:bg-slate-50">
                     <td className="px-4 py-4 font-black text-indigo-700">{row.index}</td>
                     <td className="px-4 py-4 font-black text-slate-800">{row.term}</td>
@@ -518,19 +585,63 @@ function ObservationStep({ content }) {
         </div>
       )}
 
-
       {Array.isArray(content.examples) && content.examples.length > 0 && (
         <div className="grid gap-4 md:grid-cols-3">
           {content.examples.map((item, index) => (
-            <div key={index} className="rounded-[24px] border border-sky-100 bg-gradient-to-b from-sky-50 to-white p-5 shadow-sm">
-              <MathPanel>{item.sequence}</MathPanel>
-              <MathText className="mt-4 text-sm font-semibold text-slate-600">{item.observation}</MathText>
-              <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-center font-black text-emerald-800">
-                {item.conclusion}
-              </div>
+            <div
+              key={index}
+              className="rounded-[24px] border border-sky-100 bg-gradient-to-b from-sky-50 to-white p-5 shadow-sm"
+            >
+              {(item.sequence || item.expression || item.formula) && (
+                <MathPanel>
+                  {item.sequence || item.expression || item.formula}
+                </MathPanel>
+              )}
+              {(item.observation || item.explanation) && (
+                <MathText className="mt-4 text-sm font-semibold text-slate-600">
+                  {item.observation || item.explanation}
+                </MathText>
+              )}
+              {item.conclusion && (
+                <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-center font-black text-emerald-800">
+                  <MathText className="font-black">{item.conclusion}</MathText>
+                </div>
+              )}
             </div>
           ))}
         </div>
+      )}
+
+      {discoveryText && (
+        <InfoBox title="ما الذي اكتشفناه؟" tone="emerald" icon={Lightbulb}>
+          <MathText className="font-bold">{discoveryText}</MathText>
+        </InfoBox>
+      )}
+
+      {content.why && (
+        <InfoBox title="لماذا نتعلم هذه الفكرة؟" tone="amber" icon={Lightbulb}>
+          <MathText className="font-bold">{content.why}</MathText>
+        </InfoBox>
+      )}
+
+      {content.how_to_think && (
+        <InfoBox title="كيف أفكر؟" tone="sky" icon={Brain}>
+          <MathText className="font-bold">{content.how_to_think}</MathText>
+        </InfoBox>
+      )}
+
+      {content.attention && (
+        <InfoBox title="انتبه إلى هذه النقطة" tone="rose" icon={AlertTriangle}>
+          <MathText className="font-bold">{content.attention}</MathText>
+        </InfoBox>
+      )}
+
+      {quickCheck?.question && (
+        <RevealBox label={quickCheck.question} tone="emerald">
+          <MathText className="font-black">
+            {quickCheck.answer || "لم تُرسل الإجابة من الخادم."}
+          </MathText>
+        </RevealBox>
       )}
 
       {(content.question || content.expected_answer) && (
@@ -538,10 +649,6 @@ function ObservationStep({ content }) {
           <MathText className="font-black">{content.expected_answer}</MathText>
         </RevealBox>
       )}
-
-      <InfoBox title="ما الذي اكتشفناه؟" tone="emerald" icon={Lightbulb}>
-        <MathText className="font-bold">{content.discovery}</MathText>
-      </InfoBox>
     </div>
   );
 }
@@ -688,125 +795,80 @@ function MethodsOverviewStep({ content }) {
 function MethodTimeline({ items }) {
   if (!Array.isArray(items) || items.length === 0) return null;
 
-  const normalizedItems = items
-    .map((item, index) => {
-      // تدعم الخوارزمية الجديدة مصفوفة نصوص:
-      // algorithm: ["الخطوة الأولى", "الخطوة الثانية"]
-      if (typeof item === "string" || typeof item === "number") {
-        return {
-          stepNumber: index + 1,
-          instruction: String(item),
-          why: "",
-          calculation: "",
-          result: "",
-        };
-      }
-
-      if (!item || typeof item !== "object" || Array.isArray(item)) {
-        return null;
-      }
-
-      return {
-        stepNumber:
-          item.step_number ??
-          item.order ??
-          item.number ??
-          item.index ??
-          index + 1,
-        instruction:
-          item.instruction ||
-          item.action ||
-          item.text ||
-          item.title ||
-          item.name ||
-          item.step ||
-          item.description ||
-          "",
-        why:
-          item.why ||
-          item.reason ||
-          item.explanation ||
-          item.teacher_explanation ||
-          "",
-        calculation:
-          item.calculation ||
-          item.formula ||
-          item.operation ||
-          item.work ||
-          "",
-        result:
-          item.result ||
-          item.conclusion ||
-          item.answer ||
-          "",
-      };
-    })
-    .filter(Boolean)
-    .filter(
-      (item) =>
-        item.instruction || item.why || item.calculation || item.result,
-    );
-
-  if (normalizedItems.length === 0) return null;
-
   return (
     <div className="relative space-y-4">
       <div className="pointer-events-none absolute bottom-8 right-5 top-8 hidden w-px bg-gradient-to-b from-indigo-200 via-violet-300 to-transparent sm:block" />
 
-      {normalizedItems.map((item, index) => (
-        <div
-          key={`${item.stepNumber}-${index}`}
-          className="group relative overflow-hidden rounded-[26px] border border-slate-200/80 bg-white p-5 shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg sm:pr-20"
-        >
-          <div className="absolute inset-y-0 right-0 w-1.5 bg-gradient-to-b from-indigo-500 to-violet-600" />
+      {items.map((item, index) => {
+        const isPrimitive =
+          typeof item === "string" || typeof item === "number";
 
-          <div className="mb-4 flex items-center gap-3 sm:absolute sm:right-5 sm:top-5 sm:mb-0">
-            <div className="flex h-11 min-w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 px-3 font-black text-white shadow-lg shadow-indigo-500/20">
-              {item.stepNumber}
+        const stepNumber =
+          !isPrimitive && item?.step_number !== undefined
+            ? item.step_number
+            : index + 1;
+
+        const instruction = isPrimitive
+          ? String(item)
+          : item?.instruction ||
+            item?.text ||
+            item?.title ||
+            item?.step ||
+            item?.action ||
+            item?.statement ||
+            item?.content ||
+            "";
+
+        const why = isPrimitive
+          ? ""
+          : item?.why ||
+            item?.reason ||
+            item?.explanation ||
+            item?.justification ||
+            "";
+
+        if (!instruction && !why) return null;
+
+        return (
+          <div
+            key={`${stepNumber}-${index}`}
+            className="group relative overflow-hidden rounded-[26px] border border-slate-200/80 bg-white p-5 shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg sm:pr-20"
+          >
+            <div className="absolute inset-y-0 right-0 w-1.5 bg-gradient-to-b from-indigo-500 to-violet-600" />
+
+            <div className="mb-4 flex items-center gap-3 sm:absolute sm:right-5 sm:top-5 sm:mb-0">
+              <div className="flex h-11 min-w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 px-3 font-black text-white shadow-lg shadow-indigo-500/20">
+                {stepNumber}
+              </div>
+            </div>
+
+            <div className="min-w-0">
+              {instruction && (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-black tracking-wide text-indigo-600">
+                    ماذا أفعل؟
+                  </p>
+                  <MathText className="font-black text-slate-950">
+                    {instruction}
+                  </MathText>
+                </div>
+              )}
+
+              {why && (
+                <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                  <div className="mb-1.5 flex items-center gap-2 text-xs font-black text-sky-700">
+                    <Lightbulb size={15} />
+                    لماذا نقوم بهذه الخطوة؟
+                  </div>
+                  <MathText className="text-sm font-semibold text-slate-700">
+                    {why}
+                  </MathText>
+                </div>
+              )}
             </div>
           </div>
-
-          <div className="min-w-0 space-y-4">
-            {item.instruction && (
-              <div>
-                <p className="mb-1.5 text-[11px] font-black tracking-wide text-indigo-600">
-                  ماذا أفعل؟
-                </p>
-                <MathText className="font-black text-slate-950">
-                  {item.instruction}
-                </MathText>
-              </div>
-            )}
-
-            {item.why && (
-              <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
-                <div className="mb-1.5 flex items-center gap-2 text-xs font-black text-sky-700">
-                  <Lightbulb size={15} />
-                  لماذا نقوم بهذه الخطوة؟
-                </div>
-                <MathText className="text-sm font-semibold text-slate-700">
-                  {item.why}
-                </MathText>
-              </div>
-            )}
-
-            {item.calculation && (
-              <div>
-                <p className="mb-2 text-xs font-black text-violet-700">
-                  التطبيق الرياضي
-                </p>
-                <MathPanel>{item.calculation}</MathPanel>
-              </div>
-            )}
-
-            {item.result && (
-              <InfoBox title="نتيجة الخطوة" tone="emerald" icon={CheckCircle2}>
-                <MathText className="font-black">{item.result}</MathText>
-              </InfoBox>
-            )}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -1557,28 +1619,55 @@ function HintLevels({ items }) {
 
 
 function MethodStep({ content = {} }) {
-  const algorithm = Array.isArray(content.algorithm)
-    ? content.algorithm
-    : Array.isArray(content.method)
-      ? content.method
-      : Array.isArray(content.steps)
-        ? content.steps
-        : [];
+  const algorithmSource =
+    content.algorithm ??
+    content.steps ??
+    content.method ??
+    content.method_steps ??
+    content.procedure ??
+    [];
 
-  const usefulIdentities = Array.isArray(content.useful_identities)
-    ? content.useful_identities
-    : Array.isArray(content.identities)
-      ? content.identities
-      : Array.isArray(content.formulas)
-        ? content.formulas
-        : [];
+  const algorithm = Array.isArray(algorithmSource)
+    ? algorithmSource
+    : algorithmSource
+      ? [algorithmSource]
+      : [];
 
-  const conclusionTemplates = Array.isArray(content.conclusion_templates)
-    ? content.conclusion_templates
-    : [];
+  const usefulIdentities =
+    content.useful_identities ??
+    content.identities ??
+    content.formulas ??
+    content.rules ??
+    [];
+
+  const conclusionTemplates =
+    content.conclusion_templates ??
+    content.conclusion_template ??
+    content.answer_template ??
+    [];
+
+  const normalizedConclusions = Array.isArray(conclusionTemplates)
+    ? conclusionTemplates
+    : conclusionTemplates
+      ? [conclusionTemplates]
+      : [];
+
+  const quickCheck = content.quick_check;
 
   return (
     <div className="space-y-6">
+      {(content.teacher || content.introduction) && (
+        <div className="rounded-[28px] border border-indigo-100 bg-gradient-to-l from-indigo-50 via-white to-white p-5 shadow-sm sm:p-6">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-indigo-100 px-3 py-1.5 text-xs font-black text-indigo-800">
+            <Brain size={16} />
+            شرح الطريقة
+          </div>
+          <MathText className="font-semibold text-slate-700">
+            {content.teacher || content.introduction}
+          </MathText>
+        </div>
+      )}
+
       {content.method_goal && (
         <InfoBox title="هدف الطريقة" tone="indigo" icon={Target}>
           <MathText className="font-black">{content.method_goal}</MathText>
@@ -1599,42 +1688,14 @@ function MethodStep({ content = {} }) {
         )}
       </div>
 
-      {usefulIdentities.length > 0 && (
-        <section className="rounded-[28px] border border-violet-200 bg-gradient-to-b from-violet-50/80 to-white p-5 shadow-sm sm:p-6">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-500/20">
-              <Brain size={20} />
-            </div>
-            <div>
-              <p className="text-xs font-black text-violet-600">
-                أدوات ضرورية
-              </p>
-              <h3 className="text-lg font-black text-slate-950">
-                المتطابقات المفيدة
-              </h3>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {usefulIdentities.map((identity, index) => (
-              <MathPanel key={`${getDisplayText(identity)}-${index}`}>
-                {getDisplayText(identity)}
-              </MathPanel>
-            ))}
-          </div>
-        </section>
-      )}
-
       {algorithm.length > 0 && (
-        <section>
+        <section className="rounded-[30px] border border-indigo-100 bg-gradient-to-b from-indigo-50/70 to-white p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/20">
               <Route size={20} />
             </div>
             <div>
-              <p className="text-xs font-black text-indigo-600">
-                خطوات مرتبة
-              </p>
+              <p className="text-xs font-black text-indigo-600">خطوات مرتبة</p>
               <h3 className="text-lg font-black text-slate-950">
                 اتبع المنهجية خطوة بخطوة
               </h3>
@@ -1645,10 +1706,24 @@ function MethodStep({ content = {} }) {
         </section>
       )}
 
-      {conclusionTemplates.length > 0 && (
+      {Array.isArray(usefulIdentities) && usefulIdentities.length > 0 && (
+        <div>
+          <h3 className="mb-4 flex items-center gap-2 font-black text-slate-950">
+            <ListChecks size={19} className="text-violet-600" />
+            متطابقات وقواعد مفيدة
+          </h3>
+          <div className="grid gap-4 md:grid-cols-2">
+            {usefulIdentities.map((identity, index) => (
+              <MathPanel key={index}>{getDisplayText(identity)}</MathPanel>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {normalizedConclusions.length > 0 && (
         <RevealBox label="قوالب جاهزة لكتابة الخاتمة" tone="emerald">
           <BulletList
-            items={conclusionTemplates}
+            items={normalizedConclusions}
             tone="emerald"
             icon={CheckCircle2}
           />
@@ -1656,26 +1731,47 @@ function MethodStep({ content = {} }) {
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
+        {content.why && (
+          <InfoBox title="لماذا تنجح هذه الطريقة؟" tone="amber" icon={Lightbulb}>
+            <MathText className="font-bold">{content.why}</MathText>
+          </InfoBox>
+        )}
+
+        {content.how_to_think && (
+          <InfoBox title="كيف أفكر؟" tone="sky" icon={Brain}>
+            <MathText className="font-bold">{content.how_to_think}</MathText>
+          </InfoBox>
+        )}
+
         {content.teacher_tip && (
           <InfoBox title="نصيحة الأستاذ" tone="amber" icon={Lightbulb}>
             <MathText className="font-bold">{content.teacher_tip}</MathText>
           </InfoBox>
         )}
 
-        {(content.warning || content.important_warning) && (
+        {(content.attention || content.warning || content.important_warning) && (
           <InfoBox title="انتبه" tone="rose" icon={AlertTriangle}>
             <MathText className="font-bold">
-              {content.warning || content.important_warning}
+              {content.attention ||
+                content.warning ||
+                content.important_warning}
             </MathText>
           </InfoBox>
         )}
       </div>
 
+      {quickCheck?.question && (
+        <RevealBox label={quickCheck.question} tone="emerald">
+          <MathText className="font-black">
+            {quickCheck.answer || "لم تُرسل الإجابة من الخادم."}
+          </MathText>
+        </RevealBox>
+      )}
+
       {content.graph_data && <GraphRenderer graph={content.graph_data} />}
     </div>
   );
 }
-
 
 function WorkedExampleStep({ content }) {
   return (
@@ -1802,75 +1898,116 @@ function GuidedPracticeStep({ content }) {
   );
 }
 
-function InPathFinalAssessmentStep({ content }) {
+function InPathFinalAssessmentStep({ content = {} }) {
   const [open, setOpen] = useState(false);
+
+  const statement =
+    content.exercise ||
+    content.statement ||
+    content.question ||
+    content.prompt ||
+    content.title ||
+    "";
+
+  const solutionSource =
+    content.solution ??
+    content.answers ??
+    content.solution_steps ??
+    content.expected_answer ??
+    content.final_answer ??
+    [];
+
+  const solutions = Array.isArray(solutionSource)
+    ? solutionSource
+    : solutionSource
+      ? [solutionSource]
+      : [];
+
+  const skills =
+    content.skills ??
+    content.measured_skills ??
+    content.learning_outcomes ??
+    [];
 
   return (
     <div className="space-y-6">
-      <InfoBox title="التمرين الشامل" tone="amber" icon={Trophy}>
-        <MathText className="font-black">{content.exercise}</MathText>
-      </InfoBox>
+      {statement && (
+        <InfoBox title="التمرين الشامل" tone="amber" icon={Trophy}>
+          <MathText className="font-black">{statement}</MathText>
+        </InfoBox>
+      )}
 
-      {content.skills?.length > 0 && (
+      {Array.isArray(skills) && skills.length > 0 && (
         <div>
           <h3 className="mb-3 font-black text-slate-950">المهارات المقاسة</h3>
-          <BulletList items={content.skills} tone="indigo" icon={Target} />
+          <BulletList items={skills} tone="indigo" icon={Target} />
         </div>
       )}
 
-      {content.guided_prompts?.length > 0 && (
-        <HintLevels
-          items={content.guided_prompts.map((hint, index) => ({
-            level: index + 1,
-            hint,
-          }))}
-        />
-      )}
-
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between rounded-2xl bg-slate-950 px-5 py-4 font-black text-white transition hover:bg-indigo-700"
-      >
-        <span>{open ? "إخفاء التصحيح" : "إظهار التصحيح النموذجي"}</span>
-        {open ? <ChevronUp size={19} /> : <ChevronDown size={19} />}
-      </button>
-
-      {open && (
-        <MethodTimeline
-          items={(content.solution || []).map((item, index) => ({
-            step_number: index + 1,
-            instruction: getDisplayText(item),
-          }))}
-        />
-      )}
-
-      {content.success_criteria?.length > 0 && (
-        <div>
-          <h3 className="mb-3 font-black text-slate-950">معايير النجاح</h3>
-          <BulletList
-            items={content.success_criteria}
-            tone="emerald"
-            icon={CheckCircle2}
+      {Array.isArray(content.guided_prompts) &&
+        content.guided_prompts.length > 0 && (
+          <HintLevels
+            items={content.guided_prompts.map((hint, index) => ({
+              level: index + 1,
+              hint: getDisplayText(hint),
+            }))}
           />
-        </div>
+        )}
+
+      {Array.isArray(content.hint_levels) &&
+        content.hint_levels.length > 0 && (
+          <HintLevels items={content.hint_levels} />
+        )}
+
+      {solutions.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="flex w-full items-center justify-between rounded-2xl bg-slate-950 px-5 py-4 font-black text-white transition hover:bg-indigo-700"
+          >
+            <span>{open ? "إخفاء التصحيح" : "إظهار التصحيح النموذجي"}</span>
+            {open ? <ChevronUp size={19} /> : <ChevronDown size={19} />}
+          </button>
+
+          {open && (
+            <MethodTimeline
+              items={solutions.map((item, index) => ({
+                step_number:
+                  typeof item === "object" && item?.step_number
+                    ? item.step_number
+                    : index + 1,
+                instruction: getDisplayText(item),
+                why:
+                  typeof item === "object"
+                    ? item.why || item.explanation || item.reason
+                    : "",
+              }))}
+            />
+          )}
+        </>
       )}
 
-      {content.graph_data && <GraphRenderer graph={content.graph_data} />}
+      {content.verification && (
+        <InfoBox title="التحقق" tone="sky" icon={CheckCircle2}>
+          <MathText className="font-bold">{content.verification}</MathText>
+        </InfoBox>
+      )}
+
+      {Array.isArray(content.success_criteria) &&
+        content.success_criteria.length > 0 && (
+          <div>
+            <h3 className="mb-3 font-black text-slate-950">معايير النجاح</h3>
+            <BulletList
+              items={content.success_criteria}
+              tone="emerald"
+              icon={CheckCircle2}
+            />
+          </div>
+        )}
     </div>
   );
 }
-
-
-const PEDAGOGICAL_KEYS = new Set([
-  "why",
-  "how_to_think",
-  "attention",
-  "quick_check",
-  "bac_connection",
-  "mastery_rule",
-  "next_step",
-]);
 
 function QuickCheckCard({ check }) {
   const [open, setOpen] = useState(false);
@@ -1912,55 +2049,94 @@ function QuickCheckCard({ check }) {
   );
 }
 
-function PedagogicalBlocks({ content }) {
+const PEDAGOGICAL_KEYS = new Set([
+  "why",
+  "how_to_think",
+  "attention",
+  "quick_check",
+  "bac_connection",
+  "mastery_rule",
+  "next_step",
+]);
+
+const PEDAGOGICAL_FIELDS_RENDERED_BY_STEP = {
+  observation: new Set([
+    "why",
+    "how_to_think",
+    "attention",
+    "quick_check",
+  ]),
+  method: new Set([
+    "why",
+    "how_to_think",
+    "attention",
+    "quick_check",
+  ]),
+};
+
+function getExcludedPedagogicalFields(stepType) {
+  return (
+    PEDAGOGICAL_FIELDS_RENDERED_BY_STEP[stepType] ||
+    new Set()
+  );
+}
+
+function PedagogicalBlocks({
+  content,
+  excludeFields = new Set(),
+}) {
   if (!content) return null;
 
+  const canShow = (field) => !excludeFields.has(field);
+
   const hasAny =
-    content.why ||
-    content.how_to_think ||
-    content.attention ||
-    content.quick_check ||
-    content.bac_connection ||
-    content.mastery_rule ||
-    content.next_step;
+    (canShow("why") && content.why) ||
+    (canShow("how_to_think") && content.how_to_think) ||
+    (canShow("attention") && content.attention) ||
+    (canShow("quick_check") && content.quick_check) ||
+    (canShow("bac_connection") && content.bac_connection) ||
+    (canShow("mastery_rule") && content.mastery_rule) ||
+    (canShow("next_step") && content.next_step);
 
   if (!hasAny) return null;
 
   return (
     <div className="mt-7 space-y-4 border-t border-slate-200 pt-7">
       <div className="grid gap-4 lg:grid-cols-2">
-        {content.why && (
+        {canShow("why") && content.why && (
           <InfoBox title="لماذا نتعلم هذه الفكرة؟" tone="amber" icon={Lightbulb}>
             <MathText className="font-bold">{content.why}</MathText>
           </InfoBox>
         )}
-        {content.how_to_think && (
+        {canShow("how_to_think") && content.how_to_think && (
           <InfoBox title="كيف أفكر؟" tone="sky" icon={Brain}>
             <MathText className="font-bold">{content.how_to_think}</MathText>
           </InfoBox>
         )}
       </div>
 
-      {content.attention && (
+      {canShow("attention") && content.attention && (
         <InfoBox title="انتبه إلى هذه النقطة" tone="rose" icon={AlertTriangle}>
           <MathText className="font-bold">{content.attention}</MathText>
         </InfoBox>
       )}
 
-      {content.quick_check && <QuickCheckCard check={content.quick_check} />}
+      {canShow("quick_check") && content.quick_check && (
+        <QuickCheckCard check={content.quick_check} />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {content.bac_connection && (
+        {canShow("bac_connection") && content.bac_connection && (
           <InfoBox title="صلة الفكرة بالبكالوريا" tone="indigo" icon={GraduationCap}>
             <MathText className="font-bold">{content.bac_connection}</MathText>
           </InfoBox>
         )}
-        {content.mastery_rule && (
+        {canShow("mastery_rule") && content.mastery_rule && (
           <InfoBox title="علامة الإتقان" tone="emerald" icon={Trophy}>
             <MathText className="font-bold">{content.mastery_rule}</MathText>
           </InfoBox>
         )}
-        {content.next_step && (
+        {canShow("next_step") && content.next_step && (
           <InfoBox title="الخطوة التالية" tone="indigo" icon={ArrowLeft}>
             <MathText className="font-bold">{content.next_step}</MathText>
           </InfoBox>
@@ -2169,35 +2345,157 @@ function DiscoveryStep({ content }) {
   );
 }
 
-function DefinitionStep({ content }) {
+function DefinitionStep({ content = {} }) {
+  const orderedValues = [
+    {
+      label: "عندما تكون القيم مرتبة تصاعديًا",
+      value: content.increasing_order,
+      tone: "indigo",
+    },
+    {
+      label: "عندما تكون القيم مرتبة تنازليًا",
+      value: content.decreasing_order,
+      tone: "violet",
+    },
+  ].filter((item) => !isEmpty(item.value));
+
+  const handledKeys = new Set([
+    "teacher",
+    "central_idea",
+    "general_meaning",
+    "increasing_order",
+    "decreasing_order",
+    "definitions",
+    "symbols",
+    "monotone_definition",
+    "memory_tip",
+
+    // تُعرض في PedagogicalBlocks أسفل المرحلة، لذلك لا نكررها هنا.
+    ...PEDAGOGICAL_KEYS,
+  ]);
+
+  const remainingEntries = Object.entries(content).filter(
+    ([key, value]) => !handledKeys.has(key) && !isEmpty(value),
+  );
+
   return (
     <div className="space-y-6">
       {content.teacher && (
-        <InfoBox title="الفكرة الأساسية" tone="indigo" icon={BookOpen}>
+        <InfoBox title="شرح الأستاذ" tone="indigo" icon={BookOpen}>
           <MathText className="font-bold">{content.teacher}</MathText>
         </InfoBox>
       )}
 
-      {Array.isArray(content.definitions) && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {content.definitions.map((item, index) => (
-            <div key={index} className="rounded-[24px] border border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-white p-5 shadow-sm">
-              <h3 className="font-black text-indigo-950">{item.name}</h3>
-              {item.formula && <div className="mt-3"><MathPanel>{item.formula}</MathPanel></div>}
-              <MathText className="mt-3 text-sm font-semibold text-slate-700">{item.meaning}</MathText>
-            </div>
-          ))}
+      {content.central_idea && (
+        <div className="overflow-hidden rounded-[28px] border border-violet-200 bg-gradient-to-l from-violet-50 via-white to-indigo-50 p-5 shadow-sm sm:p-6">
+          <div className="mb-3 flex items-center gap-2 text-violet-700">
+            <Sparkles size={19} />
+            <h3 className="font-black">الفكرة الأساسية</h3>
+          </div>
+          <MathText className="text-base font-black text-slate-900">
+            {content.central_idea}
+          </MathText>
         </div>
       )}
 
-      {Array.isArray(content.symbols) && (
+      {content.general_meaning && (
+        <InfoBox title="المعنى العام" tone="sky" icon={Lightbulb}>
+          <MathText className="font-bold">{content.general_meaning}</MathText>
+        </InfoBox>
+      )}
+
+      {orderedValues.length > 0 && (
         <div>
-          <h3 className="mb-4 font-black text-slate-950">معاني الرموز</h3>
+          <div className="mb-4 flex items-center gap-2">
+            <Route size={19} className="text-indigo-600" />
+            <h3 className="font-black text-slate-950">
+              ترتيب القيمة بين صورتي طرفي المجال
+            </h3>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {orderedValues.map((item) => (
+              <div
+                key={item.label}
+                className={cn(
+                  "rounded-[26px] border bg-white p-5 text-center shadow-sm",
+                  item.tone === "violet"
+                    ? "border-violet-200"
+                    : "border-indigo-200",
+                )}
+              >
+                <p
+                  className={cn(
+                    "mb-3 text-sm font-black",
+                    item.tone === "violet"
+                      ? "text-violet-700"
+                      : "text-indigo-700",
+                  )}
+                >
+                  {item.label}
+                </p>
+                <MathPanel>{item.value}</MathPanel>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {Array.isArray(content.definitions) &&
+        content.definitions.length > 0 && (
+          <div className="grid gap-4 md:grid-cols-2">
+            {content.definitions.map((item, index) => (
+              <div
+                key={item?.name || index}
+                className="rounded-[24px] border border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-white p-5 shadow-sm"
+              >
+                {item?.name && (
+                  <h3 className="font-black text-indigo-950">
+                    {item.name}
+                  </h3>
+                )}
+
+                {item?.formula && (
+                  <div className="mt-3">
+                    <MathPanel>{item.formula}</MathPanel>
+                  </div>
+                )}
+
+                {item?.meaning && (
+                  <MathText className="mt-3 text-sm font-semibold text-slate-700">
+                    {item.meaning}
+                  </MathText>
+                )}
+
+                {item?.condition && (
+                  <MathText className="mt-3 text-sm font-semibold text-slate-700">
+                    {item.condition}
+                  </MathText>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+      {Array.isArray(content.symbols) && content.symbols.length > 0 && (
+        <div>
+          <h3 className="mb-4 font-black text-slate-950">
+            معاني الرموز
+          </h3>
+
           <div className="grid gap-4 md:grid-cols-3">
             {content.symbols.map((item, index) => (
-              <div key={index} className="rounded-[22px] border border-slate-200 bg-white p-4 text-center shadow-sm">
-                <MathPanel>{item.symbol}</MathPanel>
-                <MathText className="mt-3 text-sm font-bold text-slate-700">{item.meaning}</MathText>
+              <div
+                key={item?.symbol || index}
+                className="rounded-[22px] border border-slate-200 bg-white p-4 text-center shadow-sm"
+              >
+                {item?.symbol && <MathPanel>{item.symbol}</MathPanel>}
+
+                {item?.meaning && (
+                  <MathText className="mt-3 text-sm font-bold text-slate-700">
+                    {item.meaning}
+                  </MathText>
+                )}
               </div>
             ))}
           </div>
@@ -2205,15 +2503,49 @@ function DefinitionStep({ content }) {
       )}
 
       {content.monotone_definition && (
-        <InfoBox title="تعريف المتتالية الرتيبة" tone="emerald" icon={CheckCircle2}>
-          <MathText className="font-black">{content.monotone_definition}</MathText>
+        <InfoBox
+          title="تعريف المتتالية الرتيبة"
+          tone="emerald"
+          icon={CheckCircle2}
+        >
+          <MathText className="font-black">
+            {content.monotone_definition}
+          </MathText>
         </InfoBox>
       )}
 
       {content.memory_tip && (
         <InfoBox title="حيلة للحفظ" tone="amber" icon={Lightbulb}>
-          <MathText className="font-bold">{content.memory_tip}</MathText>
+          <MathText className="font-bold">
+            {content.memory_tip}
+          </MathText>
         </InfoBox>
+      )}
+
+      {remainingEntries.length > 0 && (
+        <div className="space-y-4">
+          {remainingEntries.map(([key, value]) => (
+            <div
+              key={key}
+              className={cn(
+                key === "graph_data"
+                  ? ""
+                  : "rounded-[24px] border border-slate-200 bg-slate-50/70 p-5",
+              )}
+            >
+              {key !== "graph_data" && (
+                <h3 className="mb-3 font-black text-slate-950">
+                  {fieldLabel(key)}
+                </h3>
+              )}
+
+              <StructuredValue
+                value={value}
+                fieldKey={key}
+              />
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -3060,7 +3392,10 @@ function LessonStepCard({
 
       <div className="bg-gradient-to-b from-white via-white to-slate-50/40 p-5 sm:p-8">
         <StepBody step={step} />
-        <PedagogicalBlocks content={step?.content} />
+        <PedagogicalBlocks
+          content={step?.content}
+          excludeFields={getExcludedPedagogicalFields(step?.type)}
+        />
         <ReExplainPanel
           key={step.id || `re-explain-${index}`}
           step={step}
@@ -3080,62 +3415,156 @@ function LessonStepCard({
    Final assessment
 ========================================================= */
 
-function FinalAssessment({ assessment }) {
+function FinalAssessment({ assessment = {} }) {
   const [openAnswers, setOpenAnswers] = useState(false);
 
-  if (!assessment) return null;
+  if (!assessment || Object.keys(assessment).length === 0) return null;
+
+  const statement =
+    assessment.statement ||
+    assessment.exercise ||
+    assessment.question ||
+    assessment.prompt ||
+    "";
+
+  const questionsSource =
+    assessment.questions ??
+    assessment.tasks ??
+    assessment.items ??
+    [];
+
+  const questions = Array.isArray(questionsSource)
+    ? questionsSource
+    : questionsSource
+      ? [questionsSource]
+      : [];
+
+  const answersSource =
+    assessment.answers ??
+    assessment.solution ??
+    assessment.solution_steps ??
+    assessment.expected_answer ??
+    assessment.final_answer ??
+    [];
+
+  const answers = Array.isArray(answersSource)
+    ? answersSource
+    : answersSource
+      ? [answersSource]
+      : [];
 
   return (
     <section className="overflow-hidden rounded-[36px] border border-amber-200/80 bg-white shadow-[0_28px_80px_-42px_rgba(245,158,11,0.5)]">
       <div className="relative overflow-hidden bg-gradient-to-l from-amber-500 via-orange-500 to-rose-500 p-6 text-white sm:p-9">
         <div className="pointer-events-none absolute -left-10 -top-16 h-44 w-44 rounded-full bg-white/20 blur-2xl" />
+
         <div className="relative flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15">
             <Trophy size={24} />
           </div>
+
           <div>
             <p className="text-xs font-black text-white/80">التقييم الختامي</p>
-            <h2 className="text-2xl font-black">اختبر إتقانك للمحور</h2>
+            <h2 className="text-2xl font-black">
+              {assessment.title || "اختبر إتقانك للمحور"}
+            </h2>
           </div>
         </div>
-        <MathText className="mt-5 font-semibold text-white">{assessment.statement}</MathText>
+
+        {statement && (
+          <MathText className="mt-5 font-semibold text-white">
+            {statement}
+          </MathText>
+        )}
       </div>
 
       <div className="space-y-6 p-5 sm:p-8">
-        <div className="space-y-3.5">
-          {(assessment.questions || []).map((question, index) => (
-            <div key={index} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-950 font-black text-white">
-                {index + 1}
-              </span>
-              <MathText className="font-bold text-slate-800">{question}</MathText>
-            </div>
-          ))}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setOpenAnswers((value) => !value)}
-          className="flex w-full items-center justify-between rounded-2xl bg-slate-950 px-5 py-4 font-black text-white transition hover:bg-indigo-700"
-        >
-          <span>{openAnswers ? "إخفاء التصحيح" : "إظهار التصحيح النموذجي"}</span>
-          {openAnswers ? <ChevronUp size={19} /> : <ChevronDown size={19} />}
-        </button>
-
-        {openAnswers && (
+        {questions.length > 0 && (
           <div className="space-y-3.5">
-            {(assessment.answers || []).map((answer, index) => (
-              <InfoBox key={index} title={`إجابة السؤال ${index + 1}`} tone="emerald" icon={CheckCircle2}>
-                <MathText className="font-bold">{answer}</MathText>
-              </InfoBox>
+            {questions.map((question, index) => (
+              <div
+                key={question?.id || index}
+                className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-950 font-black text-white">
+                  {index + 1}
+                </span>
+                <MathText className="font-bold text-slate-800">
+                  {getDisplayText(question)}
+                </MathText>
+              </div>
             ))}
           </div>
         )}
 
-        <div>
-          <h3 className="mb-4 font-black text-slate-950">معايير النجاح</h3>
-          <BulletList items={assessment.success_criteria} tone="emerald" icon={CheckCircle2} />
-        </div>
+        {Array.isArray(assessment.guided_prompts) &&
+          assessment.guided_prompts.length > 0 && (
+            <div>
+              <h3 className="mb-4 font-black text-slate-950">
+                توجيهات قبل الحل
+              </h3>
+              <BulletList
+                items={assessment.guided_prompts}
+                tone="sky"
+                icon={Compass}
+              />
+            </div>
+          )}
+
+        {answers.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => setOpenAnswers((value) => !value)}
+              className="flex w-full items-center justify-between rounded-2xl bg-slate-950 px-5 py-4 font-black text-white transition hover:bg-indigo-700"
+            >
+              <span>
+                {openAnswers ? "إخفاء التصحيح" : "إظهار التصحيح النموذجي"}
+              </span>
+              {openAnswers ? (
+                <ChevronUp size={19} />
+              ) : (
+                <ChevronDown size={19} />
+              )}
+            </button>
+
+            {openAnswers && (
+              <MethodTimeline
+                items={answers.map((answer, index) => ({
+                  step_number:
+                    typeof answer === "object" && answer?.step_number
+                      ? answer.step_number
+                      : index + 1,
+                  instruction: getDisplayText(answer),
+                  why:
+                    typeof answer === "object"
+                      ? answer.why ||
+                        answer.explanation ||
+                        answer.reason
+                      : "",
+                }))}
+              />
+            )}
+          </>
+        )}
+
+        {assessment.verification && (
+          <InfoBox title="التحقق" tone="sky" icon={CheckCircle2}>
+            <MathText className="font-bold">{assessment.verification}</MathText>
+          </InfoBox>
+        )}
+
+        {Array.isArray(assessment.success_criteria) &&
+          assessment.success_criteria.length > 0 && (
+            <div>
+              <h3 className="mb-4 font-black text-slate-950">معايير النجاح</h3>
+              <BulletList
+                items={assessment.success_criteria}
+                tone="emerald"
+                icon={CheckCircle2}
+              />
+            </div>
+          )}
       </div>
     </section>
   );
@@ -3377,11 +3806,15 @@ export default function CourseAnswer({
 
     if (lesson.final_assessment) {
       result.push({
-        id: "final-assessment",
+        id: "standalone-final-assessment",
         type: "final_assessment",
-        title: "التقييم الختامي",
+        pageRole: "standalone_final_assessment",
+        title:
+          lesson.final_assessment?.title ||
+          "التقييم الختامي",
         label: "التقييم",
         icon: Trophy,
+        content: lesson.final_assessment,
       });
     }
 
@@ -3407,7 +3840,20 @@ export default function CourseAnswer({
   }
 
   const title =
-    lesson.axis_title || axis?.title || lesson.title || "شرح الدرس";
+    lesson?.axis_title ||
+    lesson?.title ||
+    axis?.title ||
+    data?.axis?.title ||
+    "شرح الدرس";
+
+  const chapterTitle =
+    lesson?.chapter_title ||
+    lesson?.chapter?.title ||
+    data?.content?.chapter_title ||
+    data?.axis?.content?.chapter_title ||
+    data?.axis?.chapter_title ||
+    data?.chapter_title ||
+    "النهايات والاستمرارية";
 
   const safePage = Math.min(currentPage, Math.max(pages.length - 1, 0));
   const activePage = pages[safePage];
@@ -3456,17 +3902,28 @@ export default function CourseAnswer({
 
         mjx-container {
           max-width: 100%;
-          overflow-x: auto;
-          overflow-y: hidden;
-          padding-block: 0.2rem;
+          overflow: visible !important;
+          padding-block: 0.08rem;
           direction: ltr !important;
           text-align: inherit;
           unicode-bidi: isolate;
+          vertical-align: middle;
+        }
+
+        mjx-container:not([display="true"]) {
+          display: inline-block !important;
+          width: auto !important;
+          min-width: 0 !important;
+          margin-inline: 0.18rem !important;
         }
 
         mjx-container[display="true"] {
           display: block !important;
-          margin: 0.45rem 0 !important;
+          width: 100%;
+          overflow-x: auto !important;
+          overflow-y: hidden !important;
+          margin: 0.55rem 0 !important;
+          padding-block: 0.25rem;
           text-align: center !important;
         }
 
@@ -3500,7 +3957,7 @@ export default function CourseAnswer({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-black text-indigo-700 ring-1 ring-indigo-100">
                   <GraduationCap size={15} />
-                  {data?.axis?.chapter_title || "المتتاليات العددية"}
+                  {chapterTitle}
                 </span>
                 <span className="inline-flex items-center gap-2 rounded-full bg-gradient-to-l from-indigo-600 to-violet-600 px-3 py-1.5 text-xs font-black text-white shadow-lg shadow-indigo-500/20">
                   <BookOpen size={14} />
@@ -3574,8 +4031,13 @@ export default function CourseAnswer({
                   title={title}
                   learningPath={learningPath}
                 />
-              ) : activePage?.type === "final_assessment" ? (
-                <FinalAssessment assessment={lesson.final_assessment} />
+              ) : activePage?.pageRole === "standalone_final_assessment" ? (
+                <FinalAssessment
+                  assessment={
+                    activePage?.content ||
+                    lesson.final_assessment
+                  }
+                />
               ) : (
                 <LessonStepCard
                   step={activePage}

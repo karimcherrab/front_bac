@@ -8,8 +8,6 @@ import {
 import axios from "axios";
 import {
   Bot,
-  ChevronLeft,
-  ChevronRight,
   Loader2,
   MessageCircle,
   RotateCcw,
@@ -707,367 +705,324 @@ export default function ChatPanel({
   };
 
   return (
-    <aside
-      dir="rtl"
-      className={[
-        "relative flex h-screen shrink-0 flex-col",
-        "border-l border-slate-200 bg-white",
-        "shadow-sm transition-all duration-300",
-        collapsed ? "w-[72px]" : "w-[360px]",
-      ].join(" ")}
-    >
-      {/* En-tête */}
-      <header
+    <>
+      {/* زر المحادثة العائم */}
+      {collapsed && (
+        <button
+          type="button"
+          onClick={handleCollapse}
+          title="فتح المساعد الذكي"
+          aria-label="فتح المساعد الذكي"
+          className={[
+            "fixed bottom-6 left-6 z-[60]",
+            "flex h-14 w-14 items-center justify-center",
+            "rounded-full bg-brand-500 text-white",
+            "shadow-[0_12px_35px_rgba(37,99,235,0.35)]",
+            "transition duration-200",
+            "hover:-translate-y-1 hover:bg-brand-600",
+            "focus:outline-none focus:ring-4 focus:ring-brand-200",
+          ].join(" ")}
+        >
+          <MessageCircle size={25} />
+
+          {messages.length > 0 && (
+            <span
+              className={[
+                "absolute -right-1 -top-1",
+                "flex h-6 min-w-6 items-center justify-center",
+                "rounded-full border-2 border-white",
+                "bg-red-500 px-1 text-[10px] font-bold text-white",
+              ].join(" ")}
+            >
+              {Math.min(messages.length, 99)}
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* خلفية شفافة على الهاتف */}
+      {!collapsed && (
+        <button
+          type="button"
+          aria-label="إغلاق المحادثة"
+          onClick={handleCollapse}
+          className={[
+            "fixed inset-0 z-[59] bg-slate-950/20",
+            "backdrop-blur-[2px] sm:hidden",
+          ].join(" ")}
+        />
+      )}
+
+      {/* نافذة المحادثة العائمة */}
+      <aside
+        dir="rtl"
         className={[
-          "flex min-h-[72px] items-center",
-          "border-b border-slate-100",
+          "fixed z-[60] flex flex-col overflow-hidden",
+          "border border-slate-200 bg-white",
+          "shadow-[0_24px_80px_rgba(15,23,42,0.22)]",
+          "transition-all duration-300 ease-out",
+
+          "bottom-3 left-3 right-3 h-[calc(100dvh-1.5rem)]",
+          "rounded-3xl",
+
+          "sm:bottom-24 sm:left-6 sm:right-auto",
+          "sm:h-[min(680px,calc(100vh-8rem))]",
+          "sm:w-[390px] sm:rounded-[28px]",
+
           collapsed
-            ? "justify-center px-2"
-            : "justify-between px-4",
+            ? "pointer-events-none translate-y-8 scale-95 opacity-0"
+            : "translate-y-0 scale-100 opacity-100",
         ].join(" ")}
       >
-        {!collapsed && (
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <div
+        {/* رأس النافذة */}
+        <header
+          className={[
+            "flex min-h-[72px] items-center justify-between",
+            "border-b border-slate-100 px-4",
+            "bg-gradient-to-l from-brand-50 to-white",
+          ].join(" ")}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <div
+              className={[
+                "flex h-10 w-10 shrink-0 items-center justify-center",
+                "rounded-2xl bg-brand-500 text-white shadow-sm",
+              ].join(" ")}
+            >
+              <Sparkles size={19} />
+            </div>
+
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-bold text-slate-900">
+                مساعدك الذكي
+              </h2>
+
+              <p className="truncate text-xs text-slate-500">
+                {chapterTitle}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            {messages.length > 0 && (
+              <button
+                type="button"
+                onClick={resetConversation}
+                disabled={loading || initialLoading}
+                title="بدء محادثة جديدة"
                 className={[
-                  "flex h-9 w-9 shrink-0 items-center",
-                  "justify-center rounded-xl",
-                  "bg-brand-100 text-brand-600",
+                  "flex h-9 w-9 items-center justify-center",
+                  "rounded-xl text-slate-500 transition",
+                  "hover:bg-white hover:text-slate-800",
+                  "disabled:cursor-not-allowed disabled:opacity-40",
                 ].join(" ")}
               >
-                <Sparkles size={18} />
-              </div>
+                <RotateCcw size={17} />
+              </button>
+            )}
 
-              <div className="min-w-0">
-                <h2
+            <button
+              type="button"
+              onClick={handleCollapse}
+              title="إغلاق المساعد"
+              aria-label="إغلاق المساعد"
+              className={[
+                "flex h-9 w-9 items-center justify-center",
+                "rounded-xl text-slate-500 transition",
+                "hover:bg-white hover:text-slate-900",
+              ].join(" ")}
+            >
+              <X size={19} />
+            </button>
+          </div>
+        </header>
+
+        {/* منطقة الرسائل */}
+        <div
+          ref={messagesContainerRef}
+          className={[
+            "flex-1 overflow-y-auto scroll-smooth px-4 py-4",
+            "[&::-webkit-scrollbar]:w-1.5",
+            "[&::-webkit-scrollbar-track]:bg-transparent",
+            "[&::-webkit-scrollbar-thumb]:rounded-full",
+            "[&::-webkit-scrollbar-thumb]:bg-slate-200",
+          ].join(" ")}
+        >
+          <div className="space-y-5">
+            {!initialLoading && messages.length === 0 && (
+              <div className="flex h-full min-h-[310px] flex-col items-center justify-center px-5 text-center">
+                <div
                   className={[
-                    "truncate text-sm font-bold",
-                    "text-slate-900",
+                    "mb-4 flex h-16 w-16 items-center justify-center",
+                    "rounded-3xl bg-brand-50 text-brand-600",
                   ].join(" ")}
                 >
-                  مساعدك الذكي
-                </h2>
+                  <Bot size={29} />
+                </div>
 
-                <p className="truncate text-xs text-slate-500">
-                  {chapterTitle}
+                <h3 className="text-base font-bold text-slate-900">
+                  كيف يمكنني مساعدتك؟
+                </h3>
+
+                <p className="mt-2 max-w-[270px] text-sm leading-6 text-slate-500">
+                  اطرح سؤالًا حول الدرس، اطلب شرحًا مبسطًا أو مثالًا إضافيًا.
                 </p>
               </div>
+            )}
+
+            {messages.map((message) => (
+              <ChatMessage
+                key={message.id}
+                message={message}
+              />
+            ))}
+
+            {(loading || initialLoading) && (
+              <div className="flex items-start gap-2.5">
+                <div
+                  className={[
+                    "flex h-8 w-8 shrink-0 items-center justify-center",
+                    "rounded-full bg-brand-100 text-brand-600",
+                  ].join(" ")}
+                >
+                  <Bot size={16} />
+                </div>
+
+                <div
+                  className={[
+                    "flex items-center gap-2 rounded-2xl rounded-tr-sm",
+                    "bg-slate-50 px-4 py-3 text-sm text-slate-500",
+                  ].join(" ")}
+                >
+                  <Loader2 size={16} className="animate-spin" />
+
+                  <span>
+                    {initialLoading
+                      ? "جارٍ تحميل المحادثة..."
+                      : "المساعد يكتب..."}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* معلومات المحور المستعمل */}
+        {lastResponseInfo?.axisTitle && (
+          <div className="border-t border-slate-100 px-4 py-2">
+            <div
+              className={[
+                "flex items-center justify-between gap-2",
+                "rounded-xl bg-slate-50 px-3 py-2",
+              ].join(" ")}
+            >
+              <div className="min-w-0">
+                <p className="text-[10px] text-slate-400">
+                  المحور المستعمل
+                </p>
+
+                <p className="truncate text-xs font-medium text-slate-700">
+                  {lastResponseInfo.axisTitle}
+                </p>
+              </div>
+
+              {lastResponseInfo.mode && (
+                <span
+                  className={[
+                    "shrink-0 rounded-lg bg-brand-100 px-2 py-1",
+                    "text-[10px] font-medium text-brand-700",
+                  ].join(" ")}
+                >
+                  {lastResponseInfo.mode}
+                </span>
+              )}
             </div>
           </div>
         )}
 
-        <div className="flex items-center gap-1">
-          {!collapsed && messages.length > 0 && (
-            <button
-              type="button"
-              onClick={resetConversation}
-              disabled={loading || initialLoading}
-              title="بدء محادثة جديدة"
-              className={[
-                "flex h-9 w-9 items-center",
-                "justify-center rounded-xl",
-                "text-slate-500 transition",
-                "hover:bg-slate-100",
-                "hover:text-slate-800",
-                "disabled:cursor-not-allowed",
-                "disabled:opacity-40",
-              ].join(" ")}
-            >
-              <RotateCcw size={17} />
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handleCollapse}
-            title={
-              collapsed
-                ? "فتح المساعد"
-                : "إغلاق المساعد"
-            }
+        {/* حقل الكتابة */}
+        <form
+          onSubmit={handleSubmit}
+          className="border-t border-slate-200 bg-white p-3"
+        >
+          <div
             className={[
-              "flex h-10 w-10 items-center",
-              "justify-center rounded-xl",
-              "bg-brand-500 text-white",
+              "flex items-end gap-2 rounded-2xl border",
+              "border-slate-200 bg-slate-50 px-2 py-2",
               "shadow-sm transition",
-              "hover:bg-brand-600",
-              "focus:outline-none",
-              "focus:ring-2",
-              "focus:ring-brand-200",
+              "focus-within:border-brand-400",
+              "focus-within:bg-white",
+              "focus-within:ring-2 focus-within:ring-brand-100",
             ].join(" ")}
           >
-            {collapsed ? (
-              <Bot size={19} />
-            ) : (
-              <ChevronRight size={19} />
-            )}
-          </button>
-        </div>
-      </header>
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={draft}
+              disabled={loading || initialLoading}
+              maxLength={2000}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={handleTextareaKeyDown}
+              placeholder="اكتب سؤالك هنا..."
+              className={[
+                "max-h-40 min-h-[42px] flex-1 resize-none",
+                "overflow-y-auto bg-transparent px-2 py-2",
+                "text-sm leading-6 text-slate-800",
+                "placeholder:text-slate-400 focus:outline-none",
+                "disabled:cursor-not-allowed disabled:opacity-60",
+              ].join(" ")}
+            />
 
-      {collapsed ? (
-        /* État fermé */
-        <div className="flex flex-1 flex-col items-center py-5">
-          <button
-            type="button"
-            onClick={handleCollapse}
-            title="فتح المساعد"
-            className={[
-              "relative flex h-11 w-11",
-              "items-center justify-center",
-              "rounded-2xl bg-brand-50",
-              "text-brand-600 transition",
-              "hover:bg-brand-100",
-            ].join(" ")}
-          >
-            <MessageCircle size={20} />
-
-            {messages.length > 0 && (
-              <span
+            {loading ? (
+              <button
+                type="button"
+                onClick={() => {
+                  chatControllerRef.current?.abort();
+                }}
+                title="إيقاف الطلب"
                 className={[
-                  "absolute -left-1 -top-1",
-                  "flex h-5 min-w-5 items-center",
-                  "justify-center rounded-full",
-                  "bg-brand-500 px-1",
-                  "text-[10px] font-bold text-white",
+                  "flex h-10 w-10 shrink-0 items-center justify-center",
+                  "rounded-xl bg-red-500 text-white transition",
+                  "hover:bg-red-600",
                 ].join(" ")}
               >
-                {Math.min(messages.length, 99)}
-              </span>
+                <X size={17} />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!draft.trim() || !token || initialLoading}
+                title="إرسال"
+                className={[
+                  "flex h-10 w-10 shrink-0 items-center justify-center",
+                  "rounded-xl bg-brand-500 text-white transition",
+                  "hover:bg-brand-600",
+                  "disabled:cursor-not-allowed disabled:bg-slate-300",
+                ].join(" ")}
+              >
+                <Send size={17} className="-rotate-90" />
+              </button>
             )}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleCollapse}
-            title="فتح المساعد"
-            className={[
-              "mt-auto flex h-9 w-9 items-center",
-              "justify-center rounded-xl",
-              "text-slate-400 transition",
-              "hover:bg-slate-100",
-              "hover:text-slate-700",
-            ].join(" ")}
-          >
-            <ChevronLeft size={18} />
-          </button>
-        </div>
-      ) : (
-        <>
-          {/* Zone de conversation */}
-          <div
-            ref={messagesContainerRef}
-            className={[
-              "flex-1 overflow-y-auto",
-              "scroll-smooth px-4 py-4",
-            ].join(" ")}
-          >
-            <div className="space-y-5">
-              {messages.map((message) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                />
-              ))}
-
-              {(loading || initialLoading) && (
-                <div className="flex items-start gap-2.5">
-                  <div
-                    className={[
-                      "flex h-8 w-8 shrink-0",
-                      "items-center justify-center",
-                      "rounded-full",
-                      "bg-brand-100",
-                      "text-brand-600",
-                    ].join(" ")}
-                  >
-                    <Bot size={16} />
-                  </div>
-
-                  <div
-                    className={[
-                      "flex items-center gap-2",
-                      "rounded-2xl",
-                      "rounded-tr-sm",
-                      "bg-slate-50",
-                      "px-4 py-3",
-                      "text-sm text-slate-500",
-                    ].join(" ")}
-                  >
-                    <Loader2
-                      size={16}
-                      className="animate-spin"
-                    />
-
-                    <span>
-                      {initialLoading
-                        ? "جارٍ تحميل المحادثة..."
-                        : "المساعد يكتب..."}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
 
-          {/* Informations du dernier axe utilisé */}
-          {lastResponseInfo?.axisTitle && (
-            <div
+          <div className="mt-2 flex items-center justify-between px-1">
+            <p className="text-[10px] text-slate-400">
+              Enter للإرسال • Shift + Enter لسطر جديد
+            </p>
+
+            <span
               className={[
-                "border-t border-slate-100",
-                "px-4 py-2",
+                "text-[10px]",
+                draft.length > 1800
+                  ? "text-amber-500"
+                  : "text-slate-400",
               ].join(" ")}
             >
-              <div
-                className={[
-                  "flex items-center",
-                  "justify-between gap-2",
-                  "rounded-xl bg-slate-50",
-                  "px-3 py-2",
-                ].join(" ")}
-              >
-                <div className="min-w-0">
-                  <p className="text-[10px] text-slate-400">
-                    المحور المستعمل
-                  </p>
-
-                  <p
-                    className={[
-                      "truncate text-xs",
-                      "font-medium text-slate-700",
-                    ].join(" ")}
-                  >
-                    {lastResponseInfo.axisTitle}
-                  </p>
-                </div>
-
-                {lastResponseInfo.mode && (
-                  <span
-                    className={[
-                      "shrink-0 rounded-lg",
-                      "bg-brand-100 px-2 py-1",
-                      "text-[10px] font-medium",
-                      "text-brand-700",
-                    ].join(" ")}
-                  >
-                    {lastResponseInfo.mode}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Champ d'écriture */}
-          <form
-            onSubmit={handleSubmit}
-            className={[
-              "border-t border-slate-200",
-              "bg-white p-3",
-            ].join(" ")}
-          >
-            <div
-              className={[
-                "flex items-end gap-2",
-                "rounded-2xl border",
-                "border-slate-200",
-                "bg-slate-50 px-2 py-2",
-                "shadow-sm transition",
-                "focus-within:border-brand-400",
-                "focus-within:bg-white",
-                "focus-within:ring-2",
-                "focus-within:ring-brand-100",
-              ].join(" ")}
-            >
-              <textarea
-                ref={textareaRef}
-                rows={1}
-                value={draft}
-                disabled={loading || initialLoading}
-                maxLength={2000}
-                onChange={(event) =>
-                  setDraft(event.target.value)
-                }
-                onKeyDown={handleTextareaKeyDown}
-                placeholder="اكتب سؤالك هنا..."
-                className={[
-                  "max-h-40 min-h-[42px]",
-                  "flex-1 resize-none",
-                  "overflow-y-auto",
-                  "bg-transparent px-2 py-2",
-                  "text-sm leading-6",
-                  "text-slate-800",
-                  "placeholder:text-slate-400",
-                  "focus:outline-none",
-                  "disabled:cursor-not-allowed",
-                  "disabled:opacity-60",
-                ].join(" ")}
-              />
-
-              {loading ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    chatControllerRef.current?.abort();
-                  }}
-                  title="إيقاف الطلب"
-                  className={[
-                    "flex h-10 w-10 shrink-0",
-                    "items-center justify-center",
-                    "rounded-xl bg-red-500",
-                    "text-white transition",
-                    "hover:bg-red-600",
-                  ].join(" ")}
-                >
-                  <X size={17} />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!draft.trim() || !token || initialLoading}
-                  title="إرسال"
-                  className={[
-                    "flex h-10 w-10 shrink-0",
-                    "items-center justify-center",
-                    "rounded-xl bg-brand-500",
-                    "text-white transition",
-                    "hover:bg-brand-600",
-                    "disabled:cursor-not-allowed",
-                    "disabled:bg-slate-300",
-                  ].join(" ")}
-                >
-                  <Send
-                    size={17}
-                    className="-rotate-90"
-                  />
-                </button>
-              )}
-            </div>
-
-            <div
-              className={[
-                "mt-2 flex items-center",
-                "justify-between px-1",
-              ].join(" ")}
-            >
-              <p className="text-[10px] text-slate-400">
-                Enter للإرسال • Shift + Enter لسطر جديد
-              </p>
-
-              <span
-                className={[
-                  "text-[10px]",
-                  draft.length > 1800
-                    ? "text-amber-500"
-                    : "text-slate-400",
-                ].join(" ")}
-              >
-                {draft.length}/2000
-              </span>
-            </div>
-          </form>
-        </>
-      )}
-    </aside>
+              {draft.length}/2000
+            </span>
+          </div>
+        </form>
+      </aside>
+    </>
   );
 }
