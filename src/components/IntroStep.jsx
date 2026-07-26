@@ -486,6 +486,115 @@ function MotivationStep({ content }) {
   );
 }
 
+
+function DynamicDataTable({
+  rows,
+  preferredColumns = [],
+  title = "",
+}) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+
+  const objectRows = rows.filter(
+    (row) => row && typeof row === "object" && !Array.isArray(row),
+  );
+
+  if (objectRows.length === 0) {
+    return <BulletList items={rows} tone="indigo" />;
+  }
+
+  const discoveredColumns = Array.from(
+    new Set(
+      objectRows.flatMap((row) =>
+        Object.keys(row).filter(
+          (key) =>
+            key !== "id" &&
+            key !== "step_number" &&
+            key !== "level" &&
+            !isEmpty(row[key]),
+        ),
+      ),
+    ),
+  );
+
+  const columns = [
+    ...preferredColumns.filter((key) =>
+      discoveredColumns.includes(key),
+    ),
+    ...discoveredColumns.filter(
+      (key) => !preferredColumns.includes(key),
+    ),
+  ];
+
+  if (columns.length === 0) return null;
+
+  return (
+    <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+      {title && (
+        <div className="border-b border-indigo-100 bg-gradient-to-l from-indigo-50 to-white px-5 py-4">
+          <h3 className="font-black text-slate-950">{title}</h3>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table
+          dir="rtl"
+          className="w-full min-w-[620px] table-auto text-right text-sm"
+        >
+          <thead className="bg-gradient-to-l from-slate-950 to-indigo-950 text-white">
+            <tr>
+              {columns.map((column) => (
+                <th
+                  key={column}
+                  className="whitespace-nowrap px-5 py-4 text-center font-black"
+                >
+                  {fieldLabel(column)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {objectRows.map((row, rowIndex) => (
+              <tr
+                key={row.id || `dynamic-row-${rowIndex}`}
+                className="border-t border-slate-200 even:bg-indigo-50/35"
+              >
+                {columns.map((column) => {
+                  const cellValue = row[column];
+
+                  return (
+                    <td
+                      key={`${rowIndex}-${column}`}
+                      className="min-w-[180px] px-5 py-4 align-top"
+                    >
+                      {isEmpty(cellValue) ? (
+                        <span className="block text-center text-slate-300">
+                          —
+                        </span>
+                      ) : typeof cellValue === "object" ? (
+                        <StructuredValue
+                          value={cellValue}
+                          fieldKey={column}
+                          depth={1}
+                        />
+                      ) : (
+                        <MathText className="text-center font-bold text-slate-800">
+                          {String(cellValue)}
+                        </MathText>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+
 function ObservationStep({ content = {} }) {
   const valueTable = Array.isArray(content.value_table)
     ? content.value_table
@@ -559,30 +668,17 @@ function ObservationStep({ content = {} }) {
       )}
 
       {legacyTable.length > 0 && (
-        <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[540px] text-center text-sm">
-              <thead className="bg-gradient-to-l from-slate-950 to-indigo-950 text-white">
-                <tr>
-                  <th className="px-4 py-4 text-sm font-black">الدليل</th>
-                  <th className="px-4 py-4 text-sm font-black">الحد</th>
-                  <th className="px-4 py-4 text-sm font-black">الترميز</th>
-                </tr>
-              </thead>
-              <tbody>
-                {legacyTable.map((row, index) => (
-                  <tr key={index} className="border-t border-slate-200 even:bg-slate-50">
-                    <td className="px-4 py-4 font-black text-indigo-700">{row.index}</td>
-                    <td className="px-4 py-4 font-black text-slate-800">{row.term}</td>
-                    <td className="px-4 py-4">
-                      <MathText className="font-bold text-slate-800">{row.notation}</MathText>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <DynamicDataTable
+          rows={legacyTable}
+          preferredColumns={[
+            "induction_element",
+            "mathematical_meaning",
+            "index",
+            "term",
+            "notation",
+          ]}
+          title={content.table_title || "جدول توضيحي"}
+        />
       )}
 
       {Array.isArray(content.examples) && content.examples.length > 0 && (
@@ -653,45 +749,241 @@ function ObservationStep({ content = {} }) {
   );
 }
 
-function GuidedExplanationStep({ content }) {
+
+function GuidedExplanationStep({ content = {} }) {
+  const mapping = content.mapping || {};
+
+  const mappingCards = [
+    {
+      label: "المدخل",
+      value:
+        mapping.input ||
+        mapping.given ||
+        mapping.domain ||
+        mapping.start ||
+        "",
+      icon: Hash,
+    },
+    {
+      label: "الخاصية",
+      value:
+        mapping.property ||
+        mapping.rule ||
+        mapping.expression ||
+        mapping.statement ||
+        "",
+      icon: Brain,
+    },
+    {
+      label: "الهدف",
+      value:
+        mapping.truth_goal ||
+        mapping.output ||
+        mapping.goal ||
+        mapping.result ||
+        "",
+      icon: CheckCircle2,
+    },
+  ].filter((item) => !isEmpty(item.value));
+
+  const examples = Array.isArray(content.examples)
+    ? content.examples.filter(Boolean)
+    : [];
+
+  const simpleMeaning =
+    content.simple_meaning ||
+    content.how_to_think ||
+    content.why ||
+    content.central_idea ||
+    "";
+
+  const formalStatement =
+    content.formal_statement ||
+    content.definition ||
+    content.property ||
+    "";
+
+  const quickCheck =
+    content.quick_check ||
+    (content.checkpoint_question || content.checkpoint_answer
+      ? {
+          question: content.checkpoint_question,
+          answer: content.checkpoint_answer,
+        }
+      : null);
+
   return (
     <div className="space-y-5 sm:space-y-6">
-      <MathText className="text-slate-700">{content.teacher}</MathText>
+      {content.teacher && (
+        <div className="rounded-[28px] border border-indigo-100 bg-gradient-to-l from-indigo-50 via-white to-white p-5 shadow-sm sm:p-6">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-indigo-100 px-3 py-1.5 text-xs font-black text-indigo-800">
+            <Brain size={16} />
+            شرح الأستاذ
+          </div>
 
-      {content.mapping && (
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            ["المدخل", content.mapping.input, Hash],
-            ["القاعدة", content.mapping.rule, Brain],
-            ["المخرج", content.mapping.output, CheckCircle2],
-          ].map(([label, value, Icon]) => (
-            <div key={label} className="group rounded-[26px] border border-indigo-100 bg-gradient-to-b from-indigo-50 to-white p-5 text-center shadow-sm transition duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-lg">
-              <Icon className="mx-auto rounded-2xl bg-indigo-600 p-2 text-white shadow-lg shadow-indigo-500/20" size={24} />
-              <p className="mt-3 text-xs font-black text-indigo-500">{label}</p>
-              <MathText className="mt-1 font-black text-indigo-950">{value}</MathText>
+          <MathText className="font-semibold text-slate-700">
+            {content.teacher}
+          </MathText>
+        </div>
+      )}
+
+      {mappingCards.length > 0 && (
+        <div
+          className={cn(
+            "grid gap-4",
+            mappingCards.length === 1 && "grid-cols-1",
+            mappingCards.length === 2 && "sm:grid-cols-2",
+            mappingCards.length >= 3 && "md:grid-cols-3",
+          )}
+        >
+          {mappingCards.map(({ label, value, icon: Icon }) => (
+            <div
+              key={label}
+              className="group min-h-[170px] rounded-[26px] border border-indigo-100 bg-gradient-to-b from-indigo-50 to-white p-5 text-center shadow-sm transition duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-lg"
+            >
+              <Icon
+                className="mx-auto rounded-2xl bg-indigo-600 p-2 text-white shadow-lg shadow-indigo-500/20"
+                size={24}
+              />
+
+              <p className="mt-3 text-xs font-black text-indigo-500">
+                {label}
+              </p>
+
+              <MathText className="mt-2 font-black text-indigo-950">
+                {value}
+              </MathText>
             </div>
           ))}
         </div>
       )}
 
-      {content.notation && <MathPanel>{content.notation}</MathPanel>}
+      {content.notation && (
+        <MathPanel>{content.notation}</MathPanel>
+      )}
 
-      <InfoBox title="المعنى البسيط" tone="sky" icon={Lightbulb}>
-        <MathText className="font-bold">{content.simple_meaning}</MathText>
-      </InfoBox>
+      {simpleMeaning && (
+        <InfoBox
+          title={
+            content.simple_meaning
+              ? "المعنى البسيط"
+              : content.how_to_think
+                ? "كيف أفكر؟"
+                : "لماذا هذه الخطوة مهمة؟"
+          }
+          tone="sky"
+          icon={Lightbulb}
+        >
+          <MathText className="font-bold">
+            {simpleMeaning}
+          </MathText>
+        </InfoBox>
+      )}
 
-      <InfoBox title="التعريف الرياضي" tone="indigo" icon={BookOpen}>
-        <MathText className="font-semibold">{content.formal_statement}</MathText>
-      </InfoBox>
+      {formalStatement && (
+        <InfoBox
+          title="التعريف الرياضي"
+          tone="indigo"
+          icon={BookOpen}
+        >
+          <MathText className="font-semibold">
+            {formalStatement}
+          </MathText>
+        </InfoBox>
+      )}
 
-      {content.checkpoint_question && (
-        <RevealBox label={content.checkpoint_question} tone="emerald">
-          <MathText className="font-black">{content.checkpoint_answer}</MathText>
+      {examples.length > 0 && (
+        <div>
+          <div className="mb-4 flex items-center gap-2">
+            <Sparkles size={20} className="text-violet-600" />
+            <h3 className="font-black text-slate-950">
+              أمثلة على صياغة الخاصية
+            </h3>
+            <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-black text-violet-700">
+              {examples.length}
+            </span>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {examples.map((example, index) => {
+              const required =
+                typeof example === "object"
+                  ? example.required ||
+                    example.question ||
+                    example.statement ||
+                    example.prompt ||
+                    ""
+                  : "";
+
+              const property =
+                typeof example === "object"
+                  ? example.property ||
+                    example.answer ||
+                    example.result ||
+                    example.formula ||
+                    ""
+                  : String(example);
+
+              if (!required && !property) return null;
+
+              return (
+                <div
+                  key={example?.id || `guided-example-${index}`}
+                  className="overflow-hidden rounded-[26px] border border-violet-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg"
+                >
+                  {required && (
+                    <div className="border-b border-violet-100 bg-violet-50/70 p-4">
+                      <p className="mb-1 text-xs font-black text-violet-700">
+                        المطلوب
+                      </p>
+                      <MathText className="font-bold text-slate-800">
+                        {required}
+                      </MathText>
+                    </div>
+                  )}
+
+                  {property && (
+                    <div className="p-4">
+                      <p className="mb-2 text-xs font-black text-emerald-700">
+                        الخاصية المناسبة
+                      </p>
+                      <MathPanel>{property}</MathPanel>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {content.attention && (
+        <InfoBox
+          title="انتبه"
+          tone="rose"
+          icon={AlertTriangle}
+        >
+          <MathText className="font-bold">
+            {content.attention}
+          </MathText>
+        </InfoBox>
+      )}
+
+      {quickCheck?.question && (
+        <RevealBox
+          label={quickCheck.question}
+          tone="emerald"
+        >
+          <MathText className="font-black">
+            {quickCheck.answer ||
+              "لم تُرسل الإجابة من الخادم."}
+          </MathText>
         </RevealBox>
       )}
     </div>
   );
 }
+
 
 function NotationStep({ content }) {
   return (
@@ -1224,6 +1516,14 @@ const FIELD_LABELS = {
   if_student_does_not_understand: "ماذا أفعل عندما لا أفهم؟",
   mastery_rule: "علامة الإتقان",
   next_step: "الخطوة التالية",
+  induction_element: "عنصر الاستدلال بالتراجع",
+  mathematical_meaning: "المعنى الرياضي",
+  index: "الدليل",
+  term: "الحد",
+  notation: "الترميز",
+  points: "النقاط",
+  mark: "العلامة",
+  score: "التنقيط",
 };
 
 function fieldLabel(key) {
@@ -1854,49 +2154,334 @@ function WorkedExampleStep({ content }) {
   );
 }
 
-function GuidedPracticeStep({ content }) {
+
+function GuidedPracticeStep({ content = {} }) {
+  const [openHints, setOpenHints] = useState({});
+  const [openAnswers, setOpenAnswers] = useState({});
+
+  const statement =
+    content.statement ||
+    content.exercise ||
+    content.question ||
+    content.prompt ||
+    "";
+
+  const promptsSource =
+    content.prompts ??
+    content.guided_prompts ??
+    content.questions ??
+    content.steps ??
+    [];
+
+  const prompts = Array.isArray(promptsSource)
+    ? promptsSource.filter(Boolean)
+    : promptsSource
+      ? [promptsSource]
+      : [];
+
+  const objective =
+    content.objective ||
+    content.goal ||
+    content.skill ||
+    "";
+
+  const thinkingText =
+    content.how_to_think ||
+    content.strategy ||
+    "";
+
+  const whyText =
+    content.why ||
+    content.benefit ||
+    "";
+
+  const quickCheck =
+    content.quick_check ||
+    (content.checkpoint_question || content.checkpoint_answer
+      ? {
+          question: content.checkpoint_question,
+          answer: content.checkpoint_answer,
+        }
+      : null);
+
+  function toggleHint(index) {
+    setOpenHints((current) => ({
+      ...current,
+      [index]: !current[index],
+    }));
+  }
+
+  function toggleAnswer(index) {
+    setOpenAnswers((current) => ({
+      ...current,
+      [index]: !current[index],
+    }));
+  }
+
   return (
     <div className="space-y-6">
-      <InfoBox title="التمرين" tone="indigo" icon={BookOpen}>
-        <MathText className="font-black">{content.exercise}</MathText>
-      </InfoBox>
-
-      {content.objective && (
-        <InfoBox title="الهدف" tone="emerald" icon={Target}>
-          <MathText className="font-bold">{content.objective}</MathText>
+      {statement && (
+        <InfoBox title="التمرين" tone="indigo" icon={BookOpen}>
+          <MathText className="font-black">{statement}</MathText>
         </InfoBox>
       )}
 
-      {content.guided_prompts?.length > 0 && (
-        <div>
-          <h3 className="mb-3 font-black text-slate-950">أسئلة توجهك نحو الحل</h3>
-          <BulletList items={content.guided_prompts} tone="sky" icon={Compass} />
+      {objective && (
+        <InfoBox title="الهدف" tone="emerald" icon={Target}>
+          <MathText className="font-bold">{objective}</MathText>
+        </InfoBox>
+      )}
+
+      {(whyText || thinkingText) && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {whyText && (
+            <InfoBox
+              title="لماذا نتعلم هذه الفكرة؟"
+              tone="amber"
+              icon={Lightbulb}
+            >
+              <MathText className="font-bold">{whyText}</MathText>
+            </InfoBox>
+          )}
+
+          {thinkingText && (
+            <InfoBox
+              title="كيف أفكر؟"
+              tone="sky"
+              icon={Brain}
+            >
+              <MathText className="font-bold">
+                {thinkingText}
+              </MathText>
+            </InfoBox>
+          )}
         </div>
       )}
 
-      <HintLevels items={content.hint_levels} />
-
-      {content.solution_steps?.length > 0 && (
-        <RevealBox label="إظهار الحل خطوة بخطوة" tone="emerald">
-          <MethodTimeline
-            items={content.solution_steps.map((item, index) => ({
-              step_number: index + 1,
-              instruction: getDisplayText(item),
-            }))}
-          />
-        </RevealBox>
-      )}
-
-      {content.final_answer && (
-        <InfoBox title="الجواب النهائي" tone="emerald" icon={CheckCircle2}>
-          <MathText className="font-black">{content.final_answer}</MathText>
+      {content.attention && (
+        <InfoBox
+          title="انتبه إلى هذه النقطة"
+          tone="rose"
+          icon={AlertTriangle}
+        >
+          <MathText className="font-bold">
+            {content.attention}
+          </MathText>
         </InfoBox>
       )}
 
-      {content.graph_data && <GraphRenderer graph={content.graph_data} />}
+      {prompts.length > 0 && (
+        <div>
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Route size={21} className="text-indigo-600" />
+              <h3 className="font-black text-slate-950">
+                مراحل التدريب الموجّه
+              </h3>
+            </div>
+
+            <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-black text-indigo-700">
+              {prompts.length} مراحل
+            </span>
+          </div>
+
+          <div className="space-y-4">
+            {prompts.map((prompt, index) => {
+              const promptObject =
+                prompt &&
+                typeof prompt === "object" &&
+                !Array.isArray(prompt)
+                  ? prompt
+                  : {};
+
+              const stepTitle =
+                promptObject.step ||
+                promptObject.title ||
+                promptObject.label ||
+                `المرحلة ${index + 1}`;
+
+              const question =
+                promptObject.question ||
+                promptObject.instruction ||
+                promptObject.prompt ||
+                promptObject.text ||
+                (typeof prompt === "string" ? prompt : "");
+
+              const hint =
+                promptObject.hint ||
+                promptObject.help ||
+                promptObject.clue ||
+                "";
+
+              const expectedAnswer =
+                promptObject.expected_answer ||
+                promptObject.answer ||
+                promptObject.solution ||
+                promptObject.result ||
+                "";
+
+              if (!question && !hint && !expectedAnswer) return null;
+
+              const hintOpen = Boolean(openHints[index]);
+              const answerOpen = Boolean(openAnswers[index]);
+
+              return (
+                <article
+                  key={promptObject.id || `guided-prompt-${index}`}
+                  className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm transition hover:border-indigo-200 hover:shadow-md"
+                >
+                  <div className="flex items-start gap-4 border-b border-slate-100 bg-gradient-to-l from-indigo-50/80 to-white p-5">
+                    <span className="flex h-11 min-w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 px-3 font-black text-white shadow-lg shadow-indigo-500/20">
+                      {index + 1}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-black text-indigo-600">
+                        {stepTitle}
+                      </p>
+
+                      {question && (
+                        <MathText className="mt-1 font-black text-slate-950">
+                          {question}
+                        </MathText>
+                      )}
+                    </div>
+                  </div>
+
+                  {(hint || expectedAnswer) && (
+                    <div className="space-y-3 p-5">
+                      <div className="flex flex-wrap gap-3">
+                        {hint && (
+                          <button
+                            type="button"
+                            onClick={() => toggleHint(index)}
+                            className={cn(
+                              "inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-black transition",
+                              hintOpen
+                                ? "border-amber-300 bg-amber-100 text-amber-900"
+                                : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100",
+                            )}
+                          >
+                            <Lightbulb size={17} />
+                            {hintOpen
+                              ? "إخفاء التلميح"
+                              : "أحتاج تلميحًا"}
+                          </button>
+                        )}
+
+                        {expectedAnswer && (
+                          <button
+                            type="button"
+                            onClick={() => toggleAnswer(index)}
+                            className={cn(
+                              "inline-flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-black transition",
+                              answerOpen
+                                ? "border-emerald-300 bg-emerald-100 text-emerald-900"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100",
+                            )}
+                          >
+                            <CheckCircle2 size={17} />
+                            {answerOpen
+                              ? "إخفاء الإجابة"
+                              : "إظهار الإجابة المتوقعة"}
+                          </button>
+                        )}
+                      </div>
+
+                      {hintOpen && hint && (
+                        <InfoBox
+                          title="تلميح"
+                          tone="amber"
+                          icon={Lightbulb}
+                        >
+                          <MathText className="font-bold">
+                            {hint}
+                          </MathText>
+                        </InfoBox>
+                      )}
+
+                      {answerOpen && expectedAnswer && (
+                        <InfoBox
+                          title="الإجابة المتوقعة"
+                          tone="emerald"
+                          icon={CheckCircle2}
+                        >
+                          <MathText className="font-black">
+                            {expectedAnswer}
+                          </MathText>
+                        </InfoBox>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {Array.isArray(content.hint_levels) &&
+        content.hint_levels.length > 0 && (
+          <HintLevels items={content.hint_levels} />
+        )}
+
+      {Array.isArray(content.solution_steps) &&
+        content.solution_steps.length > 0 && (
+          <RevealBox
+            label="إظهار الحل خطوة بخطوة"
+            tone="emerald"
+          >
+            <MethodTimeline
+              items={content.solution_steps.map((item, index) => ({
+                step_number:
+                  typeof item === "object" &&
+                  item?.step_number !== undefined
+                    ? item.step_number
+                    : index + 1,
+                instruction: getDisplayText(item),
+                why:
+                  typeof item === "object"
+                    ? item.why ||
+                      item.explanation ||
+                      item.reason ||
+                      ""
+                    : "",
+              }))}
+            />
+          </RevealBox>
+        )}
+
+      {content.final_answer && (
+        <InfoBox
+          title="الجواب النهائي"
+          tone="emerald"
+          icon={CheckCircle2}
+        >
+          <MathText className="font-black">
+            {content.final_answer}
+          </MathText>
+        </InfoBox>
+      )}
+
+      {quickCheck?.question && (
+        <RevealBox
+          label={quickCheck.question}
+          tone="emerald"
+        >
+          <MathText className="font-black">
+            {quickCheck.answer ||
+              "لم تُرسل الإجابة من الخادم."}
+          </MathText>
+        </RevealBox>
+      )}
+
+      {content.graph_data && (
+        <GraphRenderer graph={content.graph_data} />
+      )}
     </div>
   );
 }
+
 
 function InPathFinalAssessmentStep({ content = {} }) {
   const [open, setOpen] = useState(false);
@@ -3415,10 +4000,49 @@ function LessonStepCard({
    Final assessment
 ========================================================= */
 
+
 function FinalAssessment({ assessment = {} }) {
   const [openAnswers, setOpenAnswers] = useState(false);
 
-  if (!assessment || Object.keys(assessment).length === 0) return null;
+  if (
+    !assessment ||
+    typeof assessment !== "object" ||
+    Object.keys(assessment).length === 0
+  ) {
+    return null;
+  }
+
+  const toArray = (value) => {
+    if (value === null || value === undefined || value === "") return [];
+    return Array.isArray(value) ? value.filter(Boolean) : [value];
+  };
+
+  const getAssessmentText = (item) => {
+    if (item === null || item === undefined) return "";
+
+    if (typeof item === "string" || typeof item === "number") {
+      return String(item);
+    }
+
+    if (typeof item !== "object") return String(item);
+
+    return (
+      item.text ||
+      item.question ||
+      item.answer ||
+      item.expected_answer ||
+      item.final_answer ||
+      item.solution ||
+      item.correction ||
+      item.result ||
+      item.statement ||
+      item.instruction ||
+      item.title ||
+      item.label ||
+      item.content ||
+      ""
+    );
+  };
 
   const statement =
     assessment.statement ||
@@ -3427,31 +4051,73 @@ function FinalAssessment({ assessment = {} }) {
     assessment.prompt ||
     "";
 
-  const questionsSource =
+  const instructions =
+    assessment.instructions ||
+    assessment.instruction ||
+    assessment.guidelines ||
+    assessment.expected_writing ||
+    "";
+
+  const questions = toArray(
     assessment.questions ??
-    assessment.tasks ??
-    assessment.items ??
-    [];
+      assessment.tasks ??
+      assessment.items,
+  );
 
-  const questions = Array.isArray(questionsSource)
-    ? questionsSource
-    : questionsSource
-      ? [questionsSource]
-      : [];
-
-  const answersSource =
+  const answers = toArray(
     assessment.answers ??
-    assessment.solution ??
-    assessment.solution_steps ??
-    assessment.expected_answer ??
-    assessment.final_answer ??
-    [];
+      assessment.solution ??
+      assessment.solutions ??
+      assessment.solution_steps ??
+      assessment.expected_answers ??
+      assessment.expected_answer ??
+      assessment.final_answer,
+  );
 
-  const answers = Array.isArray(answersSource)
-    ? answersSource
-    : answersSource
-      ? [answersSource]
-      : [];
+  const successCriteria = toArray(
+    assessment.success_criteria ??
+      assessment.criteria ??
+      assessment.grading?.criteria,
+  );
+
+  const measuredSkills = toArray(
+    assessment.skills ??
+      assessment.measured_skills ??
+      assessment.learning_outcomes,
+  );
+
+  const guidedPrompts = toArray(
+    assessment.guided_prompts ??
+      assessment.hints ??
+      assessment.hint_levels,
+  );
+
+  const grading =
+    assessment.grading &&
+    typeof assessment.grading === "object" &&
+    !Array.isArray(assessment.grading)
+      ? assessment.grading
+      : null;
+
+  const gradingEntries = grading
+    ? Object.entries(grading).filter(
+        ([, value]) =>
+          value !== null &&
+          value !== undefined &&
+          value !== "" &&
+          !Array.isArray(value) &&
+          typeof value !== "object",
+      )
+    : [];
+
+  const gradingCriteria = grading
+    ? toArray(
+        grading.criteria ??
+          grading.rubric ??
+          grading.items ??
+          grading.details,
+      )
+    : [];
 
   return (
     <section className="overflow-hidden rounded-[36px] border border-amber-200/80 bg-white shadow-[0_28px_80px_-42px_rgba(245,158,11,0.5)]">
@@ -3464,7 +4130,9 @@ function FinalAssessment({ assessment = {} }) {
           </div>
 
           <div>
-            <p className="text-xs font-black text-white/80">التقييم الختامي</p>
+            <p className="text-xs font-black text-white/80">
+              التقييم الختامي
+            </p>
             <h2 className="text-2xl font-black">
               {assessment.title || "اختبر إتقانك للمحور"}
             </h2>
@@ -3478,48 +4146,158 @@ function FinalAssessment({ assessment = {} }) {
         )}
       </div>
 
-      <div className="space-y-6 p-5 sm:p-8">
+      <div className="space-y-7 p-5 sm:p-8">
+        {instructions && (
+          <InfoBox
+            title="تعليمات الإجابة"
+            tone="amber"
+            icon={ListChecks}
+          >
+            <MathText className="font-bold">
+              {instructions}
+            </MathText>
+          </InfoBox>
+        )}
+
         {questions.length > 0 && (
-          <div className="space-y-3.5">
-            {questions.map((question, index) => (
-              <div
-                key={question?.id || index}
-                className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-950 font-black text-white">
-                  {index + 1}
-                </span>
-                <MathText className="font-bold text-slate-800">
-                  {getDisplayText(question)}
-                </MathText>
-              </div>
-            ))}
+          <div>
+            <div className="mb-4 flex items-center gap-2">
+              <CircleHelp size={20} className="text-indigo-600" />
+              <h3 className="font-black text-slate-950">
+                أسئلة التقييم
+              </h3>
+              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-black text-indigo-700">
+                {questions.length}
+              </span>
+            </div>
+
+            <div className="space-y-3.5">
+              {questions.map((question, index) => {
+                const questionText = getAssessmentText(question);
+                if (!questionText) return null;
+
+                const points =
+                  typeof question === "object"
+                    ? question.points ??
+                      question.mark ??
+                      question.score
+                    : null;
+
+                return (
+                  <div
+                    key={question?.id || `assessment-question-${index}`}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-950 font-black text-white">
+                        {index + 1}
+                      </span>
+
+                      <div className="min-w-0 flex-1">
+                        <MathText className="font-bold text-slate-800">
+                          {questionText}
+                        </MathText>
+
+                        {points !== null &&
+                          points !== undefined &&
+                          points !== "" && (
+                            <span className="mt-2 inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-black text-amber-800">
+                              {points} نقطة
+                            </span>
+                          )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
-        {Array.isArray(assessment.guided_prompts) &&
-          assessment.guided_prompts.length > 0 && (
-            <div>
-              <h3 className="mb-4 font-black text-slate-950">
-                توجيهات قبل الحل
-              </h3>
-              <BulletList
-                items={assessment.guided_prompts}
-                tone="sky"
-                icon={Compass}
-              />
+        {measuredSkills.length > 0 && (
+          <div>
+            <h3 className="mb-4 font-black text-slate-950">
+              المهارات المقاسة
+            </h3>
+            <BulletList
+              items={measuredSkills}
+              tone="indigo"
+              icon={Target}
+            />
+          </div>
+        )}
+
+        {guidedPrompts.length > 0 && (
+          <div>
+            <h3 className="mb-4 font-black text-slate-950">
+              توجيهات وتلميحات
+            </h3>
+            <BulletList
+              items={guidedPrompts}
+              tone="sky"
+              icon={Compass}
+            />
+          </div>
+        )}
+
+        {(gradingEntries.length > 0 ||
+          gradingCriteria.length > 0) && (
+          <div className="overflow-hidden rounded-[28px] border border-violet-200 bg-violet-50/60">
+            <div className="border-b border-violet-200 bg-gradient-to-l from-violet-100 to-white px-5 py-4">
+              <div className="flex items-center gap-2">
+                <GraduationCap
+                  size={20}
+                  className="text-violet-700"
+                />
+                <h3 className="font-black text-violet-950">
+                  سلم التنقيط
+                </h3>
+              </div>
             </div>
-          )}
+
+            <div className="space-y-4 p-5">
+              {gradingEntries.length > 0 && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {gradingEntries.map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="rounded-2xl border border-violet-100 bg-white p-4 shadow-sm"
+                    >
+                      <p className="text-xs font-black text-violet-600">
+                        {fieldLabel(key)}
+                      </p>
+                      <MathText className="mt-1 font-black text-slate-900">
+                        {String(value)}
+                      </MathText>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {gradingCriteria.length > 0 && (
+                <BulletList
+                  items={gradingCriteria}
+                  tone="indigo"
+                  icon={CheckCircle2}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
         {answers.length > 0 && (
           <>
             <button
               type="button"
-              onClick={() => setOpenAnswers((value) => !value)}
+              onClick={() =>
+                setOpenAnswers((value) => !value)
+              }
               className="flex w-full items-center justify-between rounded-2xl bg-slate-950 px-5 py-4 font-black text-white transition hover:bg-indigo-700"
             >
               <span>
-                {openAnswers ? "إخفاء التصحيح" : "إظهار التصحيح النموذجي"}
+                {openAnswers
+                  ? "إخفاء التصحيح"
+                  : `إظهار التصحيح النموذجي (${answers.length})`}
               </span>
               {openAnswers ? (
                 <ChevronUp size={19} />
@@ -3529,46 +4307,92 @@ function FinalAssessment({ assessment = {} }) {
             </button>
 
             {openAnswers && (
-              <MethodTimeline
-                items={answers.map((answer, index) => ({
-                  step_number:
-                    typeof answer === "object" && answer?.step_number
-                      ? answer.step_number
-                      : index + 1,
-                  instruction: getDisplayText(answer),
-                  why:
+              <div className="space-y-4">
+                {answers.map((answer, index) => {
+                  const answerText =
+                    getAssessmentText(answer);
+
+                  if (!answerText) return null;
+
+                  const explanation =
                     typeof answer === "object"
-                      ? answer.why ||
-                        answer.explanation ||
-                        answer.reason
-                      : "",
-                }))}
-              />
+                      ? answer.explanation ||
+                        answer.why ||
+                        answer.reason ||
+                        answer.justification ||
+                        ""
+                      : "";
+
+                  return (
+                    <div
+                      key={
+                        answer?.id ||
+                        `assessment-answer-${index}`
+                      }
+                      className="rounded-[24px] border border-emerald-200 bg-emerald-50/50 p-5"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 font-black text-white">
+                          {index + 1}
+                        </span>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="mb-1 text-xs font-black text-emerald-700">
+                            الإجابة النموذجية
+                          </p>
+                          <MathText className="font-black text-slate-900">
+                            {answerText}
+                          </MathText>
+
+                          {explanation && (
+                            <div className="mt-3 rounded-2xl border border-sky-100 bg-white p-4">
+                              <p className="mb-1 text-xs font-black text-sky-700">
+                                التفسير
+                              </p>
+                              <MathText className="text-sm font-semibold text-slate-700">
+                                {explanation}
+                              </MathText>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </>
         )}
 
         {assessment.verification && (
-          <InfoBox title="التحقق" tone="sky" icon={CheckCircle2}>
-            <MathText className="font-bold">{assessment.verification}</MathText>
+          <InfoBox
+            title="التحقق"
+            tone="sky"
+            icon={CheckCircle2}
+          >
+            <MathText className="font-bold">
+              {assessment.verification}
+            </MathText>
           </InfoBox>
         )}
 
-        {Array.isArray(assessment.success_criteria) &&
-          assessment.success_criteria.length > 0 && (
-            <div>
-              <h3 className="mb-4 font-black text-slate-950">معايير النجاح</h3>
-              <BulletList
-                items={assessment.success_criteria}
-                tone="emerald"
-                icon={CheckCircle2}
-              />
-            </div>
-          )}
+        {successCriteria.length > 0 && (
+          <div>
+            <h3 className="mb-4 font-black text-slate-950">
+              معايير النجاح
+            </h3>
+            <BulletList
+              items={successCriteria}
+              tone="emerald"
+              icon={CheckCircle2}
+            />
+          </div>
+        )}
       </div>
     </section>
   );
 }
+
 
 /* =========================================================
    Main component
