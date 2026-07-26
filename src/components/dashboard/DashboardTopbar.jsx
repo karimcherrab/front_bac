@@ -8,9 +8,15 @@ import {
   Menu,
 } from "lucide-react";
 
+import { useContext} from "react";
+import {UserContext} from "../../Utils/UserContext"
 export default function DashboardTopbar({
   onOpenSidebar,
 }) {
+
+    const {user} = useContext(UserContext);
+
+  
   return (
     <header
       dir="rtl"
@@ -40,7 +46,7 @@ export default function DashboardTopbar({
 
         <div className="hidden sm:block">
           <h2 className="text-lg font-extrabold text-slate-900">
-            مرحباً أحمد
+             {user?.username}
           </h2>
 
           <p className="mt-1 text-xs text-slate-500">

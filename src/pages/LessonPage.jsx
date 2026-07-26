@@ -8,7 +8,7 @@ import { breadcrumb } from "../data/lessonData";
 import { useState } from "react";
 
 export default function LessonPage() {
-    const [chatCollapsed, setChatCollapsed] = useState(false);
+    const [chatCollapsed, setChatCollapsed] = useState(true);
 
   return (
     <div className="flex h-full flex-col">

@@ -249,11 +249,11 @@ export default function LessonPartsList({
         </div>
       )}
 
-      <BacExercisesButton
+      {/* <BacExercisesButton
         chapterId={chapterId}
         exercisesCount={exercisesCount}
         setActiveId = {setActiveId}
-      />
+      /> */}
     </div>
   );
 }

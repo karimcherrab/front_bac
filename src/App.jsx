@@ -62,7 +62,7 @@ export default function App() {
 
       {/* Page lesson avec ton ancien AppLayout */}
       <Route
-        path="/lesson/:chapter"
+        path="subjects/:id_subjects/lesson/:id_chapter"
         element={
           <ProtectedRoute>
             <AppLayout>

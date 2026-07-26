@@ -79,6 +79,7 @@ export default function SubjectsPage() {
             },
           }
         );
+        console.log(response)
 
         const apiSubjects = Array.isArray(
           response.data?.subjects

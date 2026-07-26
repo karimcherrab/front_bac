@@ -12,22 +12,22 @@ import {
   FileText,
   GraduationCap,
   Hash,
+  School,
   Lightbulb,
+  ListChecks,
   Loader2,
   RefreshCcw,
   Sparkles,
   Target,
+  PenLine,
   TriangleAlert,
 } from "lucide-react";
 import { MathJax, MathJaxContext } from "better-react-mathjax";
 
 import { UserContext } from "../../Utils/UserContext";
-  const API_BASE_URL = import.meta.env.VITE_BASE_URL;
-  // const COURSE_URL = import.meta.env.VITE_COURSE_URL;
 
-  // const URL_SIGNUP = `${STUDENT_URL}signup/`;
-  // const URL_BRANCHES = `${COURSE_URL}branches/`;
-// const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = import.meta.env.VITE_BASE_URL;
+
 const STEP_REEXPLANATION_URL =
   `${API_BASE_URL}/api/bac/exercises/re-explain-step/`;
 
@@ -56,6 +56,135 @@ function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
+}
+
+function getExerciseBranches(exercise) {
+  const directBranches = asArray(exercise?.branches);
+
+  if (directBranches.length > 0) {
+    return directBranches
+      .map((branch) => {
+        if (typeof branch === "string") {
+          return {
+            code: branch.trim().toLowerCase(),
+            name: branch.trim(),
+          };
+        }
+
+        return {
+          id: branch?.id ?? null,
+          code: String(branch?.code ?? "").trim().toLowerCase(),
+          name: String(branch?.name ?? branch?.code ?? "").trim(),
+        };
+      })
+      .filter((branch) => branch.code);
+  }
+
+  const branchCodes = asArray(
+    exercise?.branch_codes || exercise?.content?.branch_codes
+  );
+
+  return branchCodes
+    .map((code) => ({
+      code: String(code ?? "").trim().toLowerCase(),
+      name: String(code ?? "").trim(),
+    }))
+    .filter((branch) => branch.code);
+}
+
+function exerciseBelongsToBranch(exercise, branchCode) {
+  if (!branchCode || branchCode === "all") return true;
+
+  return getExerciseBranches(exercise).some(
+    (branch) => branch.code === branchCode
+  );
+}
+
+/**
+ * تدعم الخطوات سواء جاءت كمصفوفة:
+ * steps: [{...}]
+ *
+ * أو ككائن:
+ * steps: { step_1: {...}, step_2: {...} }
+ */
+function normalizeSteps(value) {
+  if (Array.isArray(value)) return value;
+
+  if (value && typeof value === "object") {
+    return Object.entries(value)
+      .sort(([keyA], [keyB]) => {
+        const numberA = Number(String(keyA).match(/\d+/)?.[0] ?? 0);
+        const numberB = Number(String(keyB).match(/\d+/)?.[0] ?? 0);
+        return numberA - numberB;
+      })
+      .map(([key, step], index) => {
+        if (typeof step === "string") {
+          return {
+            step_number: index + 1,
+            title: key.replaceAll("_", " "),
+            explanation: step,
+          };
+        }
+
+        return {
+          step_number: step?.step_number ?? index + 1,
+          ...asObject(step),
+        };
+      });
+  }
+
+  return [];
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        typeof item === "string"
+          ? item
+          : item?.text || item?.content || item?.title || ""
+      )
+      .filter(hasText);
+  }
+
+  if (hasText(value)) return [value];
+  return [];
+}
+
+function getMethodology(question, solution) {
+  return asObject(solution?.methodology || question?.methodology);
+}
+
+function getFormalWriting(question, solution, methodology) {
+  return normalizeStringList(
+    methodology?.formal_writing ||
+      solution?.formal_writing ||
+      question?.formal_writing
+  );
+}
+
+function getConstructionValues(question, solution) {
+  return asArray(
+    solution?.construction_values ||
+      question?.construction_values
+  );
+}
+
+function getSolutionTables(solution) {
+  const values = [
+    solution?.table_data,
+    solution?.table,
+    solution?.variation_table,
+    solution?.sign_table,
+  ].filter(Boolean);
+
+  return values;
+}
+
+function getExerciseStatementSections(exercise) {
+  return asArray(
+    exercise?.statement_sections || exercise?.content?.statement_sections
+  ).filter((section) => hasText(section?.text || section?.content));
 }
 
 function hasText(value) {
@@ -371,6 +500,47 @@ function MathText({ children, className = "", block = false }) {
   );
 }
 
+
+function MathLTR({ children, className = "", block = false }) {
+  const raw = normalizeEscapedLatex(children);
+  if (!String(raw ?? "").trim()) return null;
+
+  const Tag = block ? "div" : "span";
+  const alreadyWrapped =
+    raw.startsWith("\\(") ||
+    raw.startsWith("\\[") ||
+    raw.startsWith("$$");
+
+  const content = alreadyWrapped
+    ? raw
+    : block
+      ? `\\[${raw}\\]`
+      : `\\(${raw}\\)`;
+
+  return (
+    <Tag
+      dir="ltr"
+      className={cn(
+        block
+          ? "block w-full overflow-x-auto text-center"
+          : "inline-block align-middle",
+        className
+      )}
+      style={{
+        direction: "ltr",
+        unicodeBidi: "isolate",
+        textAlign: block ? "center" : "inherit",
+      }}
+    >
+      <MathJax dynamic hideUntilTypeset="first" inline={!block}>
+        <span dir="ltr" style={{ direction: "ltr", unicodeBidi: "isolate" }}>
+          {content}
+        </span>
+      </MathJax>
+    </Tag>
+  );
+}
+
 function getErrorMessage(error, action = "تحميل التمارين") {
   if (error?.response?.status === 401) {
     return "انتهت صلاحية تسجيل الدخول. سجّل الدخول من جديد.";
@@ -436,8 +606,6 @@ function getQuestionStatementGraph(question) {
   return (
     question?.statement_graph_data ||
     question?.content?.statement_graph_data ||
-    question?.graph_data ||
-    question?.graph ||
     null
   );
 }
@@ -450,8 +618,6 @@ function getQuestionTable(question) {
   return (
     question?.table_data ||
     question?.table ||
-    question?.solution?.table_data ||
-    question?.solution?.table ||
     null
   );
 }
@@ -462,6 +628,7 @@ export default function BacChapterExercises({ chapterId = 1 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedBranch, setSelectedBranch] = useState("all");
   const [selectedYear, setSelectedYear] = useState("all");
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
 
@@ -488,7 +655,8 @@ export default function BacChapterExercises({ chapterId = 1 }) {
             : {},
         }
       );
-
+      console.log("exercice bac")
+      console.log(response.data)
       setData(response.data);
       setCurrentExerciseIndex(0);
       setShowFullSolution(false);
@@ -512,28 +680,63 @@ export default function BacChapterExercises({ chapterId = 1 }) {
     [data]
   );
 
+  const branches = useMemo(() => {
+    const branchMap = new Map();
+
+    allExercises.forEach((exercise) => {
+      getExerciseBranches(exercise).forEach((branch) => {
+        if (!branchMap.has(branch.code)) {
+          branchMap.set(branch.code, branch);
+        }
+      });
+    });
+
+    return [...branchMap.values()].sort((branchA, branchB) =>
+      branchA.name.localeCompare(branchB.name, "ar")
+    );
+  }, [allExercises]);
+
+  const branchFilteredExercises = useMemo(
+    () =>
+      allExercises.filter((exercise) =>
+        exerciseBelongsToBranch(exercise, selectedBranch)
+      ),
+    [allExercises, selectedBranch]
+  );
+
   const years = useMemo(
     () =>
       [
         ...new Set(
-          allExercises.map((exercise) => exercise?.year).filter(Boolean)
+          branchFilteredExercises
+            .map((exercise) => exercise?.year)
+            .filter(Boolean)
         ),
       ].sort((a, b) => b - a),
-    [allExercises]
+    [branchFilteredExercises]
   );
 
   const exercises = useMemo(() => {
-    if (selectedYear === "all") return allExercises;
+    if (selectedYear === "all") return branchFilteredExercises;
 
-    return allExercises.filter(
+    return branchFilteredExercises.filter(
       (exercise) => String(exercise?.year) === String(selectedYear)
     );
-  }, [allExercises, selectedYear]);
+  }, [branchFilteredExercises, selectedYear]);
+
+  useEffect(() => {
+    if (
+      selectedYear !== "all" &&
+      !years.some((year) => String(year) === String(selectedYear))
+    ) {
+      setSelectedYear("all");
+    }
+  }, [selectedBranch, selectedYear, years]);
 
   useEffect(() => {
     setCurrentExerciseIndex(0);
     setShowFullSolution(false);
-  }, [selectedYear]);
+  }, [selectedBranch, selectedYear]);
 
   const currentExercise = exercises[currentExerciseIndex] || null;
   const questions = asArray(currentExercise?.questions);
@@ -751,7 +954,7 @@ export default function BacChapterExercises({ chapterId = 1 }) {
   if (loading) return <LoadingState />;
   if (error) return <ErrorState message={error} onRetry={fetchExercises} />;
 
-  if (!currentExercise) {
+  if (allExercises.length === 0) {
     return (
       <EmptyState
         title="لا توجد تمارين"
@@ -770,59 +973,78 @@ export default function BacChapterExercises({ chapterId = 1 }) {
         <ChapterHeader
           chapter={data?.chapter}
           count={exercises.length}
+          totalCount={allExercises.length}
           years={years}
           selectedYear={selectedYear}
           onYearChange={setSelectedYear}
         />
 
-        <ExerciseNavigation
-          currentIndex={currentExerciseIndex}
-          total={exercises.length}
-          onPrevious={goPrevious}
-          onNext={goNext}
+        <BranchSelector
+          branches={branches}
+          exercises={allExercises}
+          selectedBranch={selectedBranch}
+          onBranchChange={setSelectedBranch}
         />
 
-        <ExamPaper exercise={currentExercise} questions={questions} />
+        {currentExercise ? (
+          <>
+            <ExerciseNavigation
+              currentIndex={currentExerciseIndex}
+              total={exercises.length}
+              onPrevious={goPrevious}
+              onNext={goNext}
+            />
 
-        <div className="flex justify-center">
-          <button
-            type="button"
-            onClick={() => setShowFullSolution((previous) => !previous)}
-            className={cn(
-              "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-black transition",
-              showFullSolution
-                ? "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                : "bg-blue-700 text-white shadow-md hover:bg-blue-800"
+            <ExamPaper exercise={currentExercise} questions={questions} />
+
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => setShowFullSolution((previous) => !previous)}
+                className={cn(
+                  "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-black transition",
+                  showFullSolution
+                    ? "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    : "bg-blue-700 text-white shadow-md hover:bg-blue-800"
+                )}
+              >
+                {showFullSolution ? <EyeOff size={19} /> : <Eye size={19} />}
+                {showFullSolution
+                  ? "إخفاء الحل النموذجي الكامل"
+                  : "إظهار الحل النموذجي الكامل"}
+              </button>
+            </div>
+
+            {showFullSolution && (
+              <FullSolutionDocument
+                exercise={currentExercise}
+                questions={questions}
+                stepExplanations={stepExplanations}
+                visibleStepExplanations={visibleStepExplanations}
+                loadingStepKey={loadingStepKey}
+                stepErrors={stepErrors}
+                stepHistories={stepHistories}
+                loadingSavedExplanations={loadingSavedExplanations}
+                onStepReExplanation={handleStepReExplanation}
+                onSelectSavedExplanation={handleSelectSavedExplanation}
+              />
             )}
-          >
-            {showFullSolution ? <EyeOff size={19} /> : <Eye size={19} />}
-            {showFullSolution
-              ? "إخفاء الحل النموذجي الكامل"
-              : "إظهار الحل النموذجي الكامل"}
-          </button>
-        </div>
 
-        {showFullSolution && (
-          <FullSolutionDocument
-            exercise={currentExercise}
-            questions={questions}
-            stepExplanations={stepExplanations}
-            visibleStepExplanations={visibleStepExplanations}
-            loadingStepKey={loadingStepKey}
-            stepErrors={stepErrors}
-            stepHistories={stepHistories}
-            loadingSavedExplanations={loadingSavedExplanations}
-            onStepReExplanation={handleStepReExplanation}
-            onSelectSavedExplanation={handleSelectSavedExplanation}
+            <ExerciseNavigation
+              currentIndex={currentExerciseIndex}
+              total={exercises.length}
+              onPrevious={goPrevious}
+              onNext={goNext}
+            />
+          </>
+        ) : (
+          <FilteredEmptyState
+            onReset={() => {
+              setSelectedBranch("all");
+              setSelectedYear("all");
+            }}
           />
         )}
-
-        <ExerciseNavigation
-          currentIndex={currentExerciseIndex}
-          total={exercises.length}
-          onPrevious={goPrevious}
-          onNext={goNext}
-        />
         </div>
       </section>
     </MathJaxContext>
@@ -832,6 +1054,7 @@ export default function BacChapterExercises({ chapterId = 1 }) {
 function ChapterHeader({
   chapter,
   count,
+  totalCount,
   years,
   selectedYear,
   onYearChange,
@@ -857,7 +1080,7 @@ function ChapterHeader({
 
           <div className="flex flex-wrap gap-2">
             <HeaderBadge icon={<BookOpen size={16} />}>
-              {count} تمرين
+              {count} تمرين معروض من أصل {totalCount}
             </HeaderBadge>
 
             {chapter?.code && (
@@ -894,6 +1117,146 @@ function ChapterHeader({
         </div>
       )}
     </header>
+  );
+}
+
+function BranchSelector({
+  branches,
+  exercises,
+  selectedBranch,
+  onBranchChange,
+}) {
+  const getCount = (branchCode) =>
+    exercises.filter((exercise) =>
+      exerciseBelongsToBranch(exercise, branchCode)
+    ).length;
+
+  if (branches.length === 0) return null;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-2 border-b border-slate-100 bg-gradient-to-l from-blue-50 to-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-700 text-white shadow-sm">
+            <School size={21} />
+          </span>
+          <div>
+            <h2 className="font-black text-slate-950">اختر الشعبة</h2>
+            <p className="mt-0.5 text-xs font-bold text-slate-500">
+              ستظهر فقط تمارين البكالوريا التابعة للشعبة المختارة
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-3">
+        <BranchCard
+          active={selectedBranch === "all"}
+          name="كل الشعب"
+          code="all"
+          count={exercises.length}
+          onClick={() => onBranchChange("all")}
+        />
+
+        {branches.map((branch) => (
+          <BranchCard
+            key={branch.code}
+            active={selectedBranch === branch.code}
+            name={branch.name || branch.code}
+            code={branch.code}
+            count={getCount(branch.code)}
+            onClick={() => onBranchChange(branch.code)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BranchCard({
+  active,
+  name,
+  code,
+  count,
+  onClick,
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "group relative overflow-hidden rounded-2xl border p-4 text-right transition duration-200",
+        active
+          ? "border-blue-600 bg-blue-700 text-white shadow-lg shadow-blue-200"
+          : "border-slate-200 bg-white text-slate-900 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md"
+      )}
+    >
+      <div className="flex items-center justify-between gap-4">
+        <span
+          className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+            active
+              ? "bg-white/15 text-white"
+              : "bg-blue-50 text-blue-700"
+          )}
+        >
+          <GraduationCap size={23} />
+        </span>
+
+        <span
+          className={cn(
+            "rounded-full px-3 py-1 text-xs font-black",
+            active
+              ? "bg-white/15 text-white"
+              : "bg-slate-100 text-slate-600"
+          )}
+        >
+          {count} تمرين
+        </span>
+      </div>
+
+      <h3 className="mt-4 text-base font-black">{name}</h3>
+      <p
+        dir="ltr"
+        className={cn(
+          "mt-1 text-left text-xs font-bold uppercase tracking-wide",
+          active ? "text-blue-100" : "text-slate-400"
+        )}
+      >
+        {code}
+      </p>
+
+      {active && (
+        <span className="absolute left-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-white text-blue-700">
+          <CheckCircle2 size={16} />
+        </span>
+      )}
+    </button>
+  );
+}
+
+function FilteredEmptyState({ onReset }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-12 text-center shadow-sm">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+        <BookOpen size={27} />
+      </div>
+      <h2 className="mt-4 text-lg font-black text-slate-950">
+        لا توجد تمارين بهذه التصفية
+      </h2>
+      <p className="mx-auto mt-2 max-w-md text-sm font-semibold leading-7 text-slate-500">
+        غيّر الشعبة أو السنة لعرض التمارين المتاحة.
+      </p>
+      <button
+        type="button"
+        onClick={onReset}
+        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800"
+      >
+        <RefreshCcw size={17} />
+        عرض كل التمارين
+      </button>
+    </div>
   );
 }
 
@@ -963,17 +1326,20 @@ function ExerciseNavigation({
 
 function ExamPaper({ exercise, questions }) {
   const statementGraph = getExerciseStatementGraph(exercise);
+  const statementSections = getExerciseStatementSections(exercise);
+  const hasMainStatement = hasText(exercise?.statement);
 
   return (
-    <article className="overflow-hidden rounded-lg border border-slate-300 bg-white shadow-[0_10px_35px_-20px_rgba(15,23,42,0.45)]">
-      <div className="border-b-2 border-slate-900 px-5 py-5 sm:px-9">
+    <article className="overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-[0_18px_50px_-28px_rgba(15,23,42,0.45)]">
+      <div className="border-b-4 border-slate-900 bg-slate-50 px-5 py-5 sm:px-9">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-bold text-slate-500">
               الجمهورية الجزائرية الديمقراطية الشعبية
             </p>
             <h2 className="mt-2 text-xl font-black text-slate-950 sm:text-2xl">
-              {exercise?.title || `التمرين رقم ${exercise?.exercise_number || ""}`}
+              {exercise?.title ||
+                `التمرين رقم ${exercise?.exercise_number || ""}`}
             </h2>
           </div>
 
@@ -995,62 +1361,89 @@ function ExamPaper({ exercise, questions }) {
         </div>
       </div>
 
-      <div className="px-5 py-7 sm:px-10 sm:py-9">
-        {hasText(exercise?.statement) && (
-          <div className="mb-7 text-[1.03rem] font-semibold leading-9 text-slate-950 sm:text-lg">
-            <MathText block>{exercise.statement}</MathText>
+      <div className="px-4 py-6 sm:px-9 sm:py-9">
+        <section className="rounded-2xl border border-slate-200 bg-white">
+          <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:px-6">
+            <FileText size={19} className="text-slate-700" />
+            <h3 className="font-black text-slate-950">نص التمرين</h3>
           </div>
-        )}
 
-        {statementGraph && (
-          <div className="mb-7">
-            <CoordinateGraph graph={statementGraph} />
-          </div>
-        )}
-
-        <ol className="space-y-5">
-          {questions.map((question, index) => {
-            const graph = getQuestionStatementGraph(question);
-            const table = getQuestionTable(question);
-
-            return (
-              <li key={question?.id ?? index} className="text-slate-950">
+          <div className="space-y-5 px-4 py-5 sm:px-7 sm:py-7">
+            {hasMainStatement ? (
+              <MathText
+                block
+                className="text-[1.03rem] font-semibold leading-10 text-slate-950 sm:text-lg"
+              >
+                {exercise.statement}
+              </MathText>
+            ) : (
+              statementSections.map((section, index) => (
                 <div
-                  dir="rtl"
-                  className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3"
+                  key={section?.id ?? index}
+                  className="rounded-xl border border-slate-100 bg-slate-50/70 px-4 py-4"
                 >
-                  <bdi
-                    dir="ltr"
-                    className="mt-1 shrink-0 whitespace-nowrap font-black"
+                  {hasText(section?.title) && (
+                    <h4 className="mb-2 font-black text-slate-900">
+                      {section.title}
+                    </h4>
+                  )}
+                  <MathText
+                    block
+                    className="text-[1.03rem] font-semibold leading-10 text-slate-950 sm:text-lg"
                   >
-                    ({index + 1})
-                  </bdi>
-
-                  <div dir="rtl" className="min-w-0">
-                    <MathText
-                      block
-                      className="text-[1.03rem] font-semibold leading-9 sm:text-lg"
-                    >
-                      {question?.text}
-                    </MathText>
-
-                    {graph && (
-                      <div className="mt-5">
-                        <CoordinateGraph graph={graph} />
-                      </div>
-                    )}
-
-                    {table && (
-                      <div className="mt-5">
-                        <DataTable table={table} />
-                      </div>
-                    )}
-                  </div>
+                    {section?.text || section?.content}
+                  </MathText>
                 </div>
-              </li>
-            );
-          })}
-        </ol>
+              ))
+            )}
+
+            {statementGraph && (
+              <div className="pt-2">
+                <CoordinateGraph graph={statementGraph} />
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="mt-6 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/30">
+          <div className="flex items-center gap-2 border-b border-blue-200 bg-blue-50 px-4 py-3 sm:px-6">
+            <BookOpen size={19} className="text-blue-700" />
+            <h3 className="font-black text-blue-950">الأسئلة</h3>
+          </div>
+
+          <div className="space-y-4 px-4 py-5 sm:px-6">
+            {questions.map((question, index) => {
+              const graph = getQuestionStatementGraph(question);
+              const table = getQuestionTable(question);
+
+              return (
+                <article
+                  key={question?.id ?? index}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5"
+                >
+                  <MathText
+                    block
+                    className="text-[1.03rem] font-bold leading-10 text-slate-950 sm:text-lg"
+                  >
+                    {question?.text}
+                  </MathText>
+
+                  {graph && (
+                    <div className="mt-5">
+                      <CoordinateGraph graph={graph} />
+                    </div>
+                  )}
+
+                  {table && (
+                    <div className="mt-5">
+                      <DataTable table={table} />
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </section>
       </div>
     </article>
   );
@@ -1097,20 +1490,13 @@ function FullSolutionDocument({
                 index > 0 && "border-t border-slate-300"
               )}
             >
-              <div
-                dir="rtl"
-                className="mb-5 grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3"
-              >
-                <bdi
-                  dir="ltr"
-                  className="mt-0.5 shrink-0 whitespace-nowrap text-lg font-black text-blue-800"
-                >
-                  ({index + 1})
-                </bdi>
-
+              <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4">
+                <p className="mb-2 text-xs font-black text-blue-700">
+                  حل السؤال
+                </p>
                 <MathText
                   block
-                  className="text-base font-black text-slate-950 sm:text-lg"
+                  className="text-base font-black leading-9 text-slate-950 sm:text-lg"
                 >
                   {question?.text}
                 </MathText>
@@ -1152,13 +1538,27 @@ function StoredSolution({
   onStepReExplanation,
   onSelectSavedExplanation,
 }) {
-  const steps = asArray(solution?.steps);
-  const mistakes = asArray(solution?.common_mistakes);
-  const hints = asArray(solution?.hints);
+  const methodology = getMethodology(question, solution);
+  const formalWriting = getFormalWriting(question, solution, methodology);
+  const constructionValues = getConstructionValues(question, solution);
+  const solutionTables = getSolutionTables(solution);
+  const bacTemplate = normalizeStringList(
+    methodology?.bac_template ||
+      methodology?.steps ||
+      methodology?.plan ||
+      methodology?.method_steps
+  );
+  const steps = normalizeSteps(solution?.steps);
+  const mistakes = normalizeStringList(solution?.common_mistakes);
+  const hints = normalizeStringList(solution?.hints);
   const solutionGraph = getSolutionGraph(solution);
 
+  const hasMethodology =
+    Object.keys(methodology).length > 0 ||
+    hasText(solution?.strategy);
+
   if (
-    !hasText(solution?.strategy) &&
+    !hasMethodology &&
     steps.length === 0 &&
     !hasText(solution?.final_answer) &&
     !solutionGraph
@@ -1172,28 +1572,26 @@ function StoredSolution({
   }
 
   return (
-    <div className="space-y-5">
-      {hasText(solution?.strategy) && (
-        <div className="flex items-start gap-3 border-r-4 border-blue-700 pr-4">
-          <Target className="mt-1 shrink-0 text-blue-700" size={20} />
-          <div>
-            <h3 className="mb-1 text-sm font-black text-blue-800">
-              منهجية الحل
-            </h3>
-            <MathText block className="font-semibold text-slate-800">
-              {solution.strategy}
-            </MathText>
-          </div>
-        </div>
+    <div className="space-y-6">
+      {hasMethodology && (
+        <MethodologyCard
+          methodology={methodology}
+          strategy={solution?.strategy}
+          bacTemplate={bacTemplate}
+          formalWriting={formalWriting}
+        />
       )}
 
       {steps.length > 0 && (
-        <div>
-          <h3 className="mb-4 text-base font-black text-slate-950">
-            خطوات الحل
-          </h3>
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/50">
+          <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-100 px-4 py-3 sm:px-5">
+            <Target size={19} className="text-slate-800" />
+            <h3 className="text-base font-black text-slate-950">
+              خطوات الحل والحساب
+            </h3>
+          </div>
 
-          <div className="space-y-5">
+          <div className="space-y-4 p-4 sm:p-5">
             {steps.map((step, index) => (
               <SolutionStep
                 key={step?.id ?? step?.step_number ?? index}
@@ -1214,25 +1612,41 @@ function StoredSolution({
               />
             ))}
           </div>
-        </div>
+        </section>
+      )}
+
+      {constructionValues.length > 0 && (
+        <ConstructionValuesCard values={constructionValues} />
+      )}
+
+      {hasText(solution?.conclusion) && (
+        <PlainInfo
+          icon={<CheckCircle2 size={18} />}
+          title="الخلاصة"
+          text={solution.conclusion}
+        />
       )}
 
       {hasText(solution?.final_answer) && (
-        <div className="border-y border-emerald-300 bg-emerald-50 px-4 py-4">
-          <h3 className="mb-2 flex items-center gap-2 text-sm font-black text-emerald-800">
-            <CheckCircle2 size={18} />
-            النتيجة النهائية
-          </h3>
-          <MathText block className="font-black text-emerald-950">
-            {solution.final_answer}
-          </MathText>
+        <div className="overflow-hidden rounded-2xl border border-emerald-300 bg-emerald-50">
+          <div className="flex items-center gap-2 border-b border-emerald-200 bg-emerald-100/70 px-4 py-3">
+            <CheckCircle2 size={19} className="text-emerald-800" />
+            <h3 className="text-sm font-black text-emerald-900">
+              النتيجة النهائية
+            </h3>
+          </div>
+          <div className="px-4 py-4 sm:px-5">
+            <MathText block className="font-black leading-9 text-emerald-950">
+              {solution.final_answer}
+            </MathText>
+          </div>
         </div>
       )}
 
       {hasText(solution?.verification) && (
         <PlainInfo
           icon={<CheckCircle2 size={18} />}
-          title="التحقق"
+          title="التحقق من النتيجة"
           text={solution.verification}
         />
       )}
@@ -1240,7 +1654,7 @@ function StoredSolution({
       {mistakes.length > 0 && (
         <PlainList
           icon={<TriangleAlert size={18} />}
-          title="أخطاء شائعة"
+          title="أخطاء شائعة يجب تجنبها"
           items={mistakes}
         />
       )}
@@ -1248,18 +1662,191 @@ function StoredSolution({
       {hints.length > 0 && (
         <PlainList
           icon={<Lightbulb size={18} />}
-          title="تلميحات"
+          title="تلميحات منهجية"
           items={hints}
         />
       )}
 
-      {solutionGraph && (
-        <CoordinateGraph graph={solutionGraph} />
-      )}
+      {solutionGraph && <CoordinateGraph graph={solutionGraph} />}
 
-      {solution?.table_data && (
-        <DataTable table={solution.table_data} />
+      {solutionTables.map((table, index) => (
+        <SmartMathTable key={`solution-table-${index}`} table={table} />
+      ))}
+    </div>
+  );
+}
+
+function MethodologyCard({
+  methodology,
+  strategy,
+  bacTemplate,
+  formalWriting,
+}) {
+  const goal = methodology?.goal || methodology?.objective || "";
+  const method = methodology?.method || methodology?.idea || strategy || "";
+  const reason =
+    methodology?.why_this_method ||
+    methodology?.reason ||
+    methodology?.why ||
+    "";
+  const theorem =
+    methodology?.used_theorem ||
+    methodology?.theorem ||
+    methodology?.rule ||
+    "";
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/40">
+      <div className="flex items-center gap-2 border-b border-blue-200 bg-blue-100/60 px-4 py-3 sm:px-5">
+        <Target size={19} className="text-blue-800" />
+        <h3 className="font-black text-blue-950">منهجية الحل في البكالوريا</h3>
+      </div>
+
+      <div className="grid gap-4 p-4 sm:p-5 md:grid-cols-2">
+        {hasText(goal) && (
+          <MethodologyItem title="الهدف من السؤال" text={goal} />
+        )}
+
+        {hasText(method) && (
+          <MethodologyItem title="الطريقة المستعملة" text={method} />
+        )}
+
+        {hasText(reason) && (
+          <MethodologyItem title="لماذا نستعمل هذه الطريقة؟" text={reason} />
+        )}
+
+        {hasText(theorem) && (
+          <MethodologyItem title="القانون أو المبرهنة" text={theorem} />
+        )}
+
+        {/* {bacTemplate.length > 0 && (
+          <div className="md:col-span-2 rounded-xl border border-blue-100 bg-white px-4 py-4">
+            <h4 className="mb-3 text-sm font-black text-blue-900">
+              خطة الكتابة في ورقة البكالوريا
+            </h4>
+            <ol className="space-y-3">
+              {bacTemplate.map((item, index) => (
+                <li
+                  key={index}
+                  className="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-3"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-700 text-xs font-black text-white">
+                    {index + 1}
+                  </span>
+                  <MathText block className="font-semibold text-slate-800">
+                    {item}
+                  </MathText>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )} */}
+
+        {formalWriting.length > 0 && (
+          <MethodologyList
+            icon={<PenLine size={18} />}
+            title="الكتابة الرياضية النموذجية"
+            items={formalWriting}
+            tone="violet"
+          />
+        )}
+
+      </div>
+    </section>
+  );
+}
+
+function MethodologyList({ icon, title, items, tone = "blue" }) {
+  const tones = {
+    blue: "border-blue-100 bg-white text-blue-900",
+    violet: "border-violet-200 bg-violet-50/60 text-violet-950",
+    amber: "border-amber-200 bg-amber-50/70 text-amber-950",
+  };
+
+  return (
+    <div
+      className={cn(
+        "md:col-span-2 rounded-xl border px-4 py-4",
+        tones[tone] || tones.blue
       )}
+    >
+      <h4 className="mb-3 flex items-center gap-2 text-sm font-black">
+        {icon}
+        {title}
+      </h4>
+
+      <ol className="space-y-3">
+        {items.map((item, index) => (
+          <li
+            key={index}
+            className="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-3"
+          >
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-xs font-black text-white">
+              {index + 1}
+            </span>
+            <MathText block className="font-semibold leading-8 text-slate-800">
+              {item}
+            </MathText>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function ConstructionValuesCard({ values }) {
+  if (values.length === 0) return null;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-cyan-200 bg-cyan-50/40">
+      <div className="flex items-center gap-2 border-b border-cyan-200 bg-cyan-100/60 px-4 py-3 sm:px-5">
+        <ListChecks size={19} className="text-cyan-900" />
+        <h3 className="font-black text-cyan-950">
+          القيم المستعملة في الإنشاء البياني
+        </h3>
+      </div>
+
+      <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
+        {values.map((value, index) => {
+          const item = asObject(value);
+          const label =
+            item?.label ||
+            item?.name ||
+            item?.term ||
+            `القيمة ${index + 1}`;
+
+          const rawValue =
+            item?.value ??
+            item?.y ??
+            item?.result ??
+            (typeof value === "string" || typeof value === "number"
+              ? value
+              : "");
+
+          return (
+            <div
+              key={item?.id ?? index}
+              className="rounded-xl border border-cyan-100 bg-white px-4 py-3"
+            >
+              <p className="mb-1 text-xs font-black text-cyan-800">{label}</p>
+              <MathText block className="font-bold text-slate-900">
+                {String(rawValue)}
+              </MathText>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function MethodologyItem({ title, text }) {
+  return (
+    <div className="rounded-xl border border-blue-100 bg-white px-4 py-4">
+      <h4 className="mb-2 text-xs font-black text-blue-800">{title}</h4>
+      <MathText block className="font-semibold leading-8 text-slate-800">
+        {text}
+      </MathText>
     </div>
   );
 }
@@ -1288,6 +1875,18 @@ function SolutionStep({
   const isLoading = loadingStepKey === key;
   const error = stepErrors[key];
   const history = asArray(stepHistories?.[key]);
+  const calculations = normalizeStringList(
+    step?.calculations ||
+      step?.equations ||
+      step?.calculation_steps ||
+      step?.operations
+  );
+  const mainLatex =
+    step?.latex ||
+    step?.calculation ||
+    step?.formula ||
+    step?.equation ||
+    "";
 
   return (
     <div className="relative rounded-xl border border-slate-200 bg-white p-4 pr-12 shadow-sm">
@@ -1308,13 +1907,32 @@ function SolutionStep({
           </MathText>
         )}
 
-        {hasText(step?.latex) && (
-          <div
-            dir="ltr"
-            className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-center"
-          >
-            <MathText block className="text-lg font-semibold text-slate-950">
-              {`\\[${step.latex}\\]`}
+        {hasText(mainLatex) && (
+          <CalculationBox value={mainLatex} />
+        )}
+
+        {calculations.length > 0 && (
+          <div className="mt-4 space-y-3">
+            <p className="text-xs font-black text-slate-600">
+              تفاصيل الحساب
+            </p>
+            {calculations.map((calculation, calculationIndex) => (
+              <CalculationBox
+                key={calculationIndex}
+                value={calculation}
+                order={calculationIndex + 1}
+              />
+            ))}
+          </div>
+        )}
+
+        {hasText(step?.conclusion) && (
+          <div className="mt-4 rounded-xl border-r-4 border-emerald-500 bg-emerald-50 px-4 py-3">
+            <p className="mb-1 text-xs font-black text-emerald-800">
+              استنتاج الخطوة
+            </p>
+            <MathText block className="font-bold text-emerald-950">
+              {step.conclusion}
             </MathText>
           </div>
         )}
@@ -1411,6 +2029,34 @@ function SolutionStep({
           <SimpleExplanation explanation={explanation} />
         )}
       </div>
+    </div>
+  );
+}
+
+function CalculationBox({ value, order = null }) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return null;
+
+  const alreadyWrapped =
+    normalized.startsWith("\\[") ||
+    normalized.startsWith("\\(") ||
+    normalized.startsWith("$$");
+
+  const content = alreadyWrapped ? normalized : `\\[${normalized}\\]`;
+
+  return (
+    <div
+      dir="ltr"
+      className="relative overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-center"
+    >
+      {order !== null && (
+        <span className="absolute left-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-700 px-1.5 text-[10px] font-black text-white">
+          {order}
+        </span>
+      )}
+      <MathText block className="text-lg font-semibold text-slate-950">
+        {content}
+      </MathText>
     </div>
   );
 }
@@ -1675,8 +2321,22 @@ function CoordinateGraph({ graph }) {
   };
 
   return (
-    <figure className="mx-auto max-w-4xl">
-      <div className="overflow-x-auto border border-slate-300 bg-white p-2 sm:p-4">
+    <figure className="mx-auto max-w-4xl overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
+      {(hasText(graph?.title) || hasText(graph?.description)) && (
+        <div className="border-b border-slate-200 bg-slate-50 px-4 py-4 sm:px-6">
+          {hasText(graph?.title) && (
+            <h4 className="text-center text-base font-black text-slate-950 sm:text-lg">
+              {graph.title}
+            </h4>
+          )}
+          {hasText(graph?.description) && (
+            <MathText block className="mt-2 text-center text-sm font-semibold text-slate-600">
+              {graph.description}
+            </MathText>
+          )}
+        </div>
+      )}
+      <div className="overflow-x-auto bg-white p-2 sm:p-4">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           role="img"
@@ -1705,7 +2365,7 @@ function CoordinateGraph({ graph }) {
             stroke="#cbd5e1"
           />
 
-          {xTicks.map((tick, index) => (
+          {graph?.show_grid !== false && xTicks.map((tick, index) => (
             <g key={`x-grid-${index}`}>
               <line
                 x1={tick.position}
@@ -1727,7 +2387,7 @@ function CoordinateGraph({ graph }) {
             </g>
           ))}
 
-          {yTicks.map((tick, index) => (
+          {graph?.show_grid !== false && yTicks.map((tick, index) => (
             <g key={`y-grid-${index}`}>
               <line
                 x1={margin.left}
@@ -1816,7 +2476,7 @@ function CoordinateGraph({ graph }) {
                   }
                 />
 
-                {serie?.show_points &&
+                {(serie?.show_points || serie?.type === "points" || serie?.type === "scatter") &&
                   serie.data.map((point, pointIndex) => (
                     <circle
                       key={pointIndex}
@@ -1861,21 +2521,310 @@ function CoordinateGraph({ graph }) {
         </svg>
       </div>
 
-      <figcaption className="mt-3 flex flex-wrap justify-center gap-4 text-sm font-bold text-slate-700">
-        {series.map((serie, index) => (
-          <span key={serie.id} className="inline-flex items-center gap-2">
-            <span
-              className="inline-block h-1 w-7 rounded"
-              style={{
-                backgroundColor:
-                  serie?.color || palette[index % palette.length],
-              }}
-            />
-            {serie?.label || serie?.id}
-          </span>
-        ))}
+      <figcaption className="border-t border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="flex flex-wrap justify-center gap-4 text-sm font-bold text-slate-700">
+          {series.map((serie, index) => (
+            <span key={serie.id} className="inline-flex items-center gap-2">
+              <span
+                className="inline-block h-1 w-7 rounded"
+                style={{
+                  backgroundColor:
+                    serie?.color || palette[index % palette.length],
+                }}
+              />
+              {serie?.label || serie?.id}
+            </span>
+          ))}
+        </div>
+
+        {hasText(graph?.caption) && (
+          <MathText block className="mt-3 text-center text-sm font-semibold text-slate-600">
+            {graph.caption}
+          </MathText>
+        )}
       </figcaption>
     </figure>
+  );
+}
+
+
+function isVariationTable(table) {
+  const type = String(table?.type || table?.kind || table?.table_type || "")
+    .toLowerCase();
+
+  return (
+    type.includes("variation") ||
+    type.includes("تغير") ||
+    Boolean(table?.variation_table) ||
+    Boolean(table?.rows?.function?.directions) ||
+    Boolean(table?.directions)
+  );
+}
+
+function SmartMathTable({ table }) {
+  if (!table) return null;
+  return isVariationTable(table)
+    ? <VariationTable table={table?.variation_table || table} />
+    : <DataTable table={table} />;
+}
+
+function normalizeVariationTable(table) {
+  const rows = asObject(table?.rows);
+  const derivative = asObject(
+    rows?.derivative ||
+    rows?.["f'(x)"] ||
+    table?.derivative ||
+    table?.derivative_row
+  );
+  const fn = asObject(
+    rows?.function ||
+    rows?.["f(x)"] ||
+    table?.function ||
+    table?.function_row
+  );
+
+  const xValues = normalizeStringList(
+    rows?.x ||
+    table?.x_values ||
+    table?.x ||
+    table?.breakpoints ||
+    table?.points
+  );
+
+  const signs = normalizeStringList(
+    derivative?.signs ||
+    derivative?.values ||
+    table?.derivative_signs ||
+    table?.signs
+  );
+
+  const directions = normalizeStringList(
+    fn?.directions ||
+    table?.directions ||
+    table?.variation_directions
+  ).map((value) => {
+    const normalized = String(value).toLowerCase().trim();
+    if (
+      ["up", "increase", "increasing", "asc", "croissante", "متزايدة", "تزايد", "↗"].includes(normalized)
+    ) {
+      return "up";
+    }
+    if (
+      ["down", "decrease", "decreasing", "desc", "décroissante", "متناقصة", "تناقص", "↘"].includes(normalized)
+    ) {
+      return "down";
+    }
+    return normalized.includes("down") || normalized.includes("تناقص")
+      ? "down"
+      : "up";
+  });
+
+  const functionValues = normalizeStringList(
+    fn?.values ||
+    table?.function_values ||
+    table?.values ||
+    table?.limits
+  );
+
+  const criticalValues = normalizeStringList(
+    derivative?.critical_values ||
+    derivative?.zeros ||
+    table?.critical_values
+  );
+
+  const safeXValues =
+    xValues.length >= 2
+      ? xValues
+      : functionValues.length >= 2
+        ? functionValues.map((_, index) => String(index))
+        : ["0", "+\\infty"];
+
+  const intervalCount = Math.max(safeXValues.length - 1, 1);
+
+  return {
+    title: table?.title || "جدول تغيرات الدالة",
+    functionName: table?.function_name || table?.functionName || "f",
+    domain: table?.domain || table?.interval || "",
+    xValues: safeXValues,
+    signs: Array.from({ length: intervalCount }, (_, index) =>
+      signs[index] ?? signs[0] ?? ""
+    ),
+    directions: Array.from({ length: intervalCount }, (_, index) =>
+      directions[index] ?? directions[0] ?? "up"
+    ),
+    functionValues: Array.from(
+      { length: safeXValues.length },
+      (_, index) => functionValues[index] ?? ""
+    ),
+    criticalValues,
+  };
+}
+
+function VariationArrow({ direction = "up", startLabel = "", endLabel = "", id }) {
+  const isUp = direction !== "down";
+  const yStart = isUp ? 76 : 24;
+  const yEnd = isUp ? 24 : 76;
+  const markerId = `variation-arrow-${id}`;
+
+  return (
+    <div
+      dir="ltr"
+      className="relative h-28 min-w-[150px] overflow-visible"
+      style={{ direction: "ltr", unicodeBidi: "isolate" }}
+    >
+      {hasText(startLabel) && (
+        <div className="absolute bottom-1 left-2 max-w-[42%] text-left text-sm font-bold text-slate-900">
+          <MathLTR>{startLabel}</MathLTR>
+        </div>
+      )}
+
+      {hasText(endLabel) && (
+        <div className="absolute right-2 top-1 max-w-[42%] text-right text-sm font-bold text-slate-900">
+          <MathLTR>{endLabel}</MathLTR>
+        </div>
+      )}
+
+      <svg
+        viewBox="0 0 240 100"
+        preserveAspectRatio="none"
+        className="absolute inset-x-5 top-3 h-[88px] w-[calc(100%-2.5rem)] overflow-visible"
+        aria-hidden="true"
+      >
+        <defs>
+          <marker
+            id={markerId}
+            markerWidth="8"
+            markerHeight="8"
+            refX="7"
+            refY="4"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M0,0 L8,4 L0,8 Z" fill="currentColor" />
+          </marker>
+        </defs>
+
+        <line
+          x1="12"
+          y1={yStart}
+          x2="228"
+          y2={yEnd}
+          stroke="currentColor"
+          strokeWidth="3"
+          vectorEffect="non-scaling-stroke"
+          markerEnd={`url(#${markerId})`}
+        />
+      </svg>
+    </div>
+  );
+}
+
+function VariationTable({ table }) {
+  const data = normalizeVariationTable(table);
+  const intervalCount = Math.max(data.xValues.length - 1, 1);
+
+  /*
+   * جدول التغيرات جدول رياضي، لذلك بنيته الداخلية LTR دائمًا:
+   * الخانة الأولى للعناوين x و f'(x) و f(x)، ثم القيم من 0 إلى +∞.
+   * لا نعتمد على اتجاه الصفحة RTL ولا على flex-row-reverse.
+   */
+  return (
+    <figure
+      dir="ltr"
+      className="overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm"
+      style={{ direction: "ltr", unicodeBidi: "isolate" }}
+    >
+      <figcaption
+        dir="rtl"
+        className="border-b border-slate-300 bg-slate-100 px-4 py-4 text-center font-black text-slate-950"
+      >
+        <span>جدول تغيرات الدالة </span>
+        <MathLTR>{data.functionName}</MathLTR>
+      </figcaption>
+
+      <div className="overflow-x-auto">
+        <div className="min-w-[760px]">
+          <div
+            className="grid border-b border-slate-300"
+            style={{
+              gridTemplateColumns: `120px repeat(${data.xValues.length}, minmax(150px, 1fr))`,
+            }}
+          >
+            <VariationLabelCell value="x" />
+            {data.xValues.map((value, index) => (
+              <VariationValueCell key={`x-${index}`} value={value} />
+            ))}
+          </div>
+
+          <div
+            className="grid min-h-20 border-b border-slate-300"
+            style={{
+              gridTemplateColumns: `120px repeat(${intervalCount}, minmax(180px, 1fr))`,
+            }}
+          >
+            <VariationLabelCell value="f'(x)" />
+            {data.signs.map((sign, index) => (
+              <VariationValueCell
+                key={`sign-${index}`}
+                value={sign}
+                className="text-xl"
+              />
+            ))}
+          </div>
+
+          <div
+            className="grid min-h-44"
+            style={{
+              gridTemplateColumns: `120px repeat(${intervalCount}, minmax(220px, 1fr))`,
+            }}
+          >
+            <VariationLabelCell value="f(x)" />
+            {data.directions.map((direction, index) => (
+              <div
+                key={`direction-${index}`}
+                className="border-l border-slate-300 first:border-l-0"
+              >
+                <VariationArrow
+                  id={`${index}-${data.functionName}`}
+                  direction={direction}
+                  startLabel={data.functionValues[index]}
+                  endLabel={data.functionValues[index + 1]}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {hasText(data.domain) && (
+        <div
+          dir="rtl"
+          className="flex items-center justify-center gap-2 border-t border-slate-300 bg-slate-50 px-4 py-3 text-sm font-black text-slate-700"
+        >
+          <span>المجال:</span>
+          <MathLTR>{data.domain}</MathLTR>
+        </div>
+      )}
+    </figure>
+  );
+}
+
+function VariationLabelCell({ value }) {
+  return (
+    <div className="flex min-h-20 items-center justify-center border-r border-slate-300 bg-slate-50 px-3 font-black text-slate-950">
+      <MathLTR className="text-lg">{value}</MathLTR>
+    </div>
+  );
+}
+
+function VariationValueCell({ value, className = "" }) {
+  return (
+    <div className={cn(
+      "flex min-h-20 items-center justify-center border-r border-slate-300 px-4 font-black text-slate-950 last:border-r-0",
+      className
+    )}>
+      {hasText(String(value ?? "")) && <MathLTR>{String(value)}</MathLTR>}
+    </div>
   );
 }
 
@@ -1886,7 +2835,13 @@ function DataTable({ table }) {
   if (headers.length === 0 && rows.length === 0) return null;
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-hidden rounded-xl border border-slate-300 bg-white">
+      {hasText(table?.title) && (
+        <div className="border-b border-slate-300 bg-slate-100 px-4 py-3 text-center font-black text-slate-900">
+          <MathText>{table.title}</MathText>
+        </div>
+      )}
+      <div className="overflow-x-auto">
       <table className="min-w-full border-collapse border border-slate-400 text-center text-sm">
         {headers.length > 0 && (
           <thead className="bg-slate-100">
@@ -1924,6 +2879,7 @@ function DataTable({ table }) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

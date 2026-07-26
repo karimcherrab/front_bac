@@ -2193,6 +2193,7 @@ const STEP_META = {
 
 function normalizeReExplanationAnswer(payload) {
   const candidate =
+    payload?.saved_explanation?.answer ??
     payload?.answer ??
     payload?.ai_answer ??
     payload?.response ??
@@ -2204,47 +2205,38 @@ function normalizeReExplanationAnswer(payload) {
 
   if (typeof candidate === "string") {
     const text = candidate.trim();
-    return text ? { simple_explanation: text } : null;
+    return text
+      ? { type: "explanation", content: text, graph: null }
+      : null;
   }
 
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
     return null;
   }
 
-  // بعض نسخ الـ API تضع الجواب داخل answer.re_explanation
-  if (
-    candidate.re_explanation &&
-    typeof candidate.re_explanation === "object" &&
-    !Array.isArray(candidate.re_explanation)
-  ) {
-    return candidate.re_explanation;
-  }
+  const type = candidate.type === "example" ? "example" : "explanation";
+  const content =
+    candidate.content ||
+    (type === "example" ? candidate.example : candidate.explanation) ||
+    candidate.simple_explanation ||
+    candidate.direct_answer ||
+    candidate.teacher_message ||
+    "";
 
-  // وبعضها تعيده كنص داخل re_explanation
-  if (typeof candidate.re_explanation === "string") {
-    return {
-      ...candidate,
-      simple_explanation:
-        candidate.simple_explanation || candidate.re_explanation,
-    };
-  }
+  if (!String(content || "").trim()) return null;
 
-  return candidate;
+  return {
+    type,
+    content: String(content).trim(),
+    graph:
+      candidate.graph && typeof candidate.graph === "object"
+        ? candidate.graph
+        : null,
+  };
 }
 
 function extractReExplanation(payload) {
-  const answer = normalizeReExplanationAnswer(payload);
-  if (!answer) return "";
-
-  return (
-    answer.simple_explanation ||
-    answer.explanation ||
-    answer.teacher_message ||
-    answer.summary ||
-    answer.example ||
-    answer.title ||
-    ""
-  );
+  return normalizeReExplanationAnswer(payload)?.content || "";
 }
 
 function normalizeHistoryItem(item, index = 0) {
@@ -2252,7 +2244,6 @@ function normalizeHistoryItem(item, index = 0) {
 
   const answerData = normalizeReExplanationAnswer(item);
   const answer = extractReExplanation(item);
-
   if (!answerData && !answer) return null;
 
   return {
@@ -2274,7 +2265,7 @@ function normalizeHistoryItem(item, index = 0) {
       "",
     answer,
     answerData,
-    model: item?.model ?? item?.ai_model ?? item?.answer?.model ?? "",
+    model: item?.model ?? item?.model_name ?? item?.ai_model ?? "",
     createdAt:
       item?.created_at ??
       item?.createdAt ??
@@ -2285,114 +2276,226 @@ function normalizeHistoryItem(item, index = 0) {
   };
 }
 
-function ReExplanationAnswer({ answer }) {
-  if (!answer) return null;
+function splitExplanationContent(value) {
+  const text = String(value || "")
+    // بعض إجابات API ترجع الرموز \\n بدل أسطر حقيقية.
+    .replace(/\\r\\n|\\n|\\r/g, "\n")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 
-  if (typeof answer === "string") {
-    return (
-      <MathText className="text-sm font-semibold text-slate-700">
-        {answer}
-      </MathText>
-    );
+  if (!text) {
+    return {
+      intro: "",
+      sections: [],
+      result: "",
+    };
   }
 
-  const steps = Array.isArray(answer.steps) ? answer.steps : [];
+  const resultPattern =
+    /^(?:النتيجة(?:\s+النهائية)?|إذن|وبالتالي|الخلاصة|نستنتج|الجواب(?:\s+النهائي)?)\s*[:：\-]?\s*/i;
+
+  const sectionPattern =
+    /^(?:(?:الخطوة|المرحلة)\s*(\d+)|([١٢٣٤٥٦٧٨٩]+)\s*[.)\-]|(أولًا|أولا|ثانيًا|ثانيا|ثالثًا|ثالثا|رابعًا|رابعا|خامسًا|خامسا|سادسًا|سادسا))\s*[:：\-]?\s*/i;
+
+  const headingPattern =
+    /^(الفكرة|التفسير|التطبيق|الحساب|الحل|المطلوب|المعطيات|نلاحظ|نحسب|نعوض|نتحقق)\s*[:：\-]?\s*/i;
+
+  const lines = text
+    .split(/\n+/)
+    .flatMap((line) => {
+      const normalizedLine = line.trim();
+      if (!normalizedLine) return [];
+
+      // يفصل الخطوات عندما يضعها النموذج في السطر نفسه: 1. ... 2. ...
+      return normalizedLine
+        .split(/\s+(?=(?:\d+|[١٢٣٤٥٦٧٨٩]+)[.)]\s+)/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    });
+
+  const sections = [];
+  const introParts = [];
+  let result = "";
+
+  lines.forEach((line) => {
+    const cleanLine = line
+      .replace(/^[-•▪◦–—]\s*/, "")
+      .replace(/^\\?n+\s*/i, "")
+      .trim();
+
+    if (!cleanLine) return;
+
+    if (resultPattern.test(cleanLine)) {
+      const resultText = cleanLine.replace(resultPattern, "").trim();
+      result = resultText || cleanLine;
+      return;
+    }
+
+    const sectionMatch = cleanLine.match(sectionPattern);
+    if (sectionMatch) {
+      const content = cleanLine.slice(sectionMatch[0].length).trim();
+      sections.push({
+        title: `الخطوة ${sections.length + 1}`,
+        content: content || cleanLine,
+      });
+      return;
+    }
+
+    const headingMatch = cleanLine.match(headingPattern);
+    if (headingMatch) {
+      const title = headingMatch[1];
+      const content = cleanLine.slice(headingMatch[0].length).trim();
+      sections.push({
+        title,
+        content: content || cleanLine,
+      });
+      return;
+    }
+
+    // أول فقرة أو فقرتين قصيرتين تبقيان كمقدمة، والباقي يصبح شرحًا متتابعًا.
+    if (sections.length === 0 && introParts.length < 2) {
+      introParts.push(cleanLine);
+    } else {
+      sections.push({
+        title: `الخطوة ${sections.length + 1}`,
+        content: cleanLine,
+      });
+    }
+  });
+
+  // لا نحول نصًا قصيرًا إلى خطوات مصطنعة.
+  if (sections.length === 1 && introParts.length === 0) {
+    introParts.push(sections[0].content);
+    sections.length = 0;
+  }
+
+  return {
+    intro: introParts.join("\n\n"),
+    sections,
+    result,
+  };
+}
+
+function ReExplanationAnswer({ answer }) {
+  const normalized = normalizeReExplanationAnswer(answer);
+  if (!normalized) return null;
+
+  const isExample = normalized.type === "example";
+  const parsed = splitExplanationContent(normalized.content);
+
+  const theme = isExample
+    ? {
+        title: "مثال توضيحي",
+        label: "تطبيق بسيط على الفكرة",
+        Icon: GraduationCap,
+        icon: "bg-emerald-100 text-emerald-700",
+        line: "bg-emerald-300",
+        number: "border-emerald-200 bg-emerald-50 text-emerald-700",
+        result: "border-emerald-200 bg-emerald-50/70 text-emerald-950",
+      }
+    : {
+        title: "شرح مبسط",
+        label: "لنشرح الفكرة بهدوء",
+        Icon: Brain,
+        icon: "bg-indigo-100 text-indigo-700",
+        line: "bg-indigo-300",
+        number: "border-indigo-200 bg-indigo-50 text-indigo-700",
+        result: "border-indigo-200 bg-indigo-50/70 text-indigo-950",
+      };
+
+  const HeaderIcon = theme.Icon;
 
   return (
-    <div className="space-y-4">
-      {answer.title && (
-        <div className="rounded-2xl bg-gradient-to-l from-violet-600 to-indigo-600 px-4 py-3 text-white shadow-sm">
-          <MathText className="font-black text-white">
-            {answer.title}
-          </MathText>
+    <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+      {/* رأس بسيط مثل رسالة Chat، بدون بطاقة كبيرة داخل بطاقة أخرى */}
+      <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <span
+          className={cn(
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+            theme.icon,
+          )}
+        >
+          <HeaderIcon size={20} />
+        </span>
+
+        <div className="min-w-0">
+          <h4 className="text-base font-black text-slate-950 sm:text-lg">
+            {theme.title}
+          </h4>
+          <p className="mt-0.5 text-xs font-semibold text-slate-500">
+            {theme.label}
+          </p>
         </div>
-      )}
+      </div>
 
-      {(answer.simple_explanation || answer.explanation || answer.teacher_message) && (
-        <InfoBox title="الشرح المبسط" tone="indigo" icon={Brain}>
-          <MathText className="text-sm font-semibold">
-            {answer.simple_explanation ||
-              answer.explanation ||
-              answer.teacher_message}
+      <div className="px-4 py-5 sm:px-7 sm:py-6">
+        {parsed.intro && (
+          <MathText className="text-[15px] font-semibold leading-9 text-slate-800 sm:text-base sm:leading-10">
+            {parsed.intro}
           </MathText>
-        </InfoBox>
-      )}
+        )}
 
-      {answer.example && (
-        <InfoBox title="مثال للتوضيح" tone="sky" icon={Lightbulb}>
-          <MathText className="text-sm font-semibold">
-            {answer.example}
-          </MathText>
-        </InfoBox>
-      )}
-
-      {steps.length > 0 && (
-        <div>
-          <div className="mb-3 flex items-center gap-2 font-black text-slate-900">
-            <ListChecks size={18} className="text-violet-600" />
-            خطوات الفهم
-          </div>
-          <div className="space-y-3">
-            {steps.map((stepText, stepIndex) => (
-              <div
-                key={`${stepIndex}-${getDisplayText(stepText)}`}
-                className="flex items-start gap-3 rounded-2xl border border-violet-100 bg-violet-50/60 p-4"
-              >
-                <span className="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600 px-2 text-xs font-black text-white">
-                  {stepIndex + 1}
+        {parsed.sections.length > 0 && (
+          <div
+            className={cn(
+              "relative mt-6 space-y-6 border-r-2 pr-5 sm:pr-7",
+              isExample ? "border-emerald-100" : "border-indigo-100",
+            )}
+          >
+            {parsed.sections.map((section, index) => (
+              <div key={`${section.title}-${index}`} className="relative">
+                <span
+                  className={cn(
+                    "absolute -right-[31px] top-0 flex h-7 min-w-7 items-center justify-center rounded-full border px-1 text-xs font-black sm:-right-[39px]",
+                    theme.number,
+                  )}
+                >
+                  {index + 1}
                 </span>
-                <MathText className="text-sm font-semibold text-slate-700">
-                  {getDisplayText(stepText)}
-                </MathText>
+
+                <div className="min-w-0">
+                  <p className="mb-1 text-xs font-black text-slate-500">
+                    {section.title}
+                  </p>
+                  <MathText className="text-[15px] font-semibold leading-9 text-slate-800 sm:text-base sm:leading-10">
+                    {section.content}
+                  </MathText>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {answer.check_question && (
-        <RevealBox label="تحقق من فهمك" tone="amber" defaultOpen>
-          <MathText className="font-bold text-amber-950">
-            {answer.check_question}
-          </MathText>
-
-          {answer.expected_answer && (
-            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-              <p className="mb-2 text-xs font-black text-emerald-700">
-                الإجابة المتوقعة
-              </p>
-              <MathText className="text-sm font-black text-emerald-950">
-                {answer.expected_answer}
+        {parsed.result && (
+          <div
+            className={cn(
+              "mt-6 flex items-start gap-3 rounded-2xl border px-4 py-3.5",
+              theme.result,
+            )}
+          >
+            <CheckCircle2 size={19} className="mt-1 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="mb-1 text-xs font-black opacity-70">النتيجة</p>
+              <MathText className="font-black leading-8 sm:leading-9">
+                {parsed.result}
               </MathText>
             </div>
-          )}
-        </RevealBox>
-      )}
+          </div>
+        )}
 
-      {!answer.check_question && answer.expected_answer && (
-        <InfoBox title="الإجابة المتوقعة" tone="emerald" icon={CheckCircle2}>
-          <MathText className="text-sm font-black">
-            {answer.expected_answer}
-          </MathText>
-        </InfoBox>
-      )}
-
-      {answer.encouragement && (
-        <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
-          <Trophy className="mt-1 shrink-0 text-emerald-600" size={18} />
-          <MathText className="text-sm font-black text-emerald-950">
-            {answer.encouragement}
-          </MathText>
-        </div>
-      )}
-
-      {answer.summary && (
-        <InfoBox title="الخلاصة" tone="slate" icon={Sparkles}>
-          <MathText className="text-sm font-semibold">
-            {answer.summary}
-          </MathText>
-        </InfoBox>
-      )}
+        {normalized.graph && (
+          <div className="mt-7 border-t border-slate-100 pt-6">
+            <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-800">
+              <Compass size={18} className="text-indigo-600" />
+              الرسم المساعد
+            </div>
+            <GraphRenderer graph={normalized.graph} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2440,46 +2543,22 @@ function formatHistoryDate(value) {
 
 const RE_EXPLAIN_ACTIONS = [
   {
-    id: "simplify",
-    label: "شرح أبسط",
-    shortLabel: "شرح",
+    id: "explanation",
+    requestType: "explanation",
+    label: "أعد شرح المرحلة",
+    shortLabel: "شرح مبسط",
     icon: Brain,
-    prompt: "اشرح محتوى هذه المرحلة بطريقة بسيطة جدًا ومباشرة، مع التركيز على الفكرة الأساسية فقط.",
+    prompt:
+      "أعد شرح هذه المرحلة فقط بطريقة بسيطة جدًا ومفصلة، كأنني لم أفهمها من البداية. فسّر الفكرة والرموز وسبب كل خطوة تدريجيًا، ولا تضف مثالًا مستقلًا.",
   },
   {
     id: "example",
-    label: "مثال جديد",
+    requestType: "example",
+    label: "أعطني مثالًا",
     shortLabel: "مثال",
     icon: Lightbulb,
-    prompt: "أعطني مثالًا جديدًا واضحًا يطبق فكرة هذه المرحلة خطوة بخطوة.",
-  },
-  {
-    id: "symbols",
-    label: "شرح الرموز",
-    shortLabel: "الرموز",
-    icon: Hash,
-    prompt: "اشرح الرموز والتعابير الرياضية الموجودة في هذه المرحلة ومعنى كل رمز ببساطة.",
-  },
-  {
-    id: "steps",
-    label: "خطوات الفهم",
-    shortLabel: "الخطوات",
-    icon: ListChecks,
-    prompt: "اشرح هذه المرحلة في خطوات قصيرة ومرتبة، وبيّن ماذا نفعل في كل خطوة.",
-  },
-  {
-    id: "bac",
-    label: "طريقة البكالوريا",
-    shortLabel: "البكالوريا",
-    icon: GraduationCap,
-    prompt: "اشرح كيف نستعمل فكرة هذه المرحلة في البكالوريا مع صياغة رياضية قصيرة ومنظمة.",
-  },
-  {
-    id: "summary",
-    label: "خلاصة سريعة",
-    shortLabel: "الخلاصة",
-    icon: Target,
-    prompt: "لخّص هذه المرحلة في أهم الأفكار والقواعد التي يجب فهمها وحفظها.",
+    prompt:
+      "أعطني مثالًا واحدًا واضحًا من نفس المرحلة، وطبّقه تدريجيًا مع شرح العمليات حتى أصل إلى النتيجة. لا تعِد شرح الدرس كاملًا.",
   },
 ];
 
@@ -2503,6 +2582,7 @@ function ReExplainPanel({
   const requestIdRef = useRef(0);
   const activeStepIdRef = useRef(step?.id || "");
   const messagesEndRef = useRef(null);
+  const shouldAutoScrollRef = useRef(false);
   const loading = Boolean(loadingAction);
 
   useEffect(() => {
@@ -2524,7 +2604,10 @@ function ReExplainPanel({
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
 
-    setOpen(normalized.length > 0);
+    // لا نفتح سجل الشروحات تلقائيًا عند العودة إلى المرحلة.
+    // يبقى مخفيًا إلى أن يضغط التلميذ على زر المساعد الذكي.
+    setOpen(false);
+    shouldAutoScrollRef.current = false;
     setLoadingAction("");
     setError("");
     setHistory(normalized.slice(-3));
@@ -2533,11 +2616,18 @@ function ReExplainPanel({
   }, [step?.id, initialHistory]);
 
   useEffect(() => {
-    if (!open) return;
+    // لا نهبط إلى الشروحات القديمة عند فتح الصفحة أو عند فتح السجل فقط.
+    // التمرير يحدث حصريًا بعد أن يطلب التلميذ شرحًا أو مثالًا جديدًا.
+    if (!open || !shouldAutoScrollRef.current) return;
+
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth",
       block: "nearest",
     });
+
+    if (!loading) {
+      shouldAutoScrollRef.current = false;
+    }
   }, [history, loading, open]);
 
   async function requestExplanation(action) {
@@ -2581,6 +2671,7 @@ function ReExplainPanel({
       pending: true,
     };
 
+    shouldAutoScrollRef.current = true;
     setOpen(true);
     setError("");
     setLoadingAction(action.id);
@@ -2589,6 +2680,7 @@ function ReExplainPanel({
     const payload = {
       step: requestedStep,
       student_question: action.prompt,
+      request_type: action.requestType,
       axis_id: Number(resolvedAxisId),
     };
 
@@ -2660,11 +2752,15 @@ function ReExplainPanel({
       }
 
       const responseData = requestError?.response?.data;
+      const serializerMessage = responseData && typeof responseData === "object"
+        ? Object.values(responseData).flat().find((value) => typeof value === "string")
+        : "";
+
       const detail =
-        responseData?.details ||
         responseData?.detail ||
         responseData?.error ||
         responseData?.message ||
+        serializerMessage ||
         requestError?.message;
 
       setError(detail || "حدث خطأ أثناء إنشاء الشرح.");
@@ -2706,7 +2802,7 @@ function ReExplainPanel({
               )}
             </div>
             <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">
-              اختر نوع المساعدة لهذه المرحلة
+              اختر: شرح مبسط أو مثال توضيحي
             </p>
           </div>
         </div>
@@ -2718,7 +2814,7 @@ function ReExplainPanel({
 
       {open && (
         <div className="border-t border-slate-100 bg-slate-50/60 p-3 sm:p-4">
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3">
             {RE_EXPLAIN_ACTIONS.map((action) => {
               const Icon = action.icon;
               const isLoading = loadingAction === action.id;
@@ -2731,7 +2827,7 @@ function ReExplainPanel({
                   disabled={loading}
                   title={action.label}
                   className={cn(
-                    "group/action flex min-h-[72px] flex-col items-center justify-center gap-2 rounded-2xl border bg-white px-2 py-3 text-center shadow-sm transition duration-200",
+                    "group/action flex min-h-[88px] flex-col items-center justify-center gap-2 rounded-2xl border bg-white px-3 py-4 text-center shadow-sm transition duration-200",
                     isLoading
                       ? "border-indigo-400 ring-2 ring-indigo-100"
                       : "border-slate-200 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md",
@@ -2799,7 +2895,7 @@ function ReExplainPanel({
                     {item.pending ? (
                       <div className="flex items-center gap-2 rounded-xl bg-indigo-50 px-3 py-2.5 text-[11px] font-bold text-indigo-700">
                         <Loader2 className="animate-spin" size={15} />
-                        يتم إعداد الشرح...
+                        يتم إعداد المساعدة...
                       </div>
                     ) : (
                       <ReExplanationAnswer answer={item.answerData || item.answer} />

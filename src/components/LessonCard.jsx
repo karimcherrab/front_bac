@@ -6,12 +6,18 @@ import IntroStep from "./IntroStep";
 import QuestionBac from "./QuestionBac";
 import GeneratedAIExercises from "./Questions/Generate_question";
 import BacChapterExercises from "./Questions/BacChapterExercises";
+import GeneratedBacExercisesPage from "./Questions/GeneratedBacExercisesPage";
+
+
 import AxisRevisionPage from "./Course/AxisRevisionPage";
 
 import StepNavFooter from "./StepNavFooter";
 
 import { lessonSteps } from "../data/lessonData";
 import { UserContext } from "../Utils/UserContext";
+import {
+  useParams,
+} from "react-router-dom";
 
 const API_BASE_URL = import.meta.env.VITE_COURSE_URL;
 
@@ -52,7 +58,8 @@ function getErrorMessage(error, defaultMessage) {
 }
 
 export default function LessonCard() {
-  const { current_axis, token , setActiveId , activeId } = useContext(UserContext);
+  const { current_axis, token , setActiveId , activeId,user } = useContext(UserContext);
+  const { id_chapter } = useParams();
 
   // const [activeId, setActiveId] = useState("intro");
 
@@ -352,7 +359,7 @@ export default function LessonCard() {
         if (activeId === "resume") {
                   return (
             <AxisRevisionPage
-              axisId = {axisId}
+               axisId = {axisId}
               
             />
           );
@@ -402,10 +409,21 @@ export default function LessonCard() {
        if (activeId === "bac") {
               return (
         <BacChapterExercises
-            chapterId={1}
+            chapterId={id_chapter}
           
         />
       );
+      
+        }
+
+            if (activeId === "generete-bac") {
+              return (
+        <GeneratedBacExercisesPage
+      chapterId={id_chapter}
+      branchCode={user.branch.code}
+    />
+      );
+      
         }
 
 
