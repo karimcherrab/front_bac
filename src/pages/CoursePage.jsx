@@ -35,7 +35,7 @@ import {
 export default function MathCoursePage() {
   const navigate = useNavigate();
   const { token } = useContext(UserContext);
-
+const base_URL = import.meta.env.VITE_BASE_URL;
   const { id_subjects } = useParams();
 
   const [chapters, setChapters] = useState([]);
@@ -57,7 +57,7 @@ export default function MathCoursePage() {
         setError("");
 
         const response = await axios.get(
-          `http://127.0.0.1:8000/api/course/subjects/${id_subjects}/chapters/`,
+          `${base_URL}/api/course/subjects/${id_subjects}/chapters/`,
           {
             signal: controller.signal,
 
