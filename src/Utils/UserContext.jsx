@@ -3,139 +3,149 @@
 import {
   createContext,
   useCallback,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 
 import Cookies from "js-cookie";
 
-export const UserContext = createContext({
-  chapter: null,
-  setChapter: () => {},
+export const UserContext =
+  createContext(null);
 
-  current_axis: null,
-  setCurrent_axis: () => {},
-
-  activeId: "intro",
-  setActiveId: () => {},
-
-  token: null,
-  setToken: () => {},
-
-  user: null,
-  setUser: () => {},
-
-  isAuthenticated: false,
-
-  login: () => {},
-  logout: () => {},
-});
-
-export function UserProvider({ children }) {
+export function UserProvider({
+  children,
+}) {
   const [chapter, setChapter] =
     useState(null);
 
-  const [current_axis, setCurrent_axis] =
-    useState(null);
+  const [
+    current_axis,
+    setCurrent_axis,
+  ] = useState(null);
 
   const [activeId, setActiveId] =
     useState("intro");
 
-  /*
-   * قراءة الـ token عند تشغيل التطبيق.
-   */
-  const [token, setToken] = useState(
-    () => Cookies.get("access_token") || null,
-  );
-
-  const [user, setUser] = useState(() => {
-    try {
-      const storedUser =
-        localStorage.getItem("student");
-
-      return storedUser
-        ? JSON.parse(storedUser)
-        : null;
-    } catch (error) {
-      console.error(
-        "Error reading stored user:",
-        error,
+  const [token, setToken] =
+    useState(() => {
+      return (
+        Cookies.get(
+          "access_token",
+        ) || null
       );
+    });
 
-      return null;
-    }
+  const [
+    refreshToken,
+    setRefreshToken,
+  ] = useState(() => {
+    return (
+      Cookies.get(
+        "refresh_token",
+      ) || null
+    );
   });
 
-  /*
-   * تُستعمل مباشرة بعد نجاح تسجيل الدخول.
-   * تحفظ الـ token وتحدث Context في نفس اللحظة.
-   */
+  const [user, setUser] =
+    useState(() => {
+      const storedUser =
+        localStorage.getItem(
+          "student",
+        );
+
+      if (!storedUser) {
+        return null;
+      }
+
+      try {
+        return JSON.parse(
+          storedUser,
+        );
+      } catch {
+        localStorage.removeItem(
+          "student",
+        );
+
+        return null;
+      }
+    });
+
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem(
+        "student",
+        JSON.stringify(user),
+      );
+    } else {
+      localStorage.removeItem(
+        "student",
+      );
+    }
+  }, [user]);
+
   const login = useCallback(
     ({
       accessToken,
-      refreshToken = null,
-      userData = null,
+      refreshToken:
+        newRefreshToken,
+      userData,
       rememberMe = true,
     }) => {
       if (!accessToken) {
         throw new Error(
-          "Access token is required.",
+          "Access token manquant.",
         );
       }
 
-      const cookieOptions = {
-        path: "/",
+      const baseCookieOptions = {
         sameSite: "Lax",
-        secure: import.meta.env.PROD,
+        secure:
+          window.location.protocol ===
+          "https:",
       };
+
+      const accessCookieOptions = {
+        ...baseCookieOptions,
+      };
+
+      const refreshCookieOptions = {
+        ...baseCookieOptions,
+      };
+
+      if (rememberMe) {
+        accessCookieOptions.expires =
+          1;
+
+        refreshCookieOptions.expires =
+          7;
+      }
 
       Cookies.set(
         "access_token",
         accessToken,
-        {
-          ...cookieOptions,
-          expires: rememberMe
-            ? 1
-            : undefined,
-        },
+        accessCookieOptions,
       );
 
-      if (refreshToken) {
+      if (newRefreshToken) {
         Cookies.set(
           "refresh_token",
-          refreshToken,
-          {
-            ...cookieOptions,
-            expires: rememberMe
-              ? 7
-              : undefined,
-          },
+          newRefreshToken,
+          refreshCookieOptions,
         );
       } else {
         Cookies.remove(
           "refresh_token",
-          {
-            path: "/",
-          },
         );
       }
 
-      if (userData) {
-        localStorage.setItem(
-          "student",
-          JSON.stringify(userData),
-        );
-      } else {
-        localStorage.removeItem(
-          "student",
-        );
-      }
-
-      /*
-       * أهم سطر لحل مشكلة الـ refresh.
-       */
       setToken(accessToken);
-      setUser(userData);
+
+      setRefreshToken(
+        newRefreshToken || null,
+      );
+
+      setUser(userData || null);
     },
     [],
   );
@@ -143,21 +153,18 @@ export function UserProvider({ children }) {
   const logout = useCallback(() => {
     Cookies.remove(
       "access_token",
-      {
-        path: "/",
-      },
     );
 
     Cookies.remove(
       "refresh_token",
-      {
-        path: "/",
-      },
     );
 
-    localStorage.removeItem("student");
+    localStorage.removeItem(
+      "student",
+    );
 
     setToken(null);
+    setRefreshToken(null);
     setUser(null);
 
     setChapter(null);
@@ -165,39 +172,55 @@ export function UserProvider({ children }) {
     setActiveId("intro");
   }, []);
 
-  const contextValue = useMemo(
-    () => ({
-      chapter,
-      setChapter,
+  const updateUser =
+    useCallback(
+      (studentData) => {
+        setUser(
+          studentData || null,
+        );
+      },
+      [],
+    );
 
-      current_axis,
-      setCurrent_axis,
+  const contextValue =
+    useMemo(
+      () => ({
+        chapter,
+        setChapter,
 
-      token,
-      setToken,
+        current_axis,
+        setCurrent_axis,
 
-      activeId,
-      setActiveId,
+        activeId,
+        setActiveId,
 
-      user,
-      setUser,
+        token,
+        setToken,
 
-      isAuthenticated:
-        Boolean(token),
+        refreshToken,
+        setRefreshToken,
 
-      login,
-      logout,
-    }),
-    [
-      chapter,
-      current_axis,
-      token,
-      activeId,
-      user,
-      login,
-      logout,
-    ],
-  );
+        user,
+        setUser: updateUser,
+
+        login,
+        logout,
+
+        isAuthenticated:
+          Boolean(token),
+      }),
+      [
+        chapter,
+        current_axis,
+        activeId,
+        token,
+        refreshToken,
+        user,
+        updateUser,
+        login,
+        logout,
+      ],
+    );
 
   return (
     <UserContext.Provider

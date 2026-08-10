@@ -9,6 +9,11 @@ import CoursePage from "./pages/CoursePage";
 
 import LogInPage from "./pages/LogInPage";
 import SignupPage from "./pages/SignupPage";
+import CheckEmailPage from "./pages/CheckEmailPage";
+import VerifyEmailPage from "./pages/VerifyEmailPage";
+
+import SettingsPage from "./pages/SettingsPage";
+
 
 import ProtectedRoute from "./Utils/ProtectedRoute";
 import GuestRoute from "./Utils/GuestRoute";
@@ -16,9 +21,9 @@ import GuestRoute from "./Utils/GuestRoute";
 import "./App.css";
 
 export default function App() {
+
   return (
     <Routes>
-      {/* Routes pour utilisateur non connecté */}
       <Route
         path="/login"
         element={
@@ -37,7 +42,32 @@ export default function App() {
         }
       />
 
-      {/* Page des matières avec le nouveau DashboardLayout */}
+      <Route
+        path="/check-email"
+        element={
+          <GuestRoute>
+            <CheckEmailPage />
+          </GuestRoute>
+        }
+      />
+
+      <Route
+        path="/verify-email"
+        element={
+          <GuestRoute>
+            <VerifyEmailPage />
+          </GuestRoute>
+        }
+      />
+      <Route
+  path="/settings"
+  element={
+    <DashboardLayout>
+      <SettingsPage />
+    </DashboardLayout>
+  }
+/>
+
       <Route
         path="/subjects"
         element={
@@ -60,9 +90,8 @@ export default function App() {
         }
       />
 
-      {/* Page lesson avec ton ancien AppLayout */}
       <Route
-        path="subjects/:id_subjects/lesson/:id_chapter"
+        path="/subjects/:id_subjects/lesson/:id_chapter"
         element={
           <ProtectedRoute>
             <AppLayout>
@@ -72,13 +101,11 @@ export default function App() {
         }
       />
 
-      {/* Page principale */}
       <Route
         path="/"
         element={<Navigate to="/subjects" replace />}
       />
 
-      {/* Route inexistante */}
       <Route
         path="*"
         element={<Navigate to="/subjects" replace />}

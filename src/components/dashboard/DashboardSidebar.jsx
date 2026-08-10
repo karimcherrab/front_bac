@@ -1,22 +1,23 @@
 // src/components/dashboard/DashboardSidebar.jsx
 
 import {
-  Home,
   BookOpen,
-  Network,
-  GraduationCap,
-  PenLine,
-  ClipboardList,
   Bookmark,
   Bot,
-  Settings,
+  ClipboardList,
+  Home,
   LogOut,
-  Crown,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
+  X,
 } from "lucide-react";
 
-import { NavLink, useNavigate } from "react-router-dom";
+import {
+  NavLink,
+  useNavigate,
+} from "react-router-dom";
+
 import Cookies from "js-cookie";
 
 const navigationItems = [
@@ -31,22 +32,7 @@ const navigationItems = [
     path: "/subjects",
   },
   {
-    label: "المحاور",
-    icon: Network,
-    path: "/axes",
-  },
-  {
-    label: "دروسي",
-    icon: GraduationCap,
-    path: "/my-lessons",
-  },
-  {
-    label: "التمارين",
-    icon: PenLine,
-    path: "/exercises",
-  },
-  {
-    label: "الامتحانات",
+    label: "البكالوريا التجريبية",
     icon: ClipboardList,
     path: "/exams",
   },
@@ -65,6 +51,8 @@ const navigationItems = [
 export default function DashboardSidebar({
   collapsed,
   setCollapsed,
+  mobileOpen,
+  onCloseMobile,
 }) {
   const navigate = useNavigate();
 
@@ -72,155 +60,476 @@ export default function DashboardSidebar({
     Cookies.remove("access_token");
     Cookies.remove("refresh_token");
 
+    onCloseMobile?.();
+
     navigate("/login", {
       replace: true,
     });
   };
 
+  const handleNavigation = () => {
+    onCloseMobile?.();
+  };
+
   return (
-    <aside
-      dir="rtl"
-      className={`
-        relative z-30 flex h-screen shrink-0 flex-col
-        border-e border-slate-100 bg-white
-        transition-all duration-300
-        ${collapsed ? "w-[86px]" : "w-[230px]"}
-      `}
-    >
-      {/* Logo */}
-      <div className="flex h-[100px] items-center justify-between px-5">
-        <div className="flex items-center gap-3 overflow-hidden">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-blue-600 text-2xl font-black text-white shadow-lg shadow-violet-200">
-            M
-          </div>
-
-          {!collapsed && (
-            <div className="whitespace-nowrap">
-              <h1 className="text-xl font-extrabold text-slate-900">
-                MathMaster
-              </h1>
-
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                تعلم بذكاء، تفوق بثقة
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Collapse button */}
+    <>
+      {/* Mobile overlay */}
       <button
         type="button"
-        onClick={() => setCollapsed((current) => !current)}
-        className="
-          absolute -end-3 top-[110px] z-40
-          flex h-7 w-7 items-center justify-center
-          rounded-full border border-slate-200
-          bg-white text-slate-500 shadow-sm
-          transition hover:text-violet-600
-        "
+        aria-label="إغلاق القائمة الجانبية"
+        onClick={onCloseMobile}
+        className={`
+          fixed inset-0
+          z-40 bg-slate-950/40
+          backdrop-blur-[2px]
+          transition-opacity
+          duration-300
+
+          lg:hidden
+
+          ${
+            mobileOpen
+              ? "pointer-events-auto opacity-100"
+              : "pointer-events-none opacity-0"
+          }
+        `}
+      />
+
+      {/* Sidebar */}
+      <aside
+        dir="rtl"
+        className={`
+          fixed inset-y-0
+          right-0 z-50
+          flex h-dvh
+          w-[min(86vw,320px)]
+          shrink-0 flex-col
+          overflow-hidden
+          border-l border-slate-100
+          bg-white
+          shadow-[-12px_0_40px_rgba(15,23,42,0.14)]
+          transition-transform
+          duration-300 ease-out
+
+          lg:relative
+          lg:inset-auto
+          lg:z-30
+          lg:h-dvh
+          lg:translate-x-0
+          lg:shadow-[-4px_0_30px_rgba(15,23,42,0.03)]
+          lg:transition-[width]
+          lg:duration-300
+
+          ${
+            mobileOpen
+              ? "translate-x-0"
+              : "translate-x-full"
+          }
+
+          ${
+            collapsed
+              ? "lg:w-[92px]"
+              : "lg:w-[270px]"
+          }
+        `}
       >
-        {collapsed ? (
-          <PanelLeftOpen size={15} />
-        ) : (
-          <PanelLeftClose size={15} />
-        )}
-      </button>
+        {/* Logo */}
+        <div
+          className={`
+            flex h-[88px]
+            shrink-0 items-center
+            border-b border-slate-50
+            px-4
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3">
-        {navigationItems.map((item) => {
-          const Icon = item.icon;
+            sm:h-[96px]
 
-          return (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.path === "/"}
-              title={collapsed ? item.label : undefined}
-              className={({ isActive }) => `
-                flex h-12 items-center rounded-xl
-                text-sm font-bold transition-all duration-200
+            lg:h-[112px]
+
+            ${
+              collapsed
+                ? "lg:justify-center lg:px-3"
+                : "lg:justify-start lg:px-6"
+            }
+          `}
+        >
+          <div
+            className="
+              flex min-w-0
+              flex-1 items-center
+              gap-3 overflow-hidden
+              lg:gap-4
+            "
+          >
+            <div
+              className="
+                flex h-12 w-12
+                shrink-0 items-center
+                justify-center rounded-2xl
+                bg-gradient-to-br
+                from-violet-500
+                to-blue-600
+                text-xl font-black
+                text-white
+                shadow-lg
+                shadow-violet-200
+
+                lg:h-14 lg:w-14
+                lg:text-2xl
+              "
+            >
+              M
+            </div>
+
+            <div
+              className={`
+                min-w-0
+                whitespace-nowrap
+
                 ${
                   collapsed
-                    ? "justify-center px-0"
-                    : "gap-3 px-4"
-                }
-                ${
-                  isActive
-                    ? "bg-gradient-to-l from-violet-600 to-violet-500 text-white shadow-md shadow-violet-200"
-                    : "text-slate-600 hover:bg-violet-50 hover:text-violet-700"
+                    ? "lg:hidden"
+                    : ""
                 }
               `}
             >
-              <Icon size={20} />
+              <h1
+                className="
+                  truncate text-xl
+                  font-black
+                  tracking-tight
+                  text-slate-900
 
-              {!collapsed && <span>{item.label}</span>}
-            </NavLink>
-          );
-        })}
-      </nav>
+                  lg:text-[22px]
+                "
+              >
+                MathMaster
+              </h1>
 
-      {/* Premium */}
-      {/* {!collapsed && (
-        <div className="mx-4 mb-5 rounded-2xl bg-gradient-to-br from-[#20105f] to-[#4f26b9] p-4 text-center text-white shadow-xl shadow-violet-100">
-          <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-amber-300">
-            <Crown size={23} fill="currentColor" />
+              <p
+                className="
+                  mt-1 truncate
+                  text-xs font-medium
+                  text-slate-500
+                "
+              >
+                تعلم بذكاء، تفوق بثقة
+              </p>
+            </div>
           </div>
 
-          <h3 className="text-sm font-extrabold">
-            النسخة المميزة
-          </h3>
+          {/* Mobile close */}
+          <button
+            type="button"
+            onClick={onCloseMobile}
+            aria-label="إغلاق القائمة"
+            className="
+              flex h-10 w-10
+              shrink-0 items-center
+              justify-center rounded-xl
+              border border-slate-200
+              bg-white text-slate-500
+              transition
 
-          <p className="mt-2 text-xs leading-5 text-violet-100">
-            تجربة تعليمية متكاملة بدون حدود
-          </p>
+              hover:border-red-200
+              hover:bg-red-50
+              hover:text-red-500
+
+              lg:hidden
+            "
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Desktop collapse button */}
+        <button
+          type="button"
+          onClick={() =>
+            setCollapsed(
+              (current) => !current
+            )
+          }
+          aria-label={
+            collapsed
+              ? "توسيع القائمة"
+              : "تصغير القائمة"
+          }
+          className="
+            absolute -left-3.5
+            top-[123px] z-40
+            hidden h-8 w-8
+            items-center justify-center
+            rounded-full
+            border border-slate-200
+            bg-white text-slate-500
+            shadow-md
+            transition duration-200
+
+            hover:border-violet-200
+            hover:bg-violet-50
+            hover:text-violet-600
+
+            lg:flex
+          "
+        >
+          {collapsed ? (
+            <PanelLeftOpen size={17} />
+          ) : (
+            <PanelLeftClose size={17} />
+          )}
+        </button>
+
+        {/* Navigation */}
+        <nav
+          className="
+            min-h-0 flex-1
+            space-y-2
+            overflow-y-auto
+            overscroll-contain
+            px-3 py-4
+
+            sm:px-4 sm:py-5
+
+            lg:space-y-3
+          "
+        >
+          {navigationItems.map(
+            (item) => {
+              const Icon = item.icon;
+
+              return (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.path === "/"}
+                  onClick={
+                    handleNavigation
+                  }
+                  title={
+                    collapsed
+                      ? item.label
+                      : undefined
+                  }
+                  className={({
+                    isActive,
+                  }) => `
+                    group flex
+                    h-[52px] w-full
+                    items-center
+                    rounded-xl
+                    text-[15px]
+                    font-bold
+                    transition-all
+                    duration-200
+
+                    sm:h-[56px]
+                    sm:rounded-2xl
+                    sm:text-[16px]
+
+                    ${
+                      collapsed
+                        ? `
+                          gap-4 px-4
+                          lg:justify-center
+                          lg:gap-0
+                          lg:px-0
+                        `
+                        : `
+                          gap-4 px-4
+                          lg:px-5
+                        `
+                    }
+
+                    ${
+                      isActive
+                        ? `
+                          bg-gradient-to-l
+                          from-violet-600
+                          to-violet-500
+                          text-white
+                          shadow-lg
+                          shadow-violet-200/70
+                        `
+                        : `
+                          text-slate-600
+
+                          hover:bg-violet-50
+                          hover:text-violet-700
+
+                          lg:hover:-translate-x-0.5
+                        `
+                    }
+                  `}
+                >
+                  <Icon
+                    size={22}
+                    strokeWidth={2}
+                    className="shrink-0"
+                  />
+
+                  <span
+                    className={`
+                      min-w-0
+                      truncate
+                      whitespace-nowrap
+
+                      ${
+                        collapsed
+                          ? "lg:hidden"
+                          : ""
+                      }
+                    `}
+                  >
+                    {item.label}
+                  </span>
+                </NavLink>
+              );
+            }
+          )}
+        </nav>
+
+        {/* Bottom actions */}
+        <div
+          className="
+            shrink-0 space-y-2
+            border-t border-slate-100
+            bg-white px-3 py-4
+
+            sm:px-4 sm:py-5
+          "
+        >
+          <NavLink
+            to="/settings"
+            onClick={handleNavigation}
+            title={
+              collapsed
+                ? "الإعدادات"
+                : undefined
+            }
+            className={({
+              isActive,
+            }) => `
+              flex h-[52px]
+              w-full items-center
+              rounded-xl
+              text-[15px]
+              font-bold
+              transition-all
+              duration-200
+
+              sm:h-[54px]
+              sm:rounded-2xl
+
+              ${
+                collapsed
+                  ? `
+                    gap-4 px-4
+                    lg:justify-center
+                    lg:gap-0
+                    lg:px-0
+                  `
+                  : `
+                    gap-4 px-4
+                    lg:px-5
+                  `
+              }
+
+              ${
+                isActive
+                  ? `
+                    bg-violet-50
+                    text-violet-700
+                  `
+                  : `
+                    text-slate-600
+
+                    hover:bg-violet-50
+                    hover:text-violet-700
+                  `
+              }
+            `}
+          >
+            <Settings
+              size={22}
+              strokeWidth={2}
+              className="shrink-0"
+            />
+
+            <span
+              className={`
+                whitespace-nowrap
+
+                ${
+                  collapsed
+                    ? "lg:hidden"
+                    : ""
+                }
+              `}
+            >
+              الإعدادات
+            </span>
+          </NavLink>
 
           <button
             type="button"
-            className="
-              mt-3 w-full rounded-xl
-              bg-gradient-to-l from-violet-500 to-purple-500
-              py-2.5 text-xs font-bold
-              transition hover:brightness-110
-            "
+            onClick={logout}
+            title={
+              collapsed
+                ? "تسجيل الخروج"
+                : undefined
+            }
+            className={`
+              flex h-[52px]
+              w-full items-center
+              rounded-xl
+              text-[15px]
+              font-bold text-slate-600
+              transition-all
+              duration-200
+
+              hover:bg-red-50
+              hover:text-red-500
+
+              sm:h-[54px]
+              sm:rounded-2xl
+
+              ${
+                collapsed
+                  ? `
+                    gap-4 px-4
+                    lg:justify-center
+                    lg:gap-0
+                    lg:px-0
+                  `
+                  : `
+                    gap-4 px-4
+                    lg:px-5
+                  `
+              }
+            `}
           >
-            ترقية الآن
+            <LogOut
+              size={22}
+              strokeWidth={2}
+              className="shrink-0"
+            />
+
+            <span
+              className={`
+                whitespace-nowrap
+
+                ${
+                  collapsed
+                    ? "lg:hidden"
+                    : ""
+                }
+              `}
+            >
+              تسجيل الخروج
+            </span>
           </button>
         </div>
-      )} */}
-
-      {/* Bottom actions */}
-      <div className="space-y-1 border-t border-slate-100 p-3">
-        <NavLink
-          to="/settings"
-          className={`
-            flex h-11 items-center rounded-xl
-            text-sm font-semibold text-slate-600
-            transition hover:bg-slate-50
-            ${collapsed ? "justify-center" : "gap-3 px-4"}
-          `}
-        >
-          <Settings size={19} />
-
-          {!collapsed && <span>الإعدادات</span>}
-        </NavLink>
-
-        <button
-          type="button"
-          onClick={logout}
-          className={`
-            flex h-11 w-full items-center rounded-xl
-            text-sm font-semibold text-slate-600
-            transition hover:bg-red-50 hover:text-red-500
-            ${collapsed ? "justify-center" : "gap-3 px-4"}
-          `}
-        >
-          <LogOut size={19} />
-
-          {!collapsed && <span>تسجيل الخروج</span>}
-        </button>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }

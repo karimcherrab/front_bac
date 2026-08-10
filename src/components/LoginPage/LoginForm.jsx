@@ -1,8 +1,17 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+// src/components/auth/LoginForm.jsx
+// عدّل المسار حسب مكان الملف لديك.
+
+import {
+  useContext,
+  useState,
+} from "react";
+
+import {
+  Link,
+  useNavigate,
+} from "react-router-dom";
 
 import axios from "axios";
-import Cookies from "js-cookie";
 
 import {
   ArrowLeft,
@@ -16,6 +25,7 @@ import {
 } from "lucide-react";
 
 import AuthInput from "./AuthInput";
+import { UserContext } from "../../Utils/UserContext";
 
 const INITIAL_VALUES = {
   email: "",
@@ -25,23 +35,46 @@ const INITIAL_VALUES = {
 export default function LoginForm() {
   const navigate = useNavigate();
 
-  const studentUrl = import.meta.env.VITE_STUDENT_URL;
+  /*
+   * نأخذ login من Context.
+   */
+  const { login } = useContext(UserContext);
 
-  const loginUrl = `${studentUrl?.replace(/\/+$/, "")}/login/`;
+  const studentUrl =
+    import.meta.env.VITE_STUDENT_URL;
 
-  const [formValues, setFormValues] = useState(INITIAL_VALUES);
-  const [formErrors, setFormErrors] = useState({});
+  /*
+   * إزالة / الزائدة من نهاية الرابط.
+   */
+  const normalizedStudentUrl =
+    studentUrl?.replace(/\/+$/, "");
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  const loginUrl =
+    `${normalizedStudentUrl}/login/`;
 
-  const [notification, setNotification] = useState({
-    show: false,
-    type: "success",
-    message: "",
-  });
+  const [formValues, setFormValues] =
+    useState(INITIAL_VALUES);
 
-  const showNotification = (type, message) => {
+  const [formErrors, setFormErrors] =
+    useState({});
+
+  const [isLoading, setIsLoading] =
+    useState(false);
+
+  const [rememberMe, setRememberMe] =
+    useState(true);
+
+  const [notification, setNotification] =
+    useState({
+      show: false,
+      type: "success",
+      message: "",
+    });
+
+  const showNotification = (
+    type,
+    message,
+  ) => {
     setNotification({
       show: true,
       type,
@@ -50,10 +83,12 @@ export default function LoginForm() {
   };
 
   const closeNotification = () => {
-    setNotification((previousNotification) => ({
-      ...previousNotification,
-      show: false,
-    }));
+    setNotification(
+      (previousNotification) => ({
+        ...previousNotification,
+        show: false,
+      }),
+    );
   };
 
   const handleChange = (event) => {
@@ -64,7 +99,6 @@ export default function LoginForm() {
       [name]: value,
     }));
 
-    // حذف خطأ الحقل بمجرد أن يبدأ المستخدم بالكتابة
     if (formErrors[name]) {
       setFormErrors((previousErrors) => ({
         ...previousErrors,
@@ -80,30 +114,46 @@ export default function LoginForm() {
   const validateForm = () => {
     const errors = {};
 
-    const email = formValues.email.trim();
+    const email =
+      formValues.email.trim();
 
     if (!email) {
-      errors.email = "البريد الإلكتروني مطلوب.";
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = "أدخل بريداً إلكترونياً صحيحاً.";
+      errors.email =
+        "البريد الإلكتروني مطلوب.";
+    } else if (
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+        email,
+      )
+    ) {
+      errors.email =
+        "أدخل بريداً إلكترونياً صحيحاً.";
     }
 
     if (!formValues.password) {
-      errors.password = "كلمة المرور مطلوبة.";
+      errors.password =
+        "كلمة المرور مطلوبة.";
     }
 
     return errors;
   };
 
-  const extractErrorMessage = (error) => {
+  const extractErrorMessage = (
+    error,
+  ) => {
     if (!error.response) {
       return "تعذر الاتصال بالخادم. تحقق من الإنترنت وتشغيل Django.";
     }
 
-    const status = error.response.status;
-    const data = error.response.data;
+    const status =
+      error.response.status;
 
-    if (status === 401 || status === 403) {
+    const data =
+      error.response.data;
+
+    if (
+      status === 401 ||
+      status === 403
+    ) {
       return "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
     }
 
@@ -119,7 +169,9 @@ export default function LoginForm() {
       return data.detail;
     }
 
-    if (data?.non_field_errors?.length > 0) {
+    if (
+      data?.non_field_errors?.length > 0
+    ) {
       return data.non_field_errors[0];
     }
 
@@ -138,12 +190,12 @@ export default function LoginForm() {
     return "فشل تسجيل الدخول. تحقق من معلوماتك وحاول مجدداً.";
   };
 
-  const getTokensFromResponse = (responseData) => {
-    // يدعم:
-    // { tokens: { access, refresh } }
-    // أو { access, refresh }
-    // أو { access_token, refresh_token }
-
+  /*
+   * يدعم عدة أشكال لاستجابة Django.
+   */
+  const getTokensFromResponse = (
+    responseData,
+  ) => {
     const accessToken =
       responseData?.tokens?.access ||
       responseData?.access ||
@@ -152,7 +204,8 @@ export default function LoginForm() {
     const refreshToken =
       responseData?.tokens?.refresh ||
       responseData?.refresh ||
-      responseData?.refresh_token;
+      responseData?.refresh_token ||
+      null;
 
     return {
       accessToken,
@@ -160,44 +213,19 @@ export default function LoginForm() {
     };
   };
 
-  const saveAuthenticationData = (responseData) => {
-    const { accessToken, refreshToken } =
-      getTokensFromResponse(responseData);
-
-    if (!accessToken) {
-      throw new Error("ACCESS_TOKEN_MISSING");
-    }
-
-    const cookieOptions = {
-      secure: import.meta.env.PROD,
-      sameSite: "Lax",
-      path: "/",
-    };
-
-    Cookies.set("access_token", accessToken, {
-      ...cookieOptions,
-      expires: rememberMe ? 1 : undefined,
-    });
-
-    if (refreshToken) {
-      Cookies.set("refresh_token", refreshToken, {
-        ...cookieOptions,
-        expires: rememberMe ? 7 : undefined,
-      });
-    }
-
-    // حفظ بيانات الطالب إن كانت موجودة في الرد
-    if (responseData?.student) {
-      localStorage.setItem(
-        "student",
-        JSON.stringify(responseData.student),
-      );
-    } else if (responseData?.user) {
-      localStorage.setItem(
-        "student",
-        JSON.stringify(responseData.user),
-      );
-    }
+  /*
+   * استخراج بيانات المستخدم مهما كان اسمها.
+   */
+  const getUserFromResponse = (
+    responseData,
+  ) => {
+    return (
+      responseData?.student ||
+      responseData?.user ||
+      responseData?.data?.student ||
+      responseData?.data?.user ||
+      null
+    );
   };
 
   const performLogin = async () => {
@@ -213,21 +241,57 @@ export default function LoginForm() {
     setIsLoading(true);
 
     try {
-      const response = await axios.post(
-        loginUrl,
-        {
-          email: formValues.email.trim(),
-          password: formValues.password,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
+      const response =
+        await axios.post(
+          loginUrl,
+          {
+            email:
+              formValues.email.trim(),
+
+            password:
+              formValues.password,
           },
-          timeout: 15000,
-        },
+          {
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            timeout: 15000,
+          },
+        );
+
+      const {
+        accessToken,
+        refreshToken,
+      } = getTokensFromResponse(
+        response.data,
       );
 
-      saveAuthenticationData(response.data);
+      if (!accessToken) {
+        throw new Error(
+          "ACCESS_TOKEN_MISSING",
+        );
+      }
+
+      const userData =
+        getUserFromResponse(
+          response.data,
+        );
+
+      /*
+       * مهم جدًا:
+       * تحديث Cookies وUserContext معًا.
+       *
+       * بعد هذا السطر ستتغير قيمة token
+       * داخل SubjectsPage مباشرة.
+       */
+      login({
+        accessToken,
+        refreshToken,
+        userData,
+        rememberMe,
+      });
 
       setFormErrors({});
 
@@ -236,16 +300,25 @@ export default function LoginForm() {
         "تم تسجيل الدخول بنجاح، مرحباً بك في MathMaster.",
       );
 
-      // نترك رسالة النجاح ظاهرة قليلاً ثم ننتقل
+      /*
+       * الانتقال إلى صفحة المواد.
+       * ضع "/" إن كانت المواد في الصفحة الرئيسية.
+       */
       window.setTimeout(() => {
         navigate("/", {
           replace: true,
         });
-      }, 1000);
+      }, 600);
     } catch (error) {
-      console.error("Login error:", error);
+      console.error(
+        "Login error:",
+        error,
+      );
 
-      if (error.message === "ACCESS_TOKEN_MISSING") {
+      if (
+        error.message ===
+        "ACCESS_TOKEN_MISSING"
+      ) {
         showNotification(
           "error",
           "تم قبول الطلب، لكن الخادم لم يُرجع رمز الدخول access token.",
@@ -254,15 +327,21 @@ export default function LoginForm() {
         return;
       }
 
-      const errorMessage = extractErrorMessage(error);
+      const errorMessage =
+        extractErrorMessage(error);
 
-      showNotification("error", errorMessage);
+      showNotification(
+        "error",
+        errorMessage,
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = async (
+    event,
+  ) => {
     event.preventDefault();
 
     if (isLoading) {
@@ -271,11 +350,14 @@ export default function LoginForm() {
 
     closeNotification();
 
-    const errors = validateForm();
+    const errors =
+      validateForm();
 
     setFormErrors(errors);
 
-    if (Object.keys(errors).length > 0) {
+    if (
+      Object.keys(errors).length > 0
+    ) {
       return;
     }
 
@@ -284,7 +366,6 @@ export default function LoginForm() {
 
   return (
     <>
-      {/* رسالة النجاح أو الخطأ */}
       {notification.show && (
         <div
           dir="rtl"
@@ -299,17 +380,22 @@ export default function LoginForm() {
             role="alert"
             className={`
               flex items-start gap-3 rounded-2xl
-              border px-5 py-4 shadow-2xl backdrop-blur-md
+              border px-5 py-4 shadow-2xl
+              backdrop-blur-md
               ${
-                notification.type === "success"
+                notification.type ===
+                "success"
                   ? "border-emerald-200 bg-emerald-50/95 text-emerald-800"
                   : "border-red-200 bg-red-50/95 text-red-800"
               }
             `}
           >
             <div className="mt-0.5 shrink-0">
-              {notification.type === "success" ? (
-                <CheckCircle2 size={24} />
+              {notification.type ===
+              "success" ? (
+                <CheckCircle2
+                  size={24}
+                />
               ) : (
                 <XCircle size={24} />
               )}
@@ -321,7 +407,9 @@ export default function LoginForm() {
 
             <button
               type="button"
-              onClick={closeNotification}
+              onClick={
+                closeNotification
+              }
               aria-label="إغلاق الرسالة"
               className="
                 shrink-0 rounded-lg p-1
@@ -345,11 +433,14 @@ export default function LoginForm() {
         <div
           className="
             mx-auto mb-8 flex h-16 w-16
-            items-center justify-center rounded-full
+            items-center justify-center
+            rounded-full
             bg-brand-50 text-brand-600
           "
         >
-          <GraduationCap size={34} />
+          <GraduationCap
+            size={34}
+          />
         </div>
 
         <div className="mb-10 text-center">
@@ -358,7 +449,8 @@ export default function LoginForm() {
           </h2>
 
           <p className="mt-3 text-slate-500">
-            سجل دخولك لمتابعة رحلتك التعليمية
+            سجل دخولك لمتابعة رحلتك
+            التعليمية
           </p>
         </div>
 
@@ -373,16 +465,24 @@ export default function LoginForm() {
               type="email"
               placeholder="أدخل بريدك الإلكتروني"
               icon={Mail}
-              value={formValues.email}
-              onChange={handleChange}
+              value={
+                formValues.email
+              }
+              onChange={
+                handleChange
+              }
               name="email"
-              disabled={isLoading}
+              disabled={
+                isLoading
+              }
               autoComplete="email"
             />
 
             {formErrors.email && (
               <p className="mt-2 text-sm font-medium text-red-600">
-                {formErrors.email}
+                {
+                  formErrors.email
+                }
               </p>
             )}
           </div>
@@ -393,16 +493,24 @@ export default function LoginForm() {
               type="password"
               placeholder="أدخل كلمة المرور"
               icon={Lock}
-              value={formValues.password}
-              onChange={handleChange}
+              value={
+                formValues.password
+              }
+              onChange={
+                handleChange
+              }
               name="password"
-              disabled={isLoading}
+              disabled={
+                isLoading
+              }
               autoComplete="current-password"
             />
 
             {formErrors.password && (
               <p className="mt-2 text-sm font-medium text-red-600">
-                {formErrors.password}
+                {
+                  formErrors.password
+                }
               </p>
             )}
           </div>
@@ -410,19 +518,30 @@ export default function LoginForm() {
           <div className="flex items-center justify-between gap-4 text-sm">
             <label
               className="
-                flex cursor-pointer items-center gap-2
+                flex cursor-pointer
+                items-center gap-2
                 text-slate-600
               "
             >
               <input
                 type="checkbox"
-                checked={rememberMe}
-                onChange={(event) =>
-                  setRememberMe(event.target.checked)
+                checked={
+                  rememberMe
                 }
-                disabled={isLoading}
+                onChange={(
+                  event,
+                ) =>
+                  setRememberMe(
+                    event.target
+                      .checked,
+                  )
+                }
+                disabled={
+                  isLoading
+                }
                 className="
-                  h-4 w-4 cursor-pointer
+                  h-4 w-4
+                  cursor-pointer
                   accent-brand-600
                   disabled:cursor-not-allowed
                 "
@@ -435,7 +554,8 @@ export default function LoginForm() {
               to="/forgot-password"
               className="
                 font-bold text-brand-600
-                transition hover:text-brand-700
+                transition
+                hover:text-brand-700
               "
             >
               نسيت كلمة المرور؟
@@ -446,10 +566,14 @@ export default function LoginForm() {
             type="submit"
             disabled={isLoading}
             className="
-              mt-4 flex w-full items-center justify-center
-              gap-3 rounded-2xl bg-brand-600
-              py-4 text-lg font-bold text-white
-              shadow-lg shadow-brand-500/30
+              mt-4 flex w-full
+              items-center justify-center
+              gap-3 rounded-2xl
+              bg-brand-600 py-4
+              text-lg font-bold
+              text-white
+              shadow-lg
+              shadow-brand-500/30
               transition
               hover:bg-brand-700
               disabled:cursor-not-allowed
@@ -469,7 +593,10 @@ export default function LoginForm() {
             ) : (
               <>
                 تسجيل الدخول
-                <ArrowLeft size={22} />
+
+                <ArrowLeft
+                  size={22}
+                />
               </>
             )}
           </button>
@@ -482,7 +609,8 @@ export default function LoginForm() {
             to="/signup"
             className="
               font-bold text-brand-600
-              transition hover:text-brand-700
+              transition
+              hover:text-brand-700
             "
           >
             إنشاء حساب جديد

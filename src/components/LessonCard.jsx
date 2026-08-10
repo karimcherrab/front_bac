@@ -2,7 +2,8 @@ import { useContext, useEffect, useState } from "react";
 import axios from "axios";
 
 import StepTabs from "./StepTabs";
-import IntroStep from "./IntroStep";
+import IntroStep from "./module/ScienceLesson";
+
 import QuestionBac from "./QuestionBac";
 import GeneratedAIExercises from "./Questions/Generate_question";
 import BacChapterExercises from "./Questions/BacChapterExercises";

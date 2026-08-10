@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 
 import { UserContext } from "../../Utils/UserContext";
-const BASE_URL = import.meta.env.VITE_BASE_URL;
+const BASE_URL = (import.meta.env.VITE_BASE_URL || "").replace(/\/+$/, "");
 // const API_BASE_URL =
 //   "http://127.0.0.1:8000/api/exercise-generation";
 
@@ -141,9 +141,16 @@ function repairLatexCommandNames(value) {
    */
   text = String(text)
     // \right قد يتحول إلى carriage-return + ight أو إلى \]ight.
+    .replace(/\r\s*ightarrow\b/gi, "\\rightarrow")
     .replace(/\r\s*ight\b/gi, "\\right")
+    .replace(/\\r\s*ightarrow\b/gi, "\\rightarrow")
     .replace(/\\r\s*ight\b/gi, "\\right")
+    .replace(/\\\]\s*ightarrow\b/gi, "\\rightarrow")
     .replace(/\\\]\s*ight\b/gi, "\\right")
+    // إذا تحوّل \r داخل \rightarrow إلى سطر جديد أو اختفى نهائيًا.
+    .replace(/(^|\n)\s*ightarrow\b/gi, "$1\\rightarrow")
+    .replace(/(^|[^A-Za-z\\])rightarrow\b/gi, "$1\\rightarrow")
+    .replace(/(^|[^A-Za-z\\])arrow(?=\s*[A-Za-z\\{(])/gi, "$1\\rightarrow ")
     .replace(/\\r\s*ight\b/gi, "\\right")
     .replace(/\\\]\s*ight\b/gi, "\\right")
     .replace(/(^|[^A-Za-z\\])\]\s*ight\b/gi, "$1\\right")
@@ -158,6 +165,7 @@ function repairLatexCommandNames(value) {
     .replace(/(^|[^A-Za-z\\])cdot\b/gi, "$1\\cdot")
     .replace(/(^|[^A-Za-z\\])times\b/gi, "$1\\times")
     .replace(/(^|[^A-Za-z\\])infty\b/gi, "$1\\infty")
+    .replace(/(^|[^A-Za-z\\])(?:ightarrow|rightarrow)\b/gi, "$1\\rightarrow")
     .replace(/(^|[^A-Za-z\\])Rightarrow\b/g, "$1\\Rightarrow")
     .replace(/(^|[^A-Za-z\\])Leftrightarrow\b/g, "$1\\Leftrightarrow")
 
@@ -191,6 +199,7 @@ function recoverJsonEscapedLatex(value) {
    * نعيد بناء الأمر قبل أي تحويل للأسطر أو المسافات.
    */
   return String(text)
+    .replace(/\r\s*ightarrow\b/gi, "\\\\rightarrow")
     .replace(/\r\s*ight\b/gi, "\\\\right")
     .replace(/\t\s*imes\b/gi, "\\\\times")
     .replace(/\t\s*ext\b/gi, "\\\\text")
@@ -211,7 +220,6 @@ function normalizeMalformedMathText(value) {
     // مثال المشكلة: L(L+2)=...\\nL^2 تتحول إلى L(L+2)=... L^2.
     .replace(/\\n(?!(?:eq|e\b|ot\b|u\b|abla\b))/gi, " ")
     .replace(/\\n\s*(?=[\-•▪◦]|\d+[.)]|[\u0600-\u06FF])/g, "\n")
-    .replace(/\\r\\n|\\r/g, "\n")
     // Tab حرفي متكرر. لا نمس أوامر LaTeX الصحيحة مثل \\times و\\text.
     .replace(/(?:\\t){2,}/g, " ")
     .replace(/\\t(?=\s|$|[×+\-=0-9\u0600-\u06FF])/g, " ")
@@ -257,6 +265,10 @@ function repairBrokenContent(value) {
     .replace(/\\g\s*eq?\b/gi, "\\geq")
     .replace(/\\l\s*eq?\b/gi, "\\leq")
     .replace(/\\c\s*dot\b/gi, "\\cdot")
+    // سهم التفاعل قد يصل من JSON على شكل carriage-return + ightarrow
+    // أو يفقد أول أحرفه ويظهر حرفيًا كـ ightarrow.
+    .replace(/\r\s*ightarrow\b/gi, "\\rightarrow")
+    .replace(/(^|[^A-Za-z\\])(?:ightarrow|rightarrow)\b/gi, "$1\\rightarrow")
     // ترميز n>=0 المكسور.
     .replace(/\\n\s*\\?g(?:e|eo|eq)\b/gi, "n\\geq")
     .replace(/\\n\s*\\?l(?:e|eo|eq)\b/gi, "n\\leq")
@@ -325,6 +337,41 @@ function repairBrokenContent(value) {
   const dollarCount = (text.match(/\$/g) || []).length;
   if (dollarCount % 2 !== 0) text = text.replace(/\$/g, "");
 
+  return repairPhysicsLatexArtifacts(text);
+}
+
+/*
+ * إصلاح أخطاء LaTeX الفيزيائية الشائعة القادمة من إجابات الـAI أو من
+ * بيانات قديمة مخزنة في قاعدة البيانات. هذه الدالة لا تحول النص العربي
+ * إلى MathJax؛ هي فقط تنظف المحارف التي تكسر العارض.
+ */
+function repairPhysicsLatexArtifacts(value) {
+  let text = toText(value);
+  if (!text) return "";
+
+  text = String(text)
+    // Backslash شارد قبل قوس عربي/نصي:  \ (مقروء...) -> (مقروء...)
+    .replace(/\\\s+(?=\()/g, " ")
+    .replace(/\\\s+(?=[،؛,.!?؟])/g, " ")
+
+    // متغيرات فيزيائية وصلت كأنها أوامر LaTeX غير موجودة: \U_{R1}, \u_{AB}.
+    // U هنا متغير فرق الجهد وليس أمر LaTeX.
+    .replace(/\\u(?=_\s*\{)/g, "U")
+    .replace(/\bu(?=_\s*\{(?:AB|BA|R\d+)\})/g, "U")
+    .replace(/\\U(?=_\s*\{)/g, "\\qquad U")
+    .replace(/\\I(?=\s*=)/g, "I")
+    .replace(/\\E(?=\s*=)/g, "E")
+
+    // إذا التصقت معادلتان بسبب backslash شارد: ...V\U_{R2}=...
+    .replace(/([}0-9A-Za-z])\\(?=U_\s*\{)/g, "$1 \\qquad ")
+
+    // تنظيف مسافة LaTeX واقفة وحدها بين نصين؛ داخل الصيغة تبقى \, صحيحة.
+    .replace(/(^|\s)\\;(?=\s|$)/g, "$1 ")
+
+    // توحيد المسافات من دون المساس بالأسطر.
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
   return text;
 }
 
@@ -346,9 +393,10 @@ function sanitizeLeftRight(value) {
   let text = toText(value);
 
   // left/right only resize delimiters. Removing them prevents unmatched-pair errors.
+  // مهم: نستخدم \b حتى لا نحذف بداية الأمر \rightarrow ونحوّله إلى "arrow".
   text = text
-    .replace(/\\left\s*/g, "")
-    .replace(/\\right\s*/g, "")
+    .replace(/\\left\b\s*/g, "")
+    .replace(/\\right\b\s*/g, "")
     .replace(/(^|[^A-Za-z\\])left(?=\s*[([{.|])/gi, "$1")
     .replace(/(^|[^A-Za-z\\])right(?=\s*[)\]}.|])/gi, "$1");
 
@@ -394,11 +442,64 @@ function stripOuterMathDelimiters(value) {
   return text;
 }
 
+function wrapArabicRunsInsideLatex(value) {
+  let text = toText(value);
+  if (!text || !containsArabic(text)) return text;
+
+  /*
+   * بعض إجابات الـAI تضع كلمة عربية خام داخل بيئة رياضية مثل aligned:
+   *   \\begin{aligned} ... & عند t=... \\end{aligned}
+   * MathJax لا يقبل العربية الخام داخل الصيغة، لذلك نحولها إلى:
+   *   & \\text{عند } t=...
+   *
+   * نحمي أولًا محتوى \\text{...} الموجود أصلًا حتى لا نغلفه مرة ثانية.
+   */
+  const protectedText = [];
+  text = text.replace(/\\text\s*\{[^{}]*\}/g, (match) => {
+    const token = `@@LATEX_TEXT_${protectedText.length}@@`;
+    protectedText.push(match);
+    return token;
+  });
+
+  // غلف أي سلسلة عربية (مع مسافاتها) داخل \\text{...}.
+  text = text.replace(
+    /([\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+(?:[ \t]+[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+)*)/g,
+    (arabic) => `\\text{${arabic.trim()}}`,
+  );
+
+  protectedText.forEach((original, index) => {
+    text = text.replace(`@@LATEX_TEXT_${index}@@`, original);
+  });
+
+  return text;
+}
+
+function repairMalformedAlignedLatex(value) {
+  let text = toText(value);
+  if (!text) return "";
+
+  text = String(text)
+    // أوامر text المفقود منها backslash: Wtext{...} -> W\\text{...}
+    .replace(/([A-Za-z0-9}])\s*text\s*\{/g, "$1\\text{")
+    .replace(/(^|[^A-Za-z\\])text\s*\{/g, "$1\\text{")
+    // أوامر شائعة تالفة داخل aligned.
+    .replace(/(^|[^A-Za-z\\])begin\s*\{aligned\}/g, "$1\\begin{aligned}")
+    .replace(/(^|[^A-Za-z\\])end\s*\{aligned\}/g, "$1\\end{aligned}")
+    // لا نسمح بقوس فتح زائد بعد approx مثل \\approx{ 2.0...
+    .replace(/\\approx\s*\{\s*(?=[-+]?\d)/g, "\\approx ")
+    // تنظيف & الزائد في أول/آخر البيئة فقط.
+    .replace(/\\begin\{aligned\}\s*&+/g, "\\begin{aligned}&")
+    .replace(/&+\s*\\end\{aligned\}/g, "\\end{aligned}");
+
+  return wrapArabicRunsInsideLatex(text);
+}
+
 function normalizeLatex(value) {
   let text = repairLatexCommandNames(repairBrokenContent(value)).trim();
   if (!text) return "";
 
   text = repairLatexCommandNames(repairCorruptedMathDelimiters(text));
+  text = repairMalformedAlignedLatex(text);
 
   // MathRenderer يضيف delimiters بنفسه، لذلك نحذف الغلاف الخارجي أولًا.
   // هذه الخطوة تعالج الصيغة التي كانت تظهر حرفيًا بالشكل: \[ ... \]
@@ -425,6 +526,16 @@ function normalizeLatex(value) {
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 
+  // إصلاح أخير للمتغيرات الفيزيائية التي قد تصل مسبوقة بـ backslash
+  // بعد إزالة delimiters الخارجية.
+  text = repairPhysicsLatexArtifacts(text)
+    .replace(/^\\qquad\s+/, "")
+    .replace(/\\u(?=_\s*\{)/g, "U")
+    .replace(/\\U(?=_\s*\{)/g, "\\qquad U")
+    .replace(/\\I(?=\s*=)/g, "I")
+    .replace(/\\E(?=\s*=)/g, "E");
+
+  text = repairMalformedAlignedLatex(text);
   text = sanitizeLeftRight(text);
   return balanceBraces(text);
 }
@@ -470,7 +581,7 @@ function looksLikeBareMath(value) {
   const hasArabicOutsideLatexText = containsArabic(detectionText);
 
   const hasMathCommand =
-    /\\(?:frac|sqrt|sum|prod|lim|infty|cdot|times|div|leq?|geq?|neq|to|Rightarrow|Leftrightarrow|begin|end|left|right|mathbb|mathrm|text)\b/.test(
+    /\\(?:frac|sqrt|sum|prod|lim|infty|cdot|times|div|leq?|geq?|neq|to|Rightarrow|Leftrightarrow|begin|end|left|right|mathbb|mathcal|mathrm|text|Omega|omega|mu|Delta|delta|lambda|rho|tau|theta|alpha|beta|gamma|varepsilon|vec)\b/.test(
       text,
     );
 
@@ -505,7 +616,7 @@ function isMathChunk(value) {
   if (containsArabic(detectionText)) return false;
 
   const hasMathCommand =
-    /\\(?:frac|sqrt|sum|prod|lim|infty|cdot|times|div|leq?|geq?|neq|to|Rightarrow|Leftrightarrow|alpha|beta|gamma|theta|text|mathrm|mathbb)\b/.test(
+    /\\(?:frac|sqrt|sum|prod|lim|infty|cdot|times|div|leq?|geq?|neq|to|Rightarrow|Leftrightarrow|alpha|beta|gamma|theta|text|mathrm|mathbb|mathcal|Omega|omega|mu|Delta|delta|lambda|rho|tau|varepsilon|vec)\b/.test(
       text,
     );
 
@@ -584,7 +695,7 @@ function splitUndelimitedMixedText(value) {
 
     const hasStrongMathSignal =
       /[=_^<>≤≥≠]/.test(candidate) ||
-      /\\(?:frac|sqrt|sum|prod|lim|neq|leq|geq|times|cdot|to|infty|Rightarrow|Leftrightarrow)\b/.test(candidate) ||
+      /\\(?:frac|sqrt|sum|prod|lim|neq|leq|geq|times|cdot|to|infty|Rightarrow|Leftrightarrow|mathcal|mathrm|text|Omega|omega|mu|Delta|delta|lambda|rho|tau|theta|alpha|beta|gamma|varepsilon|vec)\b/.test(candidate) ||
       /[A-Za-z]_(?:\{|[A-Za-z0-9])/.test(candidate) ||
       /[A-Za-z]\^(?:\{|[A-Za-z0-9])/.test(candidate) ||
       /\d\s*[+\-*/×·]\s*\d/.test(candidate);
@@ -806,8 +917,38 @@ function MathRenderer({ value, display = false, className = "" }) {
   const math = normalizeLatex(stripOuterMathDelimiters(firstPass));
   if (!math) return null;
 
-  // عند بقاء صيغة غير سليمة، نعرضها كنص بدل ظهور Math input error.
+  // محاولة أخيرة خاصة ببيئات aligned قبل الرجوع إلى النص الخام.
+  // هذا يعالج إجابات قديمة تحتوي عربية خام أو \text مكسورة داخل البيئة.
   if (!isSafeLatex(math)) {
+    const recovered = repairMalformedAlignedLatex(math);
+    if (recovered !== math && isSafeLatex(recovered)) {
+      if (display) {
+        return (
+          <div
+            dir="ltr"
+            className={cn("w-full overflow-x-auto px-2 py-1 text-center", className)}
+            style={{ direction: "ltr", unicodeBidi: "isolate" }}
+          >
+            <MathJax dynamic hideUntilTypeset="first">
+              {`\[${recovered}\]`}
+            </MathJax>
+          </div>
+        );
+      }
+
+      return (
+        <span
+          dir="ltr"
+          className={cn("mx-1 inline-block max-w-full align-baseline", className)}
+          style={{ direction: "ltr", unicodeBidi: "isolate", whiteSpace: "nowrap" }}
+        >
+          <MathJax dynamic hideUntilTypeset="first">
+            <span dir="ltr">{`\(${recovered}\)`}</span>
+          </MathJax>
+        </span>
+      );
+    }
+
     return (
       <bdi
         dir="ltr"
@@ -842,7 +983,7 @@ function MathRenderer({ value, display = false, className = "" }) {
   }
 
   return (
-    <bdi
+    <span
       dir="ltr"
       className={cn(
         "mx-1 inline-block max-w-full align-baseline",
@@ -857,7 +998,7 @@ function MathRenderer({ value, display = false, className = "" }) {
       <MathJax dynamic hideUntilTypeset="first">
         <span dir="ltr">{`\\(${math}\\)`}</span>
       </MathJax>
-    </bdi>
+    </span>
   );
 }
 
@@ -898,10 +1039,29 @@ function InlineRichText({ value, className = "" }) {
     >
       {segments.map((segment, index) => {
         if (segment.type === "inline-math") {
+          const normalizedSegment = normalizeLatex(segment.value);
+          const shouldDisplaySeparately =
+            /\\(?:rightarrow|leftarrow|leftrightarrow|Rightarrow|Leftrightarrow)\b/.test(
+              normalizedSegment,
+            ) || normalizedSegment.length > 55;
+
+          if (shouldDisplaySeparately) {
+            return (
+              <span
+                key={`im-block-${index}`}
+                dir="ltr"
+                className="my-3 block w-full overflow-x-auto text-center"
+                style={{ direction: "ltr", unicodeBidi: "isolate" }}
+              >
+                <MathRenderer value={normalizedSegment} display />
+              </span>
+            );
+          }
+
           return (
             <MathRenderer
               key={`im-${index}`}
-              value={segment.value}
+              value={normalizedSegment}
             />
           );
         }
@@ -920,20 +1080,13 @@ function InlineRichText({ value, className = "" }) {
         const segmentText = toText(segment.value);
         if (!segmentText) return null;
 
-        // لا نعزل كل قطعة نصية باستعمال bdi؛ عزل كل قطعة على حدة كان
-        // يعكس ترتيب الجملة المختلطة بين العربية والصيغ الرياضية.
-        const segmentDirection = containsArabic(segmentText)
-          ? "rtl"
-          : detectDirection(segmentText);
-
+        // مهم جدًا: نترك النص العادي داخل نفس سياق RTL من دون bdi.
+        // عزل كل قطعة نصية كان يقلب ترتيب جمل الفيزياء المختلطة مثل:
+        // "سعة الوعاء 0.250 L" و "عند t = 15 s".
         return (
-          <bdi
-            key={`tx-${index}`}
-            dir={segmentDirection}
-            style={{ unicodeBidi: "isolate" }}
-          >
+          <span key={`tx-${index}`}>
             {segmentText}
-          </bdi>
+          </span>
         );
       })}
     </span>
@@ -996,19 +1149,112 @@ function SmartText({ children, className = "", as: Component = "div" }) {
   );
 }
 
-function splitExerciseStatementLines(value) {
-  let text = repairBrokenContent(value);
-  if (!text) return [];
+function normalizeExerciseStatementSource(value) {
+  let text = decodeHtmlEntities(toText(value));
+  if (!text) return "";
 
-  // نحافظ على الجملة الأصلية، ونفصل فقط فروع السؤال الواضحة.
-  text = text
-    // إزالة سطر backslash منفرد ناتج عن delimiter مكسور.
-    .replace(/^\s*\\\s*$/gm, "")
-    .replace(/\s+([أبجدهـوزحطيكلمنسعفصقرشتثخذضظغ])\s*[\)）]\s*/g, "\n$1) ")
-    .replace(/\s+([0-9]+)\s*[\)）]\s*/g, "\n$1) ")
-    .replace(/\s+(المطلوب\s*:)/g, "\n$1")
+  return String(text)
+    // إصلاح أوامر LaTeX التي قد تتضرر عند انتقالها داخل JSON.
+    // أصلح السهم فقط، ولا تحوّل السلسلة الحرفية \\r إلى سطر جديد.
+    // لأن \\rightarrow تبدأ أصلًا بـ \\r.
+    .replace(/\r[ \t]*ightarrow\b/gi, "\\rightarrow")
+    .replace(/(^|[^A-Za-z\\])ightarrow\b/gi, "$1\\rightarrow")
+    .replace(/(^|[^A-Za-z\\])rightarrow\b/gi, "$1\\rightarrow")
+    .replace(/\\{2,}rightarrow\b/gi, "\\rightarrow")
+    .replace(/\t\s*imes\b/gi, "\\times")
+    .replace(/\t\s*ext\b/gi, "\\text")
+    .replace(/\f\s*rac\b/gi, "\\frac")
+    .replace(/\x08\s*egin\b/gi, "\\begin")
+    // تحويل فواصل الأسطر الحرفية القادمة من API إلى أسطر فعلية.
+    .replace(/\\n(?!(?:eq|e\b|ot\b|u\b|abla\b))/gi, "\n")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    .replace(/\u2028|\u2029/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
+    // إصلاح أخير لأي سهم وصل تالفًا من بيانات قديمة محفوظة.
+    .replace(/(^|[^A-Za-z\\])ightarrow\b/gi, "$1\\rightarrow")
     .trim();
+}
+
+function repairStatementMathSyntax(value) {
+  let text = normalizeExerciseStatementSource(value);
+  if (!text) return "";
+
+  // توحيد double escaping للأوامر الفيزيائية والرياضية الشائعة فقط.
+  text = text.replace(
+    /\\{2,}(?=(?:mathcal|mathrm|text|Omega|omega|mu|Delta|delta|lambda|rho|tau|theta|alpha|beta|gamma|varepsilon|vec|frac|sqrt|times|cdot|to|rightarrow)\b)/g,
+    "\\",
+  );
+
+  // إصلاح أوامر فقدت الـ backslash في بيانات قديمة.
+  text = text
+    .replace(/(^|[^A-Za-z\\])mathcal(?=\s*\{)/g, "$1\\mathcal")
+    .replace(/(^|[^A-Za-z\\])mathrm(?=\s*\{)/g, "$1\\mathrm")
+    .replace(/(^|[^A-Za-z\\])text(?=\s*\{)/g, "$1\\text")
+    .replace(/(^|[^A-Za-z\\])Omega\b/g, "$1\\Omega")
+    .replace(/(^|[^A-Za-z\\])mu(?=\\text|\\mathrm|[A-Z])/g, "$1\\mu");
+
+  // إصلاح المحددات غير المتناظرة التي ظهرت في بيانات الفيزياء القديمة:
+  // (\\mathcal{E}=...\\)  أو  \\(R=...)
+  text = text
+    .replace(/\(\s*([^()\n]{1,260}?)\\\)\s*/g, (whole, inner) => {
+      const candidate = String(inner || "").trim();
+      return looksLikePhysicsMath(candidate) ? `($${candidate}$)` : whole;
+    })
+    .replace(/\\\(\s*([^()\n]{1,260}?)\)\s*/g, (whole, inner) => {
+      const candidate = String(inner || "").trim();
+      return looksLikePhysicsMath(candidate) ? `($${candidate}$)` : whole;
+    });
+
+  // توحيد محددات LaTeX السليمة إلى $...$ لأن عارض نص السؤال يتعامل معها بثبات.
+  text = text
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${String(math).trim()}$`)
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `$$${String(math).trim()}$$`);
+
+  // أي تعبير رياضي داخل قوسين عاديين نغلفه تلقائيا.
+  text = text.replace(/\(([^()\n]{1,260})\)/g, (whole, inner) => {
+    let candidate = String(inner || "").trim();
+    candidate = candidate.replace(/\\+\s*$/, "").trim();
+
+    if (!candidate || candidate.includes("$") || containsArabic(candidate)) {
+      return whole;
+    }
+
+    return looksLikePhysicsMath(candidate)
+      ? `($${candidate}$)`
+      : whole;
+  });
+
+  // إصلاح backslash شارد قبل الفواصل أو حرف الواو.
+  text = text
+    .replace(/\\\s+(?=[،,؛;])/g, "")
+    .replace(/(?:^|\s)\\\s+(?=[و])+/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  return text;
+}
+
+function looksLikePhysicsMath(value) {
+  const candidate = toText(value).trim();
+  if (!candidate || containsArabic(stripLatexTextForDetection(candidate))) {
+    return false;
+  }
+
+  return (
+    /\\(?:mathcal|mathrm|text|Omega|omega|mu|Delta|delta|lambda|rho|tau|theta|alpha|beta|gamma|varepsilon|vec|frac|sqrt|times|cdot|to|rightarrow)\b/.test(candidate) ||
+    /[A-Za-z][A-Za-z0-9]*_\{?\d+\}?\s*=/.test(candidate) ||
+    /(?:^|\s)[A-Za-z](?:_\{?\d+\}?)?\s*=\s*[-+]?\d/.test(candidate) ||
+    /\d+(?:[.,]\d+)?\s*\\,?\s*\\(?:Omega|text|mathrm|mu)\b/.test(candidate) ||
+    /[=<>_^]/.test(candidate)
+  );
+}
+
+function splitExerciseStatementLines(value) {
+  const text = repairStatementMathSyntax(value);
+  if (!text) return [];
 
   return text
     .split(/\n+/)
@@ -1016,106 +1262,154 @@ function splitExerciseStatementLines(value) {
     .filter(Boolean);
 }
 
-function isQuestionBranch(value) {
-  return /^([أبجدهـوزحطيكلمنسعفصقرشتثخذضظغ]|[0-9]+)\s*[\)）]/.test(
-    toText(value).trim(),
+function parseQuestionNumber(value) {
+  const text = toText(value).trim();
+  const match = text.match(
+    /^((?:\d+|[أبجدهـوزحطيكلمنسعفصقرشتثخذضظغ])\s*[)）.ـ-])\s*(.*)$/,
   );
+
+  if (!match) return null;
+
+  return {
+    marker: match[1].replace(/[.ـ-]$/, ")"),
+    content: match[2].trim(),
+  };
 }
 
-function normalizeStatementTextPart(value) {
-  return toText(value)
-    .replace(/\s+/g, " ")
-    .replace(/\s+([،؛:,.!?؟])/g, "$1")
-    .trim();
-}
-
-function splitStatementClauses(value) {
-  const text = repairBrokenContent(value);
+function splitDollarMathSegments(value) {
+  const text = repairStatementMathSyntax(value);
   if (!text) return [];
 
-  // نفصل فقط عند نهاية جملة حقيقية. لا نفصل داخل الصيغ الرياضية.
-  const clauses = [];
-  let buffer = "";
-  let braceDepth = 0;
-  let delimiter = null;
+  const segments = [];
+  const pattern = /\$\$([\s\S]*?)\$\$|\$([^$\n]+?)\$/g;
+  let lastIndex = 0;
+  let match;
 
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-    const next = text[index + 1] || "";
-
-    if (!delimiter && character === "\\" && ["(", "["].includes(next)) {
-      delimiter = next === "(" ? "\\)" : "\\]";
-      buffer += character + next;
-      index += 1;
-      continue;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      const plain = text.slice(lastIndex, match.index);
+      if (plain) segments.push({ type: "text", value: plain });
     }
 
-    if (delimiter && character === "\\" && `${character}${next}` === delimiter) {
-      buffer += character + next;
-      index += 1;
-      delimiter = null;
-      continue;
+    const rawMath = match[1] ?? match[2] ?? "";
+    const math = normalizeLatex(
+      rawMath
+        .replace(/(?:\\r|\r)?ightarrow/gi, "\\rightarrow")
+        .replace(/(^|[^A-Za-z\\])rightarrow\b/gi, "$1\\rightarrow"),
+    );
+
+    if (math) {
+      segments.push({
+        type: /\\(?:rightarrow|leftarrow|leftrightarrow|Rightarrow|Leftrightarrow)\b/.test(math)
+          ? "display-math"
+          : "inline-math",
+        value: math,
+      });
     }
 
-    if (!delimiter) {
-      if (character === "{") braceDepth += 1;
-      if (character === "}") braceDepth = Math.max(0, braceDepth - 1);
-    }
-
-    buffer += character;
-
-    const isSentenceEnd =
-      !delimiter &&
-      braceDepth === 0 &&
-      [".", "؟", "!", ";", "؛"].includes(character) &&
-      (next === "" || /\s/.test(next));
-
-    if (isSentenceEnd) {
-      const clause = buffer.trim();
-      if (clause) clauses.push(clause);
-      buffer = "";
-    }
+    lastIndex = match.index + match[0].length;
   }
 
-  if (buffer.trim()) clauses.push(buffer.trim());
-  return clauses;
+  if (lastIndex < text.length) {
+    const remaining = text.slice(lastIndex);
+    if (remaining) segments.push({ type: "text", value: remaining });
+  }
+
+  // احتياط للبيانات غير المتوازنة: نعرض النص بدل إخفائه أو تقسيمه عشوائيًا.
+  if (segments.length === 0) {
+    return [{ type: "text", value: text.replace(/\$/g, "") }];
+  }
+
+  return segments;
 }
 
-function StatementSegmentFlow({ value }) {
-  const text = repairBrokenContent(value);
-  if (!text) return null;
-
-  if (isMathDominantLine(text)) {
-    return (
-      <div
-        dir="ltr"
-        className="w-full overflow-x-auto py-1 text-center text-slate-950"
-        style={{
-          direction: "ltr",
-          unicodeBidi: "isolate",
-        }}
-      >
-        <MathRenderer
-          value={text}
-          display
-          className="text-[17px] font-semibold sm:text-lg"
-        />
-      </div>
-    );
-  }
-
+function StatementInlineContent({ segments }) {
   return (
     <p
       dir="rtl"
-      className="min-w-0 whitespace-pre-wrap break-words text-right text-[17px] font-medium leading-[2.15] text-slate-950 sm:text-lg"
+      className="min-w-0 whitespace-pre-wrap break-words text-right text-[17px] font-medium leading-[2.05] text-slate-950 sm:text-lg"
       style={{
         direction: "rtl",
-        unicodeBidi: "isolate",
+        unicodeBidi: "plaintext",
         letterSpacing: "normal",
         wordSpacing: "normal",
       }}
     >
-      <InlineRichText value={text} />
+      {segments.map((segment, index) => {
+        if (segment.type === "inline-math") {
+          return (
+            <MathRenderer
+              key={`inline-math-${index}`}
+              value={segment.value}
+              className="font-semibold"
+            />
+          );
+        }
+
+        return segment.type === "text" ? (
+          <span key={`plain-${index}`}>{segment.value}</span>
+        ) : null;
+      })}
+    </p>
+  );
+}
+
+function StatementSegmentFlow({ value }) {
+  const repaired = repairStatementMathSyntax(value);
+  if (!repaired) return null;
+
+  /*
+   * مهم جدًا:
+   * داخل نص التمرين يجب أن تبقى الصيغ الرياضية داخل نفس السطر مع النص.
+   * بعض البيانات القديمة تصل بـ \[ ... \] أو $$...$$ رغم أنها مجرد
+   * قيمة قصيرة مثل E=20V أو R_1=30Ω، و splitRichSegments كان يصنفها
+   * display-math فيضع كل صيغة في سطر مستقل.
+   *
+   * لذلك نستعمل هنا splitDollarMathSegments ثم نعرض كل Math كـ inline.
+   * هذا التغيير خاص بنص السؤال فقط ولا يؤثر على الحلول أو الصيغ الكبيرة.
+   */
+  const normalizedForStatement = repaired
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `$${String(math).trim()}$`)
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_, math) => `$${String(math).trim()}$`);
+
+  const segments = splitDollarMathSegments(normalizedForStatement);
+  if (!segments.length) return null;
+
+  return (
+    <p
+      dir="rtl"
+      className="m-0 min-w-0 whitespace-pre-wrap break-words text-right text-[17px] font-medium leading-[2.05] text-slate-950 sm:text-lg"
+      style={{
+        direction: "rtl",
+        unicodeBidi: "plaintext",
+        letterSpacing: "normal",
+        wordSpacing: "normal",
+      }}
+    >
+      {segments.map((segment, index) => {
+        if (
+          segment.type === "inline-math" ||
+          segment.type === "display-math"
+        ) {
+          return (
+            <MathRenderer
+              key={`statement-math-${index}`}
+              value={segment.value}
+              display={false}
+              className="font-semibold"
+            />
+          );
+        }
+
+        return (
+          <span
+            key={`statement-text-${index}`}
+            className="whitespace-pre-wrap break-words"
+          >
+            {segment.value}
+          </span>
+        );
+      })}
     </p>
   );
 }
@@ -1128,62 +1422,44 @@ function ExerciseStatement({ value }) {
     <div
       dir="rtl"
       className="space-y-4 text-slate-950"
-      style={{ direction: "rtl", unicodeBidi: "isolate" }}
+      style={{ direction: "rtl", unicodeBidi: "plaintext" }}
     >
       {lines.map((line, index) => {
-        const branchMatch = isQuestionBranch(line)
-          ? line.match(
-              /^(([أبجدهـوزحطيكلمنسعفصقرشتثخذضظغ]|[0-9]+)\s*[\)）])\s*(.*)$/,
-            )
-          : null;
+        const numbered = parseQuestionNumber(line);
 
-        if (branchMatch) {
+        if (numbered) {
           return (
             <div
-              key={`statement-line-${index}`}
+              key={`statement-question-${index}`}
               dir="rtl"
-              className="flex min-w-0 items-start gap-2 border-t border-slate-200 pt-4 first:border-t-0 first:pt-0"
-              style={{ direction: "rtl", unicodeBidi: "isolate" }}
+              className="flex min-w-0 items-start gap-3 border-t border-slate-200 pt-4 first:border-t-0 first:pt-0"
+              style={{ direction: "rtl" }}
             >
               <span
-                dir="rtl"
-                className="shrink-0 pt-0.5 text-[17px] font-black leading-[2.15] text-slate-950 sm:text-lg"
+                dir="ltr"
+                className="shrink-0 pt-0.5 text-[17px] font-black leading-[2] text-indigo-800 sm:text-lg"
                 style={{ unicodeBidi: "isolate" }}
               >
-                {branchMatch[1]}
+                {numbered.marker}
               </span>
 
-              <div className="min-w-0 flex-1 space-y-2">
-                {splitStatementClauses(branchMatch[3]).map(
-                  (clause, clauseIndex) => (
-                    <StatementSegmentFlow
-                      key={`branch-clause-${clauseIndex}`}
-                      value={clause}
-                    />
-                  ),
-                )}
+              <div className="min-w-0 flex-1">
+                <StatementSegmentFlow value={numbered.content} />
               </div>
             </div>
           );
         }
 
         return (
-          <div
-            key={`statement-line-${index}`}
-            className="min-w-0 space-y-2"
-          >
-            {splitStatementClauses(line).map((clause, clauseIndex) => (
-              <StatementSegmentFlow
-                key={`statement-clause-${clauseIndex}`}
-                value={clause}
-              />
-            ))}
+          <div key={`statement-line-${index}`} className="min-w-0">
+            <StatementSegmentFlow value={line} />
           </div>
         );
       })}
     </div>
   );
 }
+
 
 function MathBox({ children, className = "" }) {
   const text = repairBrokenContent(children);
@@ -1589,6 +1865,168 @@ function normalizeGraphData(value) {
   };
 }
 
+
+/*
+ * بعض تمارين الفيزياء القديمة/المولدة ترسل graph_data بشكل مُطبّع:
+ *   x = t / tau        من 0 إلى 5
+ *   y = i / I_infinity من 0 إلى 1
+ * بينما نص التمرين يقول إن الرسم هو i(t) بدلالة الزمن الحقيقي t.
+ *
+ * في هذه الحالة نحول النقاط إلى الوحدات الفيزيائية الفعلية إذا استطعنا
+ * استخراج I_infinity و tau من الجواب النهائي المخزن مع التمرين.
+ * هذا إصلاح عرض للبيانات القديمة؛ الأفضل أن يرسل الـ backend مستقبلاً
+ * graph_data الفيزيائي مباشرة.
+ */
+function collapseLatexBackslashes(value) {
+  return toText(value)
+    .replace(/\\{2,}/g, "\\")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractNumberAfterLatexSymbol(value, symbolPattern) {
+  const source = collapseLatexBackslashes(value).replace(/,/g, ".");
+  const match = source.match(symbolPattern);
+  if (!match) return null;
+
+  const number = Number(match[1]);
+  return Number.isFinite(number) ? number : null;
+}
+
+function extractRlPhysicalScale(finalAnswer) {
+  const source = collapseLatexBackslashes(finalAnswer);
+  if (!source) return null;
+
+  // I_{\\infty}=0.20 ، مع قبول اختلاف عدد الـ backslashes والمسافات.
+  const current = extractNumberAfterLatexSymbol(
+    source,
+    /I\s*_\s*\{\s*\\?infty\s*\}\s*=\s*([-+]?\d+(?:[.,]\d+)?)/i,
+  );
+
+  // \\tau=0.04
+  const tau = extractNumberAfterLatexSymbol(
+    source,
+    /\\?tau\s*=\s*([-+]?\d+(?:[.,]\d+)?)/i,
+  );
+
+  if (!(current > 0) || !(tau > 0)) return null;
+
+  return {
+    iInfinity: current,
+    tau,
+  };
+}
+
+function graphLooksNormalizedRl(graphData, finalAnswer = "") {
+  if (!graphData || typeof graphData !== "object") return false;
+
+  const source = collapseLatexBackslashes(
+    [
+      graphData.title,
+      graphData.xLabel,
+      graphData.yLabel,
+      ...normalizeArray(graphData.functions).flatMap((fn) => [
+        fn?.label,
+        fn?.expression,
+      ]),
+    ].join(" "),
+  ).toLowerCase();
+
+  const xMin = toFiniteNumber(graphData?.xDomain?.min, 0);
+  const xMax = toFiniteNumber(graphData?.xDomain?.max);
+  const yMin = toFiniteNumber(graphData?.yDomain?.min, 0);
+  const yMax = toFiniteNumber(graphData?.yDomain?.max);
+
+  // الشكل العددي الذي يرسله الـ backend في تمارين RL المطبعة:
+  // t/tau من 0 إلى 5 و i/I∞ من 0 إلى 1.
+  const domainLooksNormalized =
+    xMax !== null &&
+    yMax !== null &&
+    Math.abs(xMin) < 1e-9 &&
+    Math.abs(yMin) < 1e-9 &&
+    xMax >= 4.5 &&
+    xMax <= 5.5 &&
+    yMax >= 0.95 &&
+    yMax <= 1.05;
+
+  const hasNormalizedCurrent =
+    /i\s*\/\s*i\s*_/.test(source) ||
+    (/i\s*\/\s*i/.test(source) && source.includes("infty"));
+
+  const hasNormalizedTime =
+    /t\s*\/\s*\\?tau/.test(source) ||
+    source.includes("t/tau");
+
+  // الأهم: إذا كانت المجالات نفسها 0..5 و0..1 ولدينا I∞ وtau في
+  // الجواب، نعتبر الرسم مطبعا حتى لو كانت labels القادمة من AI سيئة.
+  const scale = extractRlPhysicalScale(finalAnswer);
+
+  return Boolean(
+    domainLooksNormalized &&
+      (hasNormalizedCurrent || hasNormalizedTime || Boolean(scale)),
+  );
+}
+
+function convertNormalizedRlGraphToPhysical(graphData, finalAnswer) {
+  if (!graphLooksNormalizedRl(graphData, finalAnswer)) return graphData;
+
+  const scale = extractRlPhysicalScale(finalAnswer);
+  if (!scale) return graphData;
+
+  const { iInfinity, tau } = scale;
+
+  const functions = normalizeArray(graphData.functions).map((fn, index) => ({
+    ...fn,
+    id: fn?.id || `physical-rl-${index + 1}`,
+    label: index === 0 ? "i(t)" : fn?.label,
+    expression:
+      index === 0
+        ? `i(t) = ${iInfinity}(1-e^{-t/${tau}})`
+        : fn?.expression,
+    points: normalizeArray(fn?.points)
+      .map(normalizeGraphPoint)
+      .filter(Boolean)
+      .map((point) => ({
+        x: Number((point.x * tau).toFixed(8)),
+        y: Number((point.y * iInfinity).toFixed(8)),
+      })),
+  }));
+
+  const xMin = toFiniteNumber(graphData?.xDomain?.min, 0) * tau;
+  const xMax = toFiniteNumber(graphData?.xDomain?.max, 5) * tau;
+  const xStepRaw = toFiniteNumber(graphData?.xDomain?.step, null);
+  const yMin = toFiniteNumber(graphData?.yDomain?.min, 0) * iInfinity;
+  const yMax = toFiniteNumber(graphData?.yDomain?.max, 1) * iInfinity;
+
+  return {
+    ...graphData,
+    title: "منحنى تطور شدة التيار i(t) بدلالة الزمن t",
+    xLabel: "t (s)",
+    yLabel: "i (A)",
+    xDomain: {
+      min: 0,
+      max: Number((5 * tau).toFixed(8)),
+      step:
+        xStepRaw && xStepRaw > 0
+          ? Number((xStepRaw * tau).toFixed(8))
+          : null,
+    },
+    yDomain: {
+      // في منحنى RL الفيزيائي القيمة الحدية هي I∞ نفسها.
+      // لا نترك المحور 0..1 بعد تحويل النقاط إلى الأمبير.
+      min: 0,
+      max: Number(iInfinity.toFixed(8)),
+    },
+    functions,
+    // Metadata داخلي لا يؤثر في الرسم، مفيد إن أردنا إظهار tau لاحقاً.
+    physicalScale: {
+      iInfinity,
+      tau,
+      convertedFromNormalizedRl: true,
+    },
+  };
+}
+
 function hasDrawableGraphData(graphData) {
   if (!graphData || typeof graphData !== "object") return false;
 
@@ -1616,18 +2054,691 @@ function hasDrawableGraphData(graphData) {
   return functionHasShape || sequenceHasShape || cobwebHasShape;
 }
 
+
+function normalizeVisuals(value) {
+  return normalizeArray(value)
+    .filter((item) => item && typeof item === "object")
+    .map((item) => ({ ...item, type: toText(item.type).toLowerCase() }))
+    .filter((item) => ["table", "circuit", "diagram"].includes(item.type));
+}
+
+function VisualTable({ visual }) {
+  const headers = normalizeArray(visual.headers);
+  const rows = normalizeArray(visual.rows);
+  if (!headers.length || !rows.length) return null;
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      {visual.title && <div dir="rtl" className="border-b border-slate-200 bg-slate-50 px-4 py-3 font-black text-slate-900"><SmartText>{visual.title}</SmartText></div>}
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-collapse text-center">
+          <thead><tr>{headers.map((h,i)=><th key={i} className="border border-slate-200 bg-indigo-50 px-4 py-3 font-black text-indigo-950"><SmartText>{h}</SmartText></th>)}</tr></thead>
+          <tbody>{rows.map((row,ri)=><tr key={ri}>{normalizeArray(row).map((cell,ci)=><td key={ci} className="border border-slate-200 px-4 py-3 font-semibold text-slate-900"><SmartText>{cell}</SmartText></td>)}</tr>)}</tbody>
+        </table>
+      </div>
+      {visual.caption && <div dir="rtl" className="px-4 py-3 text-sm font-semibold text-slate-600"><SmartText>{visual.caption}</SmartText></div>}
+    </section>
+  );
+}
+
+function normalizePhysicsVisualValue(value) {
+  let text = repairBrokenContent(value);
+  if (!text) return "";
+
+  text = stripOuterMathDelimiters(text)
+    .replace(/\$/g, "")
+    .replace(/\\{2,}/g, "\\")
+    .replace(/(^|[^A-Za-z\\])mathcal(?=\s*\{)/g, "$1\\mathcal")
+    .replace(/(^|[^A-Za-z\\])mathrm(?=\s*\{)/g, "$1\\mathrm")
+    .replace(/(^|[^A-Za-z\\])text(?=\s*\{)/g, "$1\\text")
+    .replace(/(^|[^A-Za-z\\])Omega\b/g, "$1\\Omega")
+    .replace(/(^|[^A-Za-z\\])mu(?=\\text|\\mathrm|[A-Z])/g, "$1\\mu")
+    // النموذج أحيانا يرسل \\12 أو \\200 بعد الوحدة.
+    .replace(/\\(?=\d)/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  // إصلاح ترتيب القيمة إذا أرسل النموذج الوحدة أولا:
+  // \\text{V}\\,12 -> 12\\,\\text{V}
+  // \\Omega\\,200  -> 200\\,\\Omega
+  // \\mu\\text{F}\\,10 -> 10\\,\\mu\\text{F}
+  const unitFirst = text.match(
+    /^(\\(?:Omega|omega)|\\mu\s*\\(?:text|mathrm)\s*\{[^{}]+\}|\\(?:text|mathrm)\s*\{[^{}]+\})\s*(?:\\[,;!]|[,;:]|\s)*\s*([-+]?\d+(?:[.,]\d+)?)$/,
+  );
+
+  if (unitFirst) {
+    return `${unitFirst[2]}\\,${unitFirst[1]}`;
+  }
+
+  return text;
+}
+
+function latexToSvgPlainText(value) {
+  let text = normalizePhysicsVisualValue(value);
+  if (!text) return "";
+
+  const subscriptMap = {
+    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+    "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+    "+": "₊", "-": "₋", "n": "ₙ",
+  };
+
+  text = text
+    .replace(/\\mathcal\s*\{([^{}]+)\}/g, "$1")
+    .replace(/\\(?:text|mathrm)\s*\{([^{}]+)\}/g, "$1")
+    .replace(/\\Omega\b/g, "Ω")
+    .replace(/\\omega\b/g, "ω")
+    .replace(/\\mu\b/g, "μ")
+    .replace(/\\Delta\b/g, "Δ")
+    .replace(/\\delta\b/g, "δ")
+    .replace(/\\lambda\b/g, "λ")
+    .replace(/\\rho\b/g, "ρ")
+    .replace(/\\tau\b/g, "τ")
+    .replace(/\\theta\b/g, "θ")
+    .replace(/\\alpha\b/g, "α")
+    .replace(/\\beta\b/g, "β")
+    .replace(/\\gamma\b/g, "γ")
+    .replace(/\\varepsilon\b/g, "ε")
+    .replace(/\\times\b/g, "×")
+    .replace(/\\cdot\b/g, "·")
+    .replace(/\\,|\\;|\\!|~/g, " ")
+    .replace(/_\{?([0-9n+\-]+)\}?/g, (_, sub) =>
+      [...sub].map((char) => subscriptMap[char] || char).join(""),
+    )
+    .replace(/[{}]/g, "")
+    .replace(/\\/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+
+  return text;
+}
+
+function SvgRichLabel({
+  x,
+  y,
+  value,
+  width = 220,
+  height = 48,
+  fontSize = 14,
+  fontWeight = 700,
+}) {
+  const text = latexToSvgPlainText(value);
+  if (!text) return null;
+
+  // نستعمل HTML عادي داخل foreignObject بدل MathJax داخل SVG.
+  // هذا يمنع ظهور أوامر مثل \\Omega و \\text كنص خام في الدارات.
+  return (
+    <foreignObject
+      x={Number(x) - width / 2}
+      y={Number(y) - height / 2}
+      width={width}
+      height={height}
+      style={{ overflow: "visible", pointerEvents: "none" }}
+    >
+      <div
+        xmlns="http://www.w3.org/1999/xhtml"
+        dir={containsArabic(text) ? "rtl" : "ltr"}
+        className="flex h-full w-full items-center justify-center whitespace-nowrap text-center text-slate-900"
+        style={{
+          fontSize,
+          fontWeight,
+          lineHeight: 1.15,
+          overflow: "visible",
+          direction: containsArabic(text) ? "rtl" : "ltr",
+          unicodeBidi: "isolate",
+        }}
+      >
+        {text}
+      </div>
+    </foreignObject>
+  );
+}
+
+function CircuitSymbol({ item }) {
+  const common = { stroke: "currentColor", strokeWidth: 3, fill: "white" };
+  if (item.type === "resistor") return <path d="M -38 0 L -28 0 L -20 -12 L -8 12 L 4 -12 L 16 12 L 28 0 L 38 0" {...common} fill="none"/>;
+  if (item.type === "capacitor") return <g><line x1="-34" y1="0" x2="-8" y2="0" {...common}/><line x1="-8" y1="-18" x2="-8" y2="18" {...common}/><line x1="8" y1="-18" x2="8" y2="18" {...common}/><line x1="8" y1="0" x2="34" y2="0" {...common}/></g>;
+  if (["ammeter","voltmeter","lamp"].includes(item.type)) return <g><circle r="22" {...common}/><text x="0" y="6" textAnchor="middle" fontSize="17" fontWeight="800">{item.type === "ammeter" ? "A" : item.type === "voltmeter" ? "V" : "✕"}</text></g>;
+  if (["battery","generator"].includes(item.type)) return <g><line x1="-34" y1="0" x2="-10" y2="0" {...common}/><line x1="-10" y1="-20" x2="-10" y2="20" {...common}/><line x1="8" y1="-12" x2="8" y2="12" {...common}/><line x1="8" y1="0" x2="34" y2="0" {...common}/></g>;
+  if (item.type === "switch") return <g><circle cx="-25" cy="0" r="4" fill="currentColor"/><circle cx="25" cy="0" r="4" fill="currentColor"/><line x1="-22" y1="-2" x2="18" y2="-18" {...common}/></g>;
+  if (item.type === "coil") return <path d="M -38 0 C -32 -18 -22 -18 -16 0 C -10 -18 0 -18 6 0 C 12 -18 22 -18 28 0 L 38 0" {...common} fill="none"/>;
+  return <circle r="5" fill="currentColor"/>;
+}
+
+function normalizeCircuitComponent(item) {
+  const component = item && typeof item === "object" ? { ...item } : {};
+  let label = normalizePhysicsVisualValue(component.label);
+  let value = normalizePhysicsVisualValue(component.value);
+
+  // إذا وضع النموذج المعادلة كاملة داخل label، نفصل اسم العنصر عن قيمته.
+  // مثال: R_1=30\\,\\Omega -> label: R_1 ، value: 30\\,\\Omega
+  if (label.includes("=")) {
+    const [left, ...rightParts] = label.split("=");
+    const right = rightParts.join("=").trim();
+    if (left.trim() && right) {
+      label = left.trim();
+      if (!value) value = right;
+    }
+  }
+
+  // رموز افتراضية واضحة عند غياب label.
+  if (!label) {
+    if (["battery", "generator"].includes(component.type)) label = "E";
+    if (component.type === "resistor") label = "R";
+    if (component.type === "capacitor") label = "C";
+  }
+
+  return { ...component, label, value };
+}
+
+function CircuitComponent({ item, showLabels = true }) {
+  const component = normalizeCircuitComponent(item);
+  const x = Number(component.x) || 0;
+  const y = Number(component.y) || 0;
+  const rotation = Number(component.rotation) || 0;
+
+  return (
+    <g className="text-slate-800">
+      <g transform={`translate(${x} ${y}) rotate(${rotation})`}>
+        <CircuitSymbol item={component} />
+      </g>
+
+      {showLabels && component.label && !["ammeter", "voltmeter"].includes(component.type) && (
+        <SvgRichLabel
+          x={x}
+          y={y - 50}
+          value={component.label}
+          width={180}
+          height={38}
+          fontSize={15}
+          fontWeight={800}
+        />
+      )}
+
+      {showLabels && component.value && (
+        <SvgRichLabel
+          x={x}
+          y={y + 52}
+          value={component.value}
+          width={220}
+          height={40}
+          fontSize={13}
+          fontWeight={700}
+        />
+      )}
+    </g>
+  );
+}
+
+function shouldUseAutomaticSeriesLayout(visual) {
+  const layout = toText(visual.layout).toLowerCase();
+  if (layout === "series") return true;
+  if (layout && layout !== "auto") return false;
+
+  const title = toText(visual.title);
+  const wires = normalizeArray(visual.wires);
+  const components = normalizeArray(visual.components);
+  const yValues = new Set(wires.flatMap((w) => [Number(w.y1), Number(w.y2)]).filter(Number.isFinite).map((v) => Math.round(v)));
+  const looksOpenAndFlat = components.length >= 3 && wires.length > 0 && yValues.size <= 2;
+
+  return /تسلسل|على التوالي|series/i.test(title) || looksOpenAndFlat;
+}
+
+function SeriesCircuit({ visual, width, height }) {
+  const rawComponents = normalizeArray(visual.components)
+    .filter((c) => c && typeof c === "object")
+    .map(normalizeCircuitComponent);
+
+  if (!rawComponents.length) return null;
+
+  const sourceIndex = rawComponents.findIndex((c) =>
+    ["battery", "generator"].includes(c.type),
+  );
+
+  const source = sourceIndex >= 0 ? rawComponents[sourceIndex] : null;
+  const seriesComponents = rawComponents.filter((_, index) => index !== sourceIndex);
+
+  const left = 90;
+  const right = Math.max(left + 500, width - 90);
+  const top = 115;
+  const bottom = Math.min(height - 70, 275);
+  const componentHalfWidth = 46;
+
+  const positioned = seriesComponents.map((component, index) => {
+    const count = Math.max(seriesComponents.length, 1);
+    const x = left + ((index + 1) * (right - left)) / (count + 1);
+    return { ...component, x, y: top, rotation: 0 };
+  });
+
+  const sourceY = (top + bottom) / 2;
+  const positionedSource = source
+    ? { ...source, x: left, y: sourceY, rotation: 90 }
+    : null;
+
+  const topSegments = [];
+  let cursor = left;
+  positioned.forEach((component) => {
+    topSegments.push({ x1: cursor, x2: component.x - componentHalfWidth });
+    cursor = component.x + componentHalfWidth;
+  });
+  topSegments.push({ x1: cursor, x2: right });
+
+  return (
+    <g className="text-slate-800">
+      {/* السلك العلوي مقطع حول العناصر، حتى لا يمر الخط داخل المقاومة أو الجهاز. */}
+      {topSegments.map((segment, index) => (
+        <line
+          key={`series-top-${index}`}
+          x1={segment.x1}
+          y1={top}
+          x2={segment.x2}
+          y2={top}
+          stroke="currentColor"
+          strokeWidth="3"
+        />
+      ))}
+
+      {/* الجانب الأيمن والسلك السفلي. */}
+      <path
+        d={`M ${right} ${top} V ${bottom} H ${left}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinejoin="round"
+      />
+
+      {/* الجانب الأيسر: نترك فراغا للمولد/البطارية. */}
+      {positionedSource ? (
+        <>
+          <line x1={left} y1={top} x2={left} y2={sourceY - 40} stroke="currentColor" strokeWidth="3" />
+          <line x1={left} y1={sourceY + 40} x2={left} y2={bottom} stroke="currentColor" strokeWidth="3" />
+        </>
+      ) : (
+        <line x1={left} y1={top} x2={left} y2={bottom} stroke="currentColor" strokeWidth="3" />
+      )}
+
+      {positioned.map((component, index) => (
+        <CircuitComponent key={component.id || index} item={component} />
+      ))}
+
+      {positionedSource && <CircuitComponent item={positionedSource} />}
+    </g>
+  );
+}
+
+function VisualCircuit({ visual }) {
+  const width = Math.max(640, Number(visual.width) || 820);
+  const height = Math.max(300, Number(visual.height) || 360);
+  const automaticSeries = shouldUseAutomaticSeriesLayout(visual);
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4">
+      {visual.title && (
+        <div dir="rtl" className="mb-3 font-black text-slate-900">
+          <SmartText>{visual.title}</SmartText>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="mx-auto min-w-[640px] max-w-full"
+          role="img"
+        >
+          <defs>
+            <marker id="arrowhead-circuit" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0,10 3.5,0 7" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          {automaticSeries ? (
+            <SeriesCircuit visual={visual} width={width} height={height} />
+          ) : (
+            <>
+              {normalizeArray(visual.wires).map((wire, index) => (
+                <g key={`wire-${index}`} className="text-slate-800">
+                  <line
+                    x1={wire.x1}
+                    y1={wire.y1}
+                    x2={wire.x2}
+                    y2={wire.y2}
+                    stroke="currentColor"
+                    strokeWidth="3"
+                  />
+                  {wire.label && (
+                    <SvgRichLabel
+                      x={(Number(wire.x1) + Number(wire.x2)) / 2}
+                      y={(Number(wire.y1) + Number(wire.y2)) / 2 - 18}
+                      value={wire.label}
+                      width={180}
+                      height={38}
+                      fontSize={12}
+                      fontWeight={700}
+                    />
+                  )}
+                </g>
+              ))}
+
+              {normalizeArray(visual.components).map((component, index) => (
+                <CircuitComponent key={component.id || index} item={component} />
+              ))}
+            </>
+          )}
+        </svg>
+      </div>
+
+      {visual.caption && (
+        <div dir="rtl" className="mt-3 text-sm font-semibold text-slate-600">
+          <SmartText>{visual.caption}</SmartText>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function VisualDiagram({ visual }) {
+  const width = Math.max(640, Number(visual.width) || 720);
+  const height = Math.max(280, Number(visual.height) || 360);
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4">
+      {visual.title && (
+        <div dir="rtl" className="mb-3 font-black">
+          <SmartText>{visual.title}</SmartText>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} className="mx-auto min-w-[640px] max-w-full">
+          <defs>
+            <marker id="arrowhead-diagram" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0,10 3.5,0 7" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          {normalizeArray(visual.elements).map((element, index) => {
+            const type = toText(element.type).toLowerCase();
+            const x1 = Number(element.x1 ?? element.x) || 0;
+            const y1 = Number(element.y1 ?? element.y) || 0;
+            const x2 = Number(element.x2) || 0;
+            const y2 = Number(element.y2) || 0;
+            const label = element.label;
+
+            if (type === "arrow") {
+              return (
+                <g key={index} className="text-slate-800">
+                  <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth="3" markerEnd="url(#arrowhead-diagram)"/>
+                  {label && <SvgRichLabel x={(x1+x2)/2} y={(y1+y2)/2-18} value={label} width={190} height={40} fontSize={13}/>}
+                </g>
+              );
+            }
+
+            if (type === "line") {
+              return <line key={index} x1={x1} y1={y1} x2={x2} y2={y2} stroke="currentColor" strokeWidth="3"/>;
+            }
+
+            if (type === "circle" || type === "point") {
+              const x = Number(element.x) || x1;
+              const y = Number(element.y) || y1;
+              const radius = type === "point" ? 4 : Number(element.radius) || 8;
+              return (
+                <g key={index} className="text-slate-800">
+                  <circle cx={x} cy={y} r={radius} fill={type === "point" ? "currentColor" : "white"} stroke="currentColor" strokeWidth="3"/>
+                  {label && <SvgRichLabel x={x} y={y-22} value={label} width={160} height={36} fontSize={13}/>}
+                </g>
+              );
+            }
+
+            if (type === "rect") {
+              const x = Number(element.x) || x1;
+              const y = Number(element.y) || y1;
+              const rectWidth = Number(element.width) || 80;
+              const rectHeight = Number(element.height) || 50;
+              return (
+                <g key={index} className="text-slate-800">
+                  <rect x={x} y={y} width={rectWidth} height={rectHeight} fill="white" stroke="currentColor" strokeWidth="3"/>
+                  {label && <SvgRichLabel x={x+rectWidth/2} y={y+rectHeight/2} value={label} width={Math.max(120, rectWidth+40)} height={40} fontSize={13}/>}
+                </g>
+              );
+            }
+
+            const x = Number(element.x) || x1;
+            const y = Number(element.y) || y1;
+            return label ? <SvgRichLabel key={index} x={x} y={y} value={label} width={220} height={44} fontSize={13}/> : null;
+          })}
+        </svg>
+      </div>
+
+      {visual.caption && (
+        <div dir="rtl" className="mt-3 text-sm font-semibold text-slate-600">
+          <SmartText>{visual.caption}</SmartText>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ExerciseVisuals({ visuals }) {
+  const items = normalizeVisuals(visuals);
+  if (!items.length) return null;
+  return <div className="mt-5 space-y-4">{items.map((v,i)=>v.type === "table" ? <VisualTable key={i} visual={v}/> : v.type === "circuit" ? <VisualCircuit key={i} visual={v}/> : <VisualDiagram key={i} visual={v}/>)}</div>;
+}
+
+
+
+function getEmbeddedExercisePayload(item) {
+  if (!item || typeof item !== "object") return {};
+  const raw = item.raw_ai_response;
+  if (!raw || typeof raw !== "object") return {};
+
+  const normalized = raw.normalized_exercise;
+  if (normalized && typeof normalized === "object") return normalized;
+
+  const exercise = raw.exercise;
+  if (exercise && typeof exercise === "object") return exercise;
+
+  return {};
+}
+
+function normalizeGraphSpec(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+
+  const expression = toText(
+    value.expression_python ||
+      value.expressionPython ||
+      value.expression ||
+      value.formula,
+  ).trim();
+
+  if (!expression) return null;
+
+  let xMin = toFiniteNumber(value.x_min ?? value.xMin, 0);
+  let xMax = toFiniteNumber(value.x_max ?? value.xMax, 5);
+  let yMin = toFiniteNumber(value.y_min ?? value.yMin, null);
+  let yMax = toFiniteNumber(value.y_max ?? value.yMax, null);
+  let step = toFiniteNumber(value.step, null);
+
+  if (!(xMax > xMin)) {
+    xMin = 0;
+    xMax = 5;
+  }
+
+  if (!(step > 0)) {
+    step = Math.max((xMax - xMin) / 120, 0.001);
+  }
+  step = Math.min(Math.max(step, (xMax - xMin) / 500), (xMax - xMin) / 20);
+
+  return {
+    graphType: toText(value.graph_type || value.graphType || "function").trim() || "function",
+    title: toText(value.title || "المنحنى").trim() || "المنحنى",
+    expression,
+    expressionLabel: toText(
+      value.expression_label || value.expressionLabel || value.label || "",
+    ).trim(),
+    xLabel: toText(value.x_label || value.xLabel || "t (s)").trim() || "t (s)",
+    yLabel: toText(value.y_label || value.yLabel || "i (A)").trim() || "i (A)",
+    xMin,
+    xMax,
+    yMin,
+    yMax,
+    step,
+  };
+}
+
+function compileSafeGraphExpression(expression) {
+  let expr = toText(expression).trim();
+  if (!expr) return null;
+
+  // يقبل فقط تعبيرات حسابية، بدون strings أو أقواس مربعة أو أوامر JavaScript.
+  if (!/^[0-9A-Za-z_+\-*/().,^\s]+$/.test(expr)) return null;
+
+  const identifiers = expr.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+  const allowed = new Set([
+    "x", "t", "exp", "log", "ln", "sqrt", "sin", "cos", "tan",
+    "abs", "pow", "pi", "e", "Math",
+  ]);
+  if (identifiers.some((name) => !allowed.has(name))) return null;
+
+  expr = expr
+    .replace(/\^/g, "**")
+    .replace(/\bln\s*\(/g, "log(")
+    .replace(/\bMath\.exp\s*\(/g, "exp(")
+    .replace(/\bMath\.log\s*\(/g, "log(")
+    .replace(/\bMath\.sqrt\s*\(/g, "sqrt(")
+    .replace(/\bMath\.sin\s*\(/g, "sin(")
+    .replace(/\bMath\.cos\s*\(/g, "cos(")
+    .replace(/\bMath\.tan\s*\(/g, "tan(")
+    .replace(/\bMath\.abs\s*\(/g, "abs(")
+    .replace(/\bMath\.PI\b/g, "pi")
+    .replace(/\bMath\.E\b/g, "e");
+
+  try {
+    // new Function هنا لا يستقبل إلا expression سبق تقييده بقائمة محارف وأسماء مسموحة.
+    const fn = new Function(
+      "x", "t", "exp", "log", "sqrt", "sin", "cos", "tan", "abs", "pow", "pi", "e",
+      `"use strict"; return (${expr});`,
+    );
+
+    return (x) => {
+      const result = fn(
+        x, x,
+        Math.exp, Math.log, Math.sqrt, Math.sin, Math.cos, Math.tan,
+        Math.abs, Math.pow, Math.PI, Math.E,
+      );
+      const number = Number(result);
+      return Number.isFinite(number) ? number : null;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function graphDataFromSpec(value) {
+  const spec = normalizeGraphSpec(value);
+  if (!spec) return null;
+
+  const evaluate = compileSafeGraphExpression(spec.expression);
+  if (!evaluate) return null;
+
+  const points = [];
+  let x = spec.xMin;
+  let guard = 0;
+
+  while (x <= spec.xMax + spec.step / 2 && guard < 520) {
+    const y = evaluate(x);
+    if (y !== null) {
+      points.push({
+        x: Number(x.toFixed(8)),
+        y: Number(y.toFixed(8)),
+      });
+    }
+    x += spec.step;
+    guard += 1;
+  }
+
+  if (points.length < 2) return null;
+
+  const ys = points.map((point) => point.y);
+  let yMin = spec.yMin;
+  let yMax = spec.yMax;
+
+  if (yMin === null || yMax === null || !(yMax > yMin)) {
+    const min = Math.min(...ys);
+    const max = Math.max(...ys);
+    const span = Math.max(max - min, Math.abs(max) * 0.12, 0.1);
+    yMin = Math.min(0, min - span * 0.08);
+    yMax = max + span * 0.12;
+  }
+
+  return normalizeGraphData({
+    graph_type: spec.graphType,
+    title: spec.title,
+    x_label: spec.xLabel,
+    y_label: spec.yLabel,
+    x_domain: { min: spec.xMin, max: spec.xMax, step: spec.step },
+    y_domain: { min: yMin, max: yMax },
+    functions: [
+      {
+        id: "generated-from-spec",
+        label: spec.expressionLabel || spec.yLabel || "f(x)",
+        expression: spec.expressionLabel || spec.expression,
+        points,
+      },
+    ],
+  });
+}
+
+function cleanGraphSpecPlaceholder(value) {
+  return toText(value)
+    .replace(/\(\s*(?:معطى|موجود|مخزن)?\s*(?:في|ضمن)?\s*graph_spec\s*\)/gi, "")
+    .replace(/\[\s*(?:معطى|موجود|مخزن)?\s*(?:في|ضمن)?\s*graph_spec\s*\]/gi, "")
+    .replace(/\bgraph_spec\b/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function normalizeExercise(item) {
   if (!item || typeof item !== "object") return null;
+
+  const embeddedExercise = getEmbeddedExercisePayload(item);
 
   const candidateGraphData = normalizeGraphData(
     item.graph_data ||
       item.graphData ||
       item.solution?.graph_data ||
-      item.solution?.graphData,
+      item.solution?.graphData ||
+      embeddedExercise.graph_data ||
+      embeddedExercise.graphData,
   );
 
-  const normalizedGraphData = hasDrawableGraphData(candidateGraphData)
+  const graphSpec =
+    item.graph_spec ||
+    item.graphSpec ||
+    item.solution?.graph_spec ||
+    item.solution?.graphSpec ||
+    embeddedExercise.graph_spec ||
+    embeddedExercise.graphSpec ||
+    null;
+
+  const graphFromSpec = graphDataFromSpec(graphSpec);
+
+  const rawNormalizedGraphData = hasDrawableGraphData(candidateGraphData)
     ? candidateGraphData
+    : hasDrawableGraphData(graphFromSpec)
+      ? graphFromSpec
+      : null;
+
+  const finalAnswerSource =
+    item.final_answer ||
+    item.solution?.final_answer ||
+    embeddedExercise.final_answer ||
+    embeddedExercise.solution?.final_answer ||
+    "";
+
+  const normalizedGraphData = rawNormalizedGraphData
+    ? convertNormalizedRlGraphToPhysical(
+        rawNormalizedGraphData,
+        finalAnswerSource,
+      )
     : null;
 
   const storedAlternativeSource =
@@ -1651,11 +2762,14 @@ function normalizeExercise(item) {
     title:
       item.title ||
       "تمرين مشابه للبكالوريا بالذكاء الاصطناعي",
-    question:
+    question: cleanGraphSpecPlaceholder(
       item.question ||
-      item.text ||
-      item.statement ||
-      "",
+        item.text ||
+        item.statement ||
+        embeddedExercise.question ||
+        embeddedExercise.text ||
+        "",
+    ),
     skill: item.skill || "",
     hints: normalizeArray(
       item.hints ||
@@ -1700,10 +2814,13 @@ function normalizeExercise(item) {
     )
       ? storedAlternative
       : null,
+    visuals: normalizeVisuals(item.visuals || item.solution?.visuals),
     graphData: normalizedGraphData,
-    // حتى لو قال الخادم requires_graph=true، لا نعرض الرسم
-    // إلا إذا كانت هناك نقاط فعلية صالحة.
+    graphSpec: graphSpec || null,
+    // الرسم يعرض فقط عندما استطعنا الحصول على نقاط فعلية، سواء من graph_data
+    // أو قمنا بحسابها محليًا من graph_spec المرسل من الـ backend.
     requiresGraph: Boolean(normalizedGraphData),
+    graphPlacement: "statement",
     modelName: item.model_name || item.model || "",
     createdAt: item.created_at || "",
   };
@@ -1897,7 +3014,7 @@ export default function GeneratedAIExercises({
       setError("");
 
       const response = await axios.get(
-        `${apiBaseUrl}/axes/${resolvedAxisId}/`,
+        `${String(apiBaseUrl || "").replace(/\/+$/, "")}/axes/${resolvedAxisId}/`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -1905,6 +3022,7 @@ export default function GeneratedAIExercises({
           timeout: 120000,
         },
       );
+      console.log(response)
 
       const items = normalizeArray(
         response.data?.exercises,
@@ -1960,7 +3078,7 @@ export default function GeneratedAIExercises({
       setError("");
 
       const response = await axios.post(
-        `${apiBaseUrl}/generate/`,
+        `${String(apiBaseUrl || "").replace(/\/+$/, "")}/generate/`,
         {
           axis_id: Number(resolvedAxisId),
           count: 1,
@@ -2191,12 +3309,67 @@ export default function GeneratedAIExercises({
 
   return (
     <MathJaxContext version={3} config={MATHJAX_CONFIG}>
+      <style>{`
+        .generated-exercises-root,
+        .generated-exercises-root * {
+          box-sizing: border-box;
+        }
+
+        .generated-exercises-root img,
+        .generated-exercises-root svg,
+        .generated-exercises-root canvas {
+          max-width: 100%;
+          height: auto;
+        }
+
+        .generated-exercises-root table {
+          max-width: 100%;
+        }
+
+        .generated-exercises-root mjx-container {
+          max-width: 100%;
+        }
+
+        .generated-exercises-root mjx-container[display="true"] {
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding-block: 0.25rem;
+        }
+
+        .generated-exercises-root button,
+        .generated-exercises-root input,
+        .generated-exercises-root textarea,
+        .generated-exercises-root select {
+          max-width: 100%;
+        }
+
+        @media (max-width: 359px) {
+          .generated-exercises-root {
+            padding-inline: 0.375rem;
+          }
+
+          .generated-exercises-root h1 {
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+          }
+
+          .generated-exercises-root h2 {
+            font-size: 1rem;
+            line-height: 1.6rem;
+          }
+
+          .generated-exercises-root p,
+          .generated-exercises-root button {
+            font-size: 0.8125rem;
+          }
+        }
+      `}</style>
       <section
       dir="rtl"
-      className="min-h-full bg-slate-50 px-3 py-5 font-[Tajawal,Cairo,Arial,sans-serif] sm:px-6"
+      className="generated-exercises-root min-h-full w-full min-w-0 overflow-x-hidden bg-slate-50 px-2 py-3 font-[Tajawal,Cairo,Arial,sans-serif] min-[360px]:px-3 min-[360px]:py-4 sm:px-5 sm:py-5 lg:px-6 lg:py-6"
       style={{ unicodeBidi: "plaintext" }}
     >
-      <div className="mx-auto max-w-5xl space-y-5">
+      <div className="mx-auto w-full min-w-0 max-w-6xl space-y-4 sm:space-y-5">
         <ExercisesHeader
           axis={axis}
           currentIndex={currentIndex}
@@ -2227,7 +3400,7 @@ export default function GeneratedAIExercises({
             generating={generating}
           />
         ) : (
-          <article className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <article className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-3xl">
             <ExerciseNavigation
               currentIndex={currentIndex}
               total={exercises.length}
@@ -2235,7 +3408,7 @@ export default function GeneratedAIExercises({
               onNext={goNext}
             />
 
-            <div className="space-y-6 p-4 sm:p-6">
+            <div className="min-w-0 space-y-5 p-3 min-[360px]:p-4 sm:space-y-6 sm:p-6">
               <ExerciseQuestion
                 exercise={currentExercise}
               />
@@ -2256,7 +3429,7 @@ export default function GeneratedAIExercises({
               <button
                 type="button"
                 onClick={toggleSolution}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-4 font-black text-white transition hover:bg-emerald-700"
+                className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3.5 text-sm font-black text-white transition hover:bg-emerald-700 active:scale-[0.99] sm:px-5 sm:py-4 sm:text-base"
               >
                 {solutionVisible ? (
                   <EyeOff size={21} />
@@ -2545,6 +3718,10 @@ function ExerciseQuestion({ exercise }) {
           </MetaBadge>
         )}
 
+        {normalizeArray(exercise.visuals).length > 0 && (
+          <MetaBadge>معطيات بصرية</MetaBadge>
+        )}
+
         {exercise.graphData && (
           <MetaBadge>
             تمرين بياني
@@ -2571,8 +3748,17 @@ function ExerciseQuestion({ exercise }) {
           </div>
         </div>
 
-        <div className="p-5 sm:p-7">
-          <ExerciseStatement value={exercise.question} />
+        <div className="bg-white px-4 py-5 sm:px-7 sm:py-7">
+          <div className="mx-auto max-w-5xl rounded-2xl bg-white">
+            <ExerciseStatement value={exercise.question} />
+            <ExerciseVisuals visuals={exercise.visuals} />
+            {exercise.requiresGraph &&
+              hasDrawableGraphData(exercise.graphData) && (
+                <div className="mt-6">
+                  <ExerciseGraph exercise={exercise} />
+                </div>
+              )}
+          </div>
         </div>
       </section>
 
@@ -2857,7 +4043,7 @@ function ExerciseGraph({ exercise }) {
         </div>
       </div>
 
-      <div className="space-y-5 p-4 sm:p-6">
+      <div className="space-y-6 bg-slate-50/40 p-4 sm:p-6">
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
           <svg
             viewBox={`0 0 ${width} ${height}`}
@@ -3175,9 +4361,7 @@ function GeneratedSolution({
             title="فكرة الحل"
             subtitle="Méthode"
           >
-            <SmartText className="font-semibold text-slate-800">
-              {exercise.strategy}
-            </SmartText>
+            <StructuredSolutionText value={exercise.strategy} />
           </ContentCard>
         )}
 
@@ -3187,15 +4371,13 @@ function GeneratedSolution({
             subtitle="Explication détaillée"
             tone="violet"
           >
-            <SmartText className="font-semibold text-slate-800">
-              {exercise.solutionExplanation}
-            </SmartText>
+            <StructuredSolutionText value={exercise.solutionExplanation} />
           </ContentCard>
         )}
 
         {exercise.solutionSteps.length >
           0 && (
-          <section className="space-y-4">
+          <section className="space-y-4" aria-label="خطوات الحل">
             {exercise.solutionSteps.map(
               (step, index) => (
                 <SolutionStep
@@ -3209,6 +4391,7 @@ function GeneratedSolution({
         )}
 
         {exercise.requiresGraph &&
+          exercise.graphPlacement !== "statement" &&
           hasDrawableGraphData(exercise.graphData) && (
             <ExerciseGraph exercise={exercise} />
           )}
@@ -3225,9 +4408,7 @@ function GeneratedSolution({
             subtitle="Vérification"
             tone="blue"
           >
-            <SmartText className="font-semibold text-slate-800">
-              {exercise.verification}
-            </SmartText>
+            <StructuredSolutionText value={exercise.verification} />
           </ContentCard>
         )}
 
@@ -3406,6 +4587,445 @@ function CommonMistakesCard({ mistakes }) {
   );
 }
 
+
+
+/**
+ * تقسيم شرح الحل إلى جمل قصيرة من دون كسر صيغ MathJax/LaTeX.
+ *
+ * الدالة تحمي:
+ * - $...$ و $$...$$
+ * - \\(...\\) و \\[...\\]
+ * - الأقواس { } داخل أوامر LaTeX
+ *
+ * ثم تقسّم النص عند علامات نهاية الجملة فقط عندما نكون خارج الصيغة.
+ */
+function splitStatementClauses(value) {
+  const text = repairBrokenContent(value).trim();
+  if (!text) return [];
+
+  const clauses = [];
+  let current = "";
+  let braceDepth = 0;
+  let inlineDollar = false;
+  let displayDollar = false;
+  let inlineLatex = false;
+  let displayLatex = false;
+
+  const pushCurrent = () => {
+    const cleaned = current
+      .replace(/^[\s،؛;:.!?؟]+|[\s]+$/g, "")
+      .trim();
+
+    if (cleaned) clauses.push(cleaned);
+    current = "";
+  };
+
+  const isEscapedAt = (index) => {
+    let slashCount = 0;
+    for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+      slashCount += 1;
+    }
+    return slashCount % 2 === 1;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    const next = text[index + 1] || "";
+    const pair = `${character}${next}`;
+
+    // محددات LaTeX: \\(...\\) و \\[...\\]
+    if (!inlineDollar && !displayDollar && pair === "\\(") {
+      inlineLatex = true;
+      current += pair;
+      index += 1;
+      continue;
+    }
+
+    if (inlineLatex && pair === "\\)") {
+      inlineLatex = false;
+      current += pair;
+      index += 1;
+      continue;
+    }
+
+    if (!inlineDollar && !displayDollar && pair === "\\[") {
+      displayLatex = true;
+      current += pair;
+      index += 1;
+      continue;
+    }
+
+    if (displayLatex && pair === "\\]") {
+      displayLatex = false;
+      current += pair;
+      index += 1;
+      continue;
+    }
+
+    // محددات الدولار، مع تجاهل الدولار المهرب.
+    if (!inlineLatex && !displayLatex && character === "$" && !isEscapedAt(index)) {
+      if (next === "$") {
+        displayDollar = !displayDollar;
+        current += "$$";
+        index += 1;
+        continue;
+      }
+
+      if (!displayDollar) inlineDollar = !inlineDollar;
+      current += character;
+      continue;
+    }
+
+    const insideMath =
+      inlineDollar || displayDollar || inlineLatex || displayLatex;
+
+    if (!insideMath) {
+      if (character === "{") braceDepth += 1;
+      if (character === "}" && braceDepth > 0) braceDepth -= 1;
+    }
+
+    current += character;
+
+    // لا نقسم داخل الصيغ أو داخل أقواس LaTeX.
+    if (insideMath || braceDepth > 0) continue;
+
+    const isArabicOrLatinSentenceEnd =
+      character === "؟" ||
+      character === "!" ||
+      character === ";" ||
+      character === "؛";
+
+    // النقطة تُعد نهاية جملة فقط إن لم تكن بين رقمين (مثل 0.25).
+    const previous = text[index - 1] || "";
+    const isDecimalPoint =
+      character === "." && /\d/.test(previous) && /\d/.test(next);
+    const isPeriodEnd = character === "." && !isDecimalPoint;
+
+    if (isArabicOrLatinSentenceEnd || isPeriodEnd) {
+      pushCurrent();
+    }
+  }
+
+  pushCurrent();
+
+  // لا نعيد مصفوفة فارغة ولا نفقد النص عند وجود بيانات غير اعتيادية.
+  return clauses.length ? clauses : [text];
+}
+
+function splitSolutionContent(value) {
+  const text = repairPhysicsLatexArtifacts(repairBrokenContent(value));
+  if (!text) return [];
+
+  const normalized = text
+    .replace(/\r\n?/g, "\n")
+    // \; هي مسافة LaTeX وليست فاصلة بين عناصر الحل. كانت النسخة السابقة
+    // تقسمها عند ; فتظهر بطاقة مستقلة تحتوي فقط على "\;".
+    .replace(/\\;/g, " ")
+    .replace(/(?:^|\n)\s*[•▪◦●-]\s*/g, "\n")
+    .replace(/\s+(?=(?:الخطوة|مرحلة)\s*\d+\s*[:：.-])/g, "\n")
+    .replace(/\s+(?=\d+\s*[.)-]\s+)/g, "\n")
+    .replace(/\s*([؛;])\s*/g, "$1\n")
+    .replace(/\s+(?=(?:إذن|بالتالي|ومن ثم|ثم|التحقق من|نعوض|نحسب|لدينا|بما أن|حيث|أي|إذن نجد)\s*:)/g, "\n")
+    .replace(/\s+(?=(?:\Delta\s*[A-Za-z]|[A-Za-z](?:_\{?[^\s=،؛:]+\}?)?)\s*=)/g, "\n")
+    .replace(/\s+(?=(?:\\frac|\\sqrt|\\Delta|\\Rightarrow|\\Leftrightarrow))/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const rawLines = normalized
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const items = [];
+  for (const line of rawLines) {
+    const clauses = splitStatementClauses(line);
+    if (clauses.length > 1) {
+      clauses.forEach((clause) => {
+        const cleaned = clause.trim();
+        if (cleaned) items.push(cleaned);
+      });
+    } else {
+      items.push(line);
+    }
+  }
+
+  // حذف بقايا أوامر المسافة أو علامات الترقيم التي لا تمثل جوابًا.
+  return items.filter((item) => {
+    const cleaned = toText(item).trim();
+    if (!cleaned) return false;
+    return !/^(?:\\[,;:! ]+|[،؛;,.]+)+$/.test(cleaned);
+  });
+}
+
+function StructuredSolutionText({ value, emphasis = false }) {
+  const items = splitSolutionContent(value);
+  if (!items.length) return null;
+
+  return (
+    <div dir="rtl" className="space-y-3" style={{ direction: "rtl" }}>
+      {items.map((rawItem, index) => {
+        const item = repairPhysicsLatexArtifacts(rawItem);
+        const mathDominant =
+          isMathDominantLine(item) ||
+          /^\s*\\+\s*\[[\s\S]*\\+\s*\]\s*$/.test(item) ||
+          /^\s*\\+\s*\([\s\S]*\\+\s*\)\s*$/.test(item);
+
+        if (mathDominant) {
+          return (
+            <div
+              key={index}
+              dir="ltr"
+              className={cn(
+                "overflow-x-auto rounded-xl border px-4 py-3 text-center",
+                emphasis
+                  ? "border-emerald-200 bg-white/80"
+                  : "border-slate-200 bg-slate-50",
+              )}
+            >
+              <MathRenderer value={item} display className="font-bold" />
+            </div>
+          );
+        }
+
+        return (
+          <div
+            key={index}
+            className="flex min-w-0 items-start gap-3"
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                "mt-[0.72rem] h-2 w-2 shrink-0 rounded-full",
+                emphasis ? "bg-emerald-600" : "bg-slate-400",
+              )}
+            />
+            <div className="min-w-0 flex-1 text-[16px] font-semibold leading-8 text-slate-800 sm:text-[17px]">
+              <InlineRichText value={item} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function splitPhysicsFormulaWithArabicNote(value) {
+  const text = repairPhysicsLatexArtifacts(value).trim();
+  if (!text || !containsArabic(text)) return null;
+
+  const firstArabicIndex = text.search(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/);
+  if (firstArabicIndex < 0) return null;
+
+  let splitIndex = firstArabicIndex;
+
+  // مثال: U_{AB}=20\\,\\text{V} (A أعلى من B)
+  // نعيد بداية الملاحظة إلى القوس، بدل إدخال "(A" داخل MathJax.
+  const beforeArabic = text.slice(0, firstArabicIndex);
+  const noteStart = beforeArabic.search(/\(\s*[A-Za-z]\s*$/);
+  if (noteStart >= 0) {
+    splitIndex = noteStart;
+  }
+
+  const mathPart = text
+    .slice(0, splitIndex)
+    .replace(/[،؛;,.\s]+$/g, "")
+    .trim();
+  const notePart = text.slice(splitIndex).trim();
+
+  if (!mathPart || !notePart) return null;
+  if (!looksLikeBareMath(mathPart) && !isMathChunk(mathPart)) return null;
+
+  return {
+    math: normalizeLatex(mathPart),
+    note: notePart,
+  };
+}
+
+function FinalAnswerMixedContent({ value }) {
+  const text = repairPhysicsLatexArtifacts(repairBrokenContent(value)).trim();
+  if (!text) return null;
+
+  // نعالج delimiters الصريحة أولًا، خصوصًا الحالات مثل:
+  // عند عكس الجهد يصبح $U_{R1}=-4\\,\\text{V}$.
+  // بهذه الطريقة لا تبقى $ أو أوامر LaTeX ظاهرة كنص داخل البطاقة.
+  const pattern = /(\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/g;
+  const pieces = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      const plain = text.slice(lastIndex, match.index);
+      if (plain) pieces.push({ type: "text", value: plain });
+    }
+
+    pieces.push({
+      type: "math",
+      value: normalizeLatex(match[0]),
+    });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    const plain = text.slice(lastIndex);
+    if (plain) pieces.push({ type: "text", value: plain });
+  }
+
+  // إذا لم نجد delimiters صريحة نرجع للمعالجة السابقة.
+  if (!pieces.some((piece) => piece.type === "math")) {
+    const mixed = splitPhysicsFormulaWithArabicNote(text);
+    if (mixed) {
+      return (
+        <span
+          dir="rtl"
+          className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1"
+          style={{ direction: "rtl", unicodeBidi: "isolate" }}
+        >
+          <MathRenderer value={mixed.math} className="text-lg font-black text-emerald-950" />
+          <span dir="rtl" style={{ direction: "rtl", unicodeBidi: "plaintext" }}>
+            {mixed.note}
+          </span>
+        </span>
+      );
+    }
+
+    if (looksLikeBareMath(text)) {
+      return (
+        <MathRenderer
+          value={text}
+          className="text-lg font-black text-emerald-950"
+        />
+      );
+    }
+
+    return <InlineRichText value={text} />;
+  }
+
+  return (
+    <span
+      dir="rtl"
+      className="inline-flex max-w-full flex-wrap items-center justify-center gap-x-1 gap-y-1"
+      style={{ direction: "rtl", unicodeBidi: "plaintext" }}
+    >
+      {pieces.map((piece, index) => {
+        if (piece.type === "math") {
+          return (
+            <MathRenderer
+              key={`fa-math-${index}`}
+              value={piece.value}
+              className="text-lg font-black text-emerald-950"
+            />
+          );
+        }
+
+        const plain = toText(piece.value)
+          // لا نعرض نقاط/مسافات زائدة قبل أو بعد الصيغة بشكل منفصل.
+          .replace(/^[ \\t]+/, "")
+          .replace(/[ \\t]+$/, "");
+
+        if (!plain) return null;
+
+        return (
+          <span
+            key={`fa-text-${index}`}
+            dir="rtl"
+            className="inline"
+            style={{ direction: "rtl", unicodeBidi: "plaintext" }}
+          >
+            {plain}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function getLatexBlockEnvironment(value) {
+  const text = repairPhysicsLatexArtifacts(repairBrokenContent(value)).trim();
+  if (!text) return null;
+
+  /*
+   * بعض الأجوبة النهائية تأتي كبيئة LaTeX كاملة، مثل:
+   *   \\begin{aligned} ... \\end{aligned}
+   * أو cases / matrix / gathered / array.
+   *
+   * لا يجوز إرسال هذا النوع إلى splitSolutionContent لأنه قد يقسمه عند
+   * الفواصل أو الأسطر ويحوّل البيئة إلى نص خام. نلتقط البيئة كاملة أولًا.
+   */
+  const environmentPattern =
+    /\\begin\s*\{(aligned|alignedat|gathered|gather|cases|array|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix)\}[\s\S]*?\\end\s*\{\1\}/;
+
+  const match = text.match(environmentPattern);
+  if (!match) return null;
+
+  // نسمح فقط بنص بسيط قبل/بعد البيئة مثل علامات الترقيم أو delimiters.
+  const before = text.slice(0, match.index).trim();
+  const after = text.slice((match.index || 0) + match[0].length).trim();
+  const harmless = (part) =>
+    !part || /^(?:\$+|\\\[|\\\]|\\\(|\\\)|[،؛;,.!?؟\s])+$/u.test(part);
+
+  if (!harmless(before) || !harmless(after)) return null;
+
+  let latex = match[0];
+  latex = repairMalformedAlignedLatex(latex);
+  latex = normalizeLatex(latex);
+
+  return latex || null;
+}
+
+function FinalAnswerItems({ value }) {
+  const blockEnvironment = getLatexBlockEnvironment(value);
+
+  // مهم: بيئات LaTeX المركبة يجب أن تصل كاملة إلى MathJax.
+  if (blockEnvironment) {
+    return (
+      <div className="grid grid-cols-1 gap-3">
+        <div
+          dir="ltr"
+          className="w-full overflow-x-auto rounded-2xl border border-emerald-200 bg-white px-4 py-4 text-center"
+          style={{ direction: "ltr", unicodeBidi: "isolate" }}
+        >
+          <MathRenderer
+            value={blockEnvironment}
+            display
+            className="min-w-max text-lg font-black text-emerald-950"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const items = splitSolutionContent(value);
+  if (!items.length) return null;
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((rawItem, index) => {
+        const item = repairPhysicsLatexArtifacts(rawItem)
+          .replace(/^\\[,;]+\s*/, "")
+          .replace(/\s*\\[,;]+$/, "")
+          .trim();
+
+        return (
+          <div
+            key={index}
+            dir="rtl"
+            className="flex min-h-16 items-center justify-center overflow-x-auto rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-center"
+          >
+            <div
+              dir="rtl"
+              className="w-full text-center font-black leading-8 text-emerald-950"
+              style={{ direction: "rtl", unicodeBidi: "plaintext" }}
+            >
+              <FinalAnswerMixedContent value={item} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function SolutionStep({ step, index }) {
   const normalized = normalizeStep(
     step,
@@ -3431,9 +5051,7 @@ function SolutionStep({ step, index }) {
 
       <div className="space-y-4 p-4 sm:p-5">
         {normalized.explanation && (
-          <SmartText className="font-semibold text-slate-800">
-            {normalized.explanation}
-          </SmartText>
+          <StructuredSolutionText value={normalized.explanation} />
         )}
 
         {normalized.formula && (
@@ -3444,9 +5062,7 @@ function SolutionStep({ step, index }) {
 
         {normalized.result && (
           <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-            <SmartText className="font-bold text-emerald-950">
-              {normalized.result}
-            </SmartText>
+            <StructuredSolutionText value={normalized.result} emphasis />
           </div>
         )}
       </div>
@@ -3478,9 +5094,7 @@ function FinalAnswerCard({ value }) {
         className="p-5 text-right"
         style={{ direction: "rtl", unicodeBidi: "plaintext" }}
       >
-        <SmartText className="text-lg font-black leading-9 text-emerald-950">
-          {value}
-        </SmartText>
+        <FinalAnswerItems value={value} />
       </div>
     </section>
   );
@@ -3514,9 +5128,7 @@ function SimplifiedSolution({ solution }) {
           subtitle="Idée"
           tone="violet"
         >
-          <SmartText className="font-semibold text-violet-950">
-            {solution.strategy}
-          </SmartText>
+          <StructuredSolutionText value={solution.strategy} />
         </ContentCard>
       )}
 
@@ -3542,9 +5154,7 @@ function SimplifiedSolution({ solution }) {
           subtitle="Vérification"
           tone="blue"
         >
-          <SmartText className="font-semibold text-slate-800">
-            {solution.verification}
-          </SmartText>
+          <StructuredSolutionText value={solution.verification} />
         </ContentCard>
       )}
     </section>
@@ -3633,7 +5243,7 @@ function ErrorMessage({
         type="button"
         onClick={onRetry}
         disabled={loading}
-        className="rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white disabled:opacity-60"
+        className="min-h-[42px] rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
       >
         إعادة المحاولة
       </button>
@@ -3645,7 +5255,7 @@ function LoadingState() {
   return (
     <div
       dir="rtl"
-      className="flex min-h-64 flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white p-8"
+      className="flex min-h-[220px] flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-5 text-center sm:min-h-64 sm:rounded-3xl sm:p-8"
     >
       <Loader2
         size={38}
@@ -3665,7 +5275,7 @@ function EmptyExercises({
   return (
     <div
       dir="rtl"
-      className="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center"
+      className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-center sm:rounded-3xl sm:p-8"
     >
       <GraduationCap
         size={45}
@@ -3684,7 +5294,7 @@ function EmptyExercises({
         type="button"
         onClick={onGenerate}
         disabled={generating}
-        className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 font-black text-white disabled:opacity-60"
+        className="mt-5 inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 font-black text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
       >
         {generating ? (
           <Loader2
@@ -3707,7 +5317,7 @@ function EmptyState({
   return (
     <div
       dir="rtl"
-      className="rounded-3xl border border-amber-200 bg-amber-50 p-8 text-center"
+      className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center sm:rounded-3xl sm:p-8"
     >
       <AlertTriangle
         size={42}

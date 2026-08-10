@@ -1,5 +1,4 @@
 import {
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -26,9 +25,6 @@ import {
   XCircle,
 } from "lucide-react";
 
-import {
-  UserContext,
-} from "../../Utils/UserContext";
 
 const INITIAL_VALUES = {
   username: "",
@@ -41,12 +37,6 @@ const INITIAL_VALUES = {
 export default function SignUpForm() {
   const navigate = useNavigate();
 
-  /*
-   * login تحفظ Cookies وتحدث token داخل Context
-   * فوراً، لذلك لا نحتاج إلى Refresh.
-   */
-  const { login } =
-    useContext(UserContext);
 
   const studentUrl =
     import.meta.env.VITE_STUDENT_URL;
@@ -470,202 +460,137 @@ export default function SignUpForm() {
     return errors;
   };
 
-  const getAuthenticationData = (
-    responseData,
-  ) => {
-    const accessToken =
-      responseData?.tokens?.access ||
-      responseData?.access ||
-      responseData?.access_token;
 
-    const refreshToken =
-      responseData?.tokens?.refresh ||
-      responseData?.refresh ||
-      responseData?.refresh_token;
+const handleSubmit = async (event) => {
+  event.preventDefault();
 
-    const userData =
-      responseData?.student ||
-      responseData?.user ||
-      responseData?.data?.student ||
-      null;
+  if (isLoading) {
+    return;
+  }
 
-    return {
-      accessToken,
-      refreshToken,
-      userData,
+  closeNotification();
+
+  const errors = validateForm();
+
+  setFormErrors(errors);
+
+  if (Object.keys(errors).length > 0) {
+    return;
+  }
+
+  if (!signupUrl) {
+    showNotification(
+      "error",
+      "VITE_STUDENT_URL غير موجود داخل ملف .env.",
+    );
+
+    return;
+  }
+
+  setIsLoading(true);
+
+  try {
+    const payload = {
+      username:
+        formValues.username.trim(),
+
+      email:
+        formValues.email
+          .trim()
+          .toLowerCase(),
+
+      password:
+        formValues.password,
+
+      branch:
+        formValues.branch,
     };
-  };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+    const response = await axios.post(
+      signupUrl,
+      payload,
+      {
+        headers: {
+          "Content-Type":
+            "application/json",
 
-    if (isLoading) {
-      return;
-    }
+          Accept:
+            "application/json",
+        },
 
-    closeNotification();
-
-    const errors = validateForm();
-
-    setFormErrors(errors);
+        timeout: 20000,
+      },
+    );
 
     if (
-      Object.keys(errors).length > 0
+      response.status !== 200 &&
+      response.status !== 201
     ) {
-      return;
-    }
-
-    if (!signupUrl) {
-      showNotification(
-        "error",
-        "VITE_STUDENT_URL غير موجود داخل ملف .env.",
+      throw new Error(
+        "UNEXPECTED_RESPONSE",
       );
-
-      return;
     }
 
-    setIsLoading(true);
+    const registeredEmail =
+      response.data?.email ||
+      payload.email;
 
-    try {
-      const payload = {
-        username:
-          formValues.username.trim(),
+    setFormValues(INITIAL_VALUES);
+    setFormErrors({});
 
-        email:
-          formValues.email
-            .trim()
-            .toLowerCase(),
-
-        password:
-          formValues.password,
-
-        /*
-         * نرسل branch code مثل:
-         * math أو science
-         */
-        branch:
-          formValues.branch,
-      };
-
-      const response = await axios.post(
-        signupUrl,
-        payload,
-        {
-          headers: {
-            "Content-Type":
-              "application/json",
-
-            Accept:
-              "application/json",
-          },
-          timeout: 15000,
+    navigate(
+      `/check-email?email=${encodeURIComponent(
+        registeredEmail,
+      )}`,
+      {
+        replace: true,
+        state: {
+          email: registeredEmail,
+          message:
+            response.data?.message ||
+            (
+              "تم إنشاء حسابك. تحقق من بريدك " +
+              "الإلكتروني لتفعيل الحساب."
+            ),
         },
-      );
+      },
+    );
+  } catch (error) {
+    console.error(
+      "Signup error:",
+      error.response?.data || error,
+    );
 
-      const {
-        accessToken,
-        refreshToken,
-        userData,
-      } = getAuthenticationData(
-        response.data,
-      );
-
-      /*
-       * بعض Endpoints ترجع 200،
-       * وبعضها ترجع 201.
-       */
-      if (
-        response.status !== 200 &&
-        response.status !== 201
-      ) {
-        throw new Error(
-          "UNEXPECTED_RESPONSE",
-        );
-      }
-
-      if (!accessToken) {
-        /*
-         * إذا كان Signup لا يرجع tokens،
-         * لا ندخل المستخدم تلقائياً.
-         */
-        setFormValues(INITIAL_VALUES);
-        setFormErrors({});
-
-        showNotification(
-          "success",
-          "تم إنشاء حسابك بنجاح. يمكنك الآن تسجيل الدخول.",
-        );
-
-        window.setTimeout(() => {
-          navigate("/login", {
-            replace: true,
-          });
-        }, 1200);
-
-        return;
-      }
-
-      /*
-       * تحديث Context مباشرة.
-       * هذا يمنع مشكلة ظهور المواد فقط بعد Refresh.
-       */
-      login({
-        accessToken,
-        refreshToken,
-        userData,
-        rememberMe: true,
-      });
-
-      setFormValues(INITIAL_VALUES);
-      setFormErrors({});
-
-      showNotification(
-        "success",
-        "تم إنشاء حسابك وتسجيل دخولك بنجاح.",
-      );
-
-      window.setTimeout(() => {
-        navigate("/", {
-          replace: true,
-        });
-      }, 900);
-    } catch (error) {
-      console.error(
-        "Signup error:",
-        error.response?.data || error,
-      );
-
-      if (
-        error.message ===
-        "UNEXPECTED_RESPONSE"
-      ) {
-        showNotification(
-          "error",
-          "أرجع الخادم استجابة غير متوقعة.",
-        );
-
-        return;
-      }
-
-      const apiErrors =
-        extractApiErrors(error);
-
-      setFormErrors(apiErrors);
-
+    if (
+      error.message ===
+      "UNEXPECTED_RESPONSE"
+    ) {
       showNotification(
         "error",
-        apiErrors.general ||
-          apiErrors.username ||
-          apiErrors.email ||
-          apiErrors.password ||
-          apiErrors.branch ||
-          "تعذر إنشاء الحساب.",
+        "أرجع الخادم استجابة غير متوقعة.",
       );
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
+      return;
+    }
+
+    const apiErrors =
+      extractApiErrors(error);
+
+    setFormErrors(apiErrors);
+
+    showNotification(
+      "error",
+      apiErrors.general ||
+        apiErrors.username ||
+        apiErrors.email ||
+        apiErrors.password ||
+        apiErrors.branch ||
+        "تعذر إنشاء الحساب.",
+    );
+  } finally {
+    setIsLoading(false);
+  }
+};
   const selectedBranch = useMemo(
     () =>
       branches.find(
@@ -1196,7 +1121,7 @@ export default function SignUpForm() {
                   className="animate-spin"
                 />
 
-                جاري إنشاء الحساب...
+                جاري إنشاء الحساب وإرسال الرابط...
               </>
             ) : (
               "إنشاء الحساب"

@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import {
   AlertCircle,
@@ -27,12 +27,120 @@ import { MathJax } from "better-react-mathjax";
 
 
 
-const API_KNOWLEDGE_URL = import.meta.env.VITE_KNOWLEDGE_URL;
+const BASE_URL = (import.meta.env.VITE_BASE_URL || "").replace(/\/+$/, "");
+
+// يفضّل أن تكون VITE_COURSE_URL مثل:
+// http://127.0.0.1:8000/api/course
+const API_COURSE_URL = (
+  import.meta.env.VITE_COURSE_URL ||
+  (BASE_URL ? `${BASE_URL}/api/course` : "/api/course")
+).replace(/\/+$/, "");
 
 
-// const SIMPLE_EXPLANATION_URL =
-//   "http://127.0.0.1:8000/api/knowledge/bac-exercises/solve/";
-const SIMPLE_EXPLANATION_URL = `${API_KNOWLEDGE_URL}bac-exercises/solve/`;
+/*
+ * أصل الخادم الذي تُحمَّل منه الصور/الوثائق.
+ *
+ * المشكلة الشائعة هنا:
+ * - الـ API يعمل على http://127.0.0.1:8000
+ * - React يعمل على http://localhost:5173
+ * - قاعدة البيانات ترجع /media/... أو media/...
+ *
+ * عند تمرير /media/... مباشرة إلى <img> سيبحث المتصفح عنها في خادم React،
+ * لذلك تظهر أيقونة الصورة المكسورة. هذه الدوال تحوّل المسارات النسبية إلى
+ * رابط كامل على خادم Django مع الإبقاء على الروابط الكاملة كما هي.
+ */
+function getBackendOrigin() {
+  const explicitBase = String(import.meta.env.VITE_BASE_URL || "").trim();
+
+  if (explicitBase) {
+    try {
+      return new URL(explicitBase, window.location.origin).origin;
+    } catch {
+      // نكمل بالمصدر التالي.
+    }
+  }
+
+  const courseUrl = String(import.meta.env.VITE_COURSE_URL || "").trim();
+
+  if (courseUrl) {
+    try {
+      return new URL(courseUrl, window.location.origin).origin;
+    } catch {
+      // نكمل بالمصدر الافتراضي.
+    }
+  }
+
+  return window.location.origin;
+}
+
+const BACKEND_ORIGIN = getBackendOrigin();
+
+function getVisualSource(value) {
+  if (!value) return "";
+
+  let raw = value;
+
+  // دعم أكثر من شكل JSON محتمل.
+  if (typeof raw === "object") {
+    raw =
+      raw.src ??
+      raw.url ??
+      raw.image_url ??
+      raw.image ??
+      raw.file_url ??
+      raw.file ??
+      raw.path ??
+      raw.media_url ??
+      "";
+  }
+
+  let source = String(raw || "").trim();
+  if (!source) return "";
+
+  // تنظيف قيم تأتي أحيانًا من JSON أو Windows.
+  source = source
+    .replace(/^['"]|['"]$/g, "")
+    .replace(/\\\\/g, "/")
+    .replace(/^\.\//, "");
+
+  // روابط جاهزة لا نغيّرها.
+  if (
+    /^(?:https?:)?\/\//i.test(source) ||
+    /^(?:data|blob):/i.test(source)
+  ) {
+    return source.startsWith("//") ? `${window.location.protocol}${source}` : source;
+  }
+
+  // لو كانت القيمة نفسها URL مشفّرًا.
+  if (/^https?%3A%2F%2F/i.test(source)) {
+    try {
+      return decodeURIComponent(source);
+    } catch {
+      return source;
+    }
+  }
+
+  // media/... أو static/... أو uploads/... إلخ.
+  const normalizedPath = source.startsWith("/") ? source : `/${source}`;
+
+  return `${BACKEND_ORIGIN}${normalizedPath}`;
+}
+
+function getVisualAlt(item, fallback = "وثيقة علمية") {
+  if (!item || typeof item !== "object") return fallback;
+
+  return (
+    item.alt ||
+    item.description ||
+    item.caption ||
+    item.title ||
+    fallback
+  );
+}
+
+function getSimpleSolutionUrl(questionId) {
+  return `${API_COURSE_URL}/questions/${questionId}/simple-solution/`;
+}
 
 function hasText(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -199,6 +307,10 @@ function decodeBrokenText(value) {
   }
 
   return text
+    // إصلاح صيغ السهم القادمة من JSON/AI مثل arrowI_2 و arrow2SO_4.
+    // نطبّق الإصلاح هنا مبكرًا حتى تستفيد منه كل أماكن العرض.
+    .replace(/\\?leftrightarrow\s*(?=[A-Za-z0-9_\\{(])/gi, "\\leftrightarrow ")
+    .replace(/\\?(?:longrightarrow|rightarrow|arrow)\s*(?=[A-Za-z0-9_\\{(])/gi, "\\rightarrow ")
     .replace(/\r\n?/g, "\n")
     .replace(/\\r\\n/g, "\n")
     // نحول \\n المكتوبة حرفيًا إلى سطر فقط عندما لا تكون بداية أمر مثل \\neq.
@@ -264,7 +376,8 @@ function repairLatexCommands(value) {
     const previous = text;
     text = text
       .replace(/\\\\+(?=[()[\]{}$])/g, "\\")
-      .replace(/\\\\+(?=[A-Za-z])/g, "\\");
+      .replace(/\\\\+(?=[A-Za-z])/g, "\\")
+      .replace(/\\+(?=[,;! ])/g, "\\");
     if (text === previous) break;
   }
 
@@ -274,7 +387,17 @@ function repairLatexCommands(value) {
     .replace(/\\(?:text|mathrm|operatorname)\s*\{([^{}]*[\u0600-\u06FF][^{}]*)\}/g, "\n$1\n")
     .replace(/\\boxed\s*\{([^{}]*[\u0600-\u06FF][^{}]*)\}/g, "\n$1\n")
     // أوامر وصلت بحروف مفصولة أو بلا backslash.
+    // إصلاح أخطاء شائعة من الـAI مثل \d\frac و dfrac بدون backslash.
+    .replace(/\\d\s*\\(?=(?:d?frac|tfrac)\b)/gi, "\\")
+    .replace(/\\d(?=\\(?:d?frac|tfrac)\b)/gi, "")
+    .replace(/(^|[^A-Za-z\\])dfrac(?=\s*(?:\{|[-+]?\d|[A-Za-z]))/g, "$1\\dfrac")
+    .replace(/(^|[^A-Za-z\\])tfrac(?=\s*(?:\{|[-+]?\d|[A-Za-z]))/g, "$1\\tfrac")
+    .replace(/\\?d\s*frac\b/gi, "\\dfrac")
+    .replace(/\\?t\s*frac\b/gi, "\\tfrac")
     .replace(/\\?f\s*rac\b/gi, "\\frac")
+    // التصحيح النهائي بعد قاعدة frac العامة: \d\frac -> \dfrac.
+    .replace(/\\d\\frac\b/g, "\\dfrac")
+    .replace(/\\t\\frac\b/g, "\\tfrac")
     .replace(/\\?s\s*qrt\b/gi, "\\sqrt")
     .replace(/\\?s\s*um\b/gi, "\\sum")
     .replace(/\\?p\s*rod\b/gi, "\\prod")
@@ -287,8 +410,14 @@ function repairLatexCommands(value) {
     .replace(/(^|[^A-Za-z\\])prod(?=\s*(?:_|\^|\{))/g, "$1\\prod")
     .replace(/(^|[^A-Za-z\\])times(?=$|[^A-Za-z])/g, "$1\\times")
     .replace(/(^|[^A-Za-z\\])cdot(?=$|[^A-Za-z])/g, "$1\\cdot")
+    // أسهم مكتوبة كنص عادي أو ملتصقة بالصيغة التالية.
+    .replace(/\\?leftrightarrow\s*(?=[A-Za-z0-9_\\{(]|$)/gi, "\\leftrightarrow ")
+    .replace(/\\?(?:longrightarrow|rightarrow|arrow)\s*(?=[A-Za-z0-9_\\{(]|$)/gi, "\\rightarrow ")
     .replace(/(^|[^A-Za-z\\])Rightarrow(?=$|[^A-Za-z])/g, "$1\\Rightarrow")
     .replace(/(^|[^A-Za-z\\])Leftrightarrow(?=$|[^A-Za-z])/g, "$1\\Leftrightarrow")
+    // توحيد كتابة الشحنات والأسس البسيطة مثل I^- و e-.
+    .replace(/\^\s*([+-])(?=$|[\s,;،؛+)=])/g, "^{$1}")
+    .replace(/(^|[^A-Za-z])([A-Za-z])([+-])(?=$|[\s,;،؛+)=])/g, "$1$2^{$3}")
     // متغيرات عادية وصلت مسبوقة بشرطة مائلة.
     .replace(/\\([A-Za-z])(?=_(?:\{|[A-Za-z0-9]))/g, "$1")
     .replace(/\\([A-Z])(?=\s*[=\[])/g, "$1")
@@ -346,6 +475,9 @@ function stripOuterMathDelimiter(value) {
 function normalizeMathFormula(value) {
   let text = repairLatexCommands(value);
   text = stripOuterMathDelimiter(text)
+    // حماية أخيرة قبل إرسال الصيغة إلى MathJax.
+    .replace(/\\?leftrightarrow\s*(?=[A-Za-z0-9_\\{(]|$)/gi, "\\leftrightarrow ")
+    .replace(/\\?(?:longrightarrow|rightarrow|arrow)\s*(?=[A-Za-z0-9_\\{(]|$)/gi, "\\rightarrow ")
     .replace(/\\\(|\\\)|\\\[|\\\]/g, "")
     .replace(/^\$+|\$+$/g, "")
     .replace(/\$+/g, "")
@@ -398,7 +530,7 @@ function looksLikeMathFragment(value) {
   if (!compact) return false;
 
   return (
-    /\\(?:frac|dfrac|tfrac|sqrt|sum|prod|lim|infty|cdot|times|div|leq?|geq?|neq|to|Rightarrow|Leftrightarrow|mathbb|forall|exists|boxed)\b/.test(text) ||
+    /\\(?:frac|dfrac|tfrac|sqrt|sum|prod|lim|infty|cdot|times|div|leq?|geq?|neq|approx|simeq|sim|pm|mp|to|rightarrow|longrightarrow|leftrightarrow|Rightarrow|Leftrightarrow|mathbb|mathrm|text|operatorname|forall|exists|boxed)\b/.test(text) ||
     /[A-Za-z](?:_\{?[^}\s]+\}?|\^\{?[^}\s]+\}?)/.test(text) ||
     /[A-Za-z0-9})\]]\s*(?:=|<|>|\\leq|\\geq|\\neq)\s*[A-Za-z0-9({\\+-]/.test(text) ||
     /^[A-Za-z](?:'|_\{?[^}\s]+\}?)?\s*=/.test(text) ||
@@ -451,7 +583,7 @@ function splitBareMathFromText(value) {
         /\s/.test(current);
 
       if (!allowed) break;
-      if (current === "\\" && !/[A-Za-z()[\]]/.test(next)) break;
+      if (current === "\\" && !/[A-Za-z()[\],;:! ]/.test(next)) break;
 
       if (current === "{") braceDepth += 1;
       if (current === "}") braceDepth = Math.max(0, braceDepth - 1);
@@ -527,6 +659,8 @@ function splitExplicitMath(value) {
 
 function cleanPlainTextSegment(value) {
   return String(value || "")
+    .replace(/\\?leftrightarrow\s*(?=[A-Za-z0-9_\\{(]|$)/gi, " ↔ ")
+    .replace(/\\?(?:longrightarrow|rightarrow|arrow)\s*(?=[A-Za-z0-9_\\{(]|$)/gi, " → ")
     .replace(/\\+[()[\]]/g, "")
     .replace(/\\+([A-Za-z])(?=_(?:\{|[A-Za-z0-9]))/g, "$1")
     .replace(/\\+(?=[{}])/g, "")
@@ -570,7 +704,7 @@ function InlineMathSegments({ value, dir = "rtl" }) {
   return (
     <span
       dir={dir}
-      className="inline whitespace-pre-wrap break-words"
+      className="inline max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
       style={{
         direction: dir,
         unicodeBidi: "isolate",
@@ -593,7 +727,7 @@ function InlineMathSegments({ value, dir = "rtl" }) {
               key={`math-${index}`}
               dir="ltr"
               className="mx-1 inline-block max-w-full align-middle"
-              style={{ direction: "ltr", unicodeBidi: "isolate" }}
+              style={{ direction: "ltr", unicodeBidi: "isolate", overflow: "visible" }}
             >
               <MathJax dynamic hideUntilTypeset="first">
                 <span dir="ltr">{`\\(${formula}\\)`}</span>
@@ -657,7 +791,7 @@ function MathTextParser({
             <div
               key={`display-${lineIndex}`}
               dir="ltr"
-              className="w-full overflow-x-auto py-1 text-center"
+              className="w-full max-w-full overflow-x-auto overscroll-x-contain py-1 text-center"
               style={{ direction: "ltr", unicodeBidi: "isolate" }}
             >
               <MathJax dynamic hideUntilTypeset="first">
@@ -757,8 +891,19 @@ export default function BacExercisesList({ data }) {
   const [visibleStoredSolutions, setVisibleStoredSolutions] = useState({});
   const [simpleExplanations, setSimpleExplanations] = useState({});
   const [visibleSimpleExplanations, setVisibleSimpleExplanations] = useState({});
+  const [loadedSavedSimpleSolutions, setLoadedSavedSimpleSolutions] = useState({});
   const [loadingQuestionId, setLoadingQuestionId] = useState(null);
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    setCurrentIndex(0);
+    setVisibleStoredSolutions({});
+    setSimpleExplanations({});
+    setVisibleSimpleExplanations({});
+    setLoadedSavedSimpleSolutions({});
+    setLoadingQuestionId(null);
+    setErrors({});
+  }, [data]);
 
   /*
    * data correspond directement à response.data :
@@ -785,6 +930,21 @@ export default function BacExercisesList({ data }) {
   const hasCurrentGraph = isNonEmptyObject(
     currentGraphData,
   );
+
+  // رسوم وAnimations خاصة بتمارين العلوم.
+  const currentScienceVisual = normalizeObject(
+    currentQuestion?.science_visual,
+  );
+
+  const hasCurrentScienceVisual = isNonEmptyObject(
+    currentScienceVisual,
+  );
+
+  const currentDocuments = getQuestionDocuments(
+    currentQuestion,
+  );
+
+  const hasCurrentDocuments = currentDocuments.length > 0;
 
   const isFirst = currentIndex === 0;
   const isLast = currentIndex === questions.length - 1;
@@ -816,6 +976,80 @@ export default function BacExercisesList({ data }) {
   const isLoading = loadingQuestionId === questionKey;
 
   const currentError = errors[questionKey] || "";
+
+  /*
+   * عند فتح السؤال نبحث مرة واحدة عن حل AI محفوظ لهذا الطالب.
+   * إذا وجدناه نظهر التصحيح والحل المبسط مباشرة بدون استدعاء AI.
+   */
+  useEffect(() => {
+    const questionId = currentQuestion?.id;
+
+    if (!questionId || !token) return undefined;
+    if (loadedSavedSimpleSolutions[questionId]) return undefined;
+
+    let cancelled = false;
+
+    const loadSavedSimpleSolution = async () => {
+      try {
+        const response = await axios.get(
+          getSimpleSolutionUrl(questionId),
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            timeout: 30000,
+          },
+        );
+
+        if (cancelled) return;
+
+        const parsed = parseAIResponse(response.data);
+
+        if (
+          parsed?.success &&
+          parsed?.exists &&
+          isNonEmptyObject(parsed?.simple_solution)
+        ) {
+          setSimpleExplanations((previous) => ({
+            ...previous,
+            [questionId]: parsed,
+          }));
+
+          // المستخدم طلب أن يجد الحل ظاهرًا مباشرة عند الرجوع.
+          setVisibleStoredSolutions((previous) => ({
+            ...previous,
+            [questionId]: true,
+          }));
+
+          setVisibleSimpleExplanations((previous) => ({
+            ...previous,
+            [questionId]: true,
+          }));
+        }
+      } catch (error) {
+        // فشل استرجاع المحفوظ لا يمنع الطالب من إنشاء حل جديد يدويًا.
+        console.error("Load saved simple solution error:", error);
+      } finally {
+        if (!cancelled) {
+          setLoadedSavedSimpleSolutions((previous) => ({
+            ...previous,
+            [questionId]: true,
+          }));
+
+        }
+      }
+    };
+
+    loadSavedSimpleSolution();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentQuestion?.id,
+    token,
+    loadedSavedSimpleSolutions,
+  ]);
 
   const toggleStoredSolution = () => {
     setVisibleStoredSolutions((previous) => ({
@@ -864,35 +1098,9 @@ export default function BacExercisesList({ data }) {
       clearQuestionError();
 
       const response = await axios.post(
-        SIMPLE_EXPLANATION_URL,
+        getSimpleSolutionUrl(currentQuestion.id),
         {
-          question_id: currentQuestion.id,
-          exercise_id: currentQuestion.code,
-          axis_id: axis?.id,
-          mode: "simplified_explanation",
-          explanation_style: "very_simple",
-          language: "ar",
-          question: {
-            code: currentQuestion.code,
-            text: currentQuestion.text,
-            displayed_text: getQuestionDisplayText(currentQuestion),
-            standalone_text: currentQuestion.standalone_text,
-            context: currentQuestion.context,
-            standalone_support:
-              currentQuestion.standalone_support || {},
-            original_text: currentQuestion.original_text,
-            is_standalone: currentQuestion.is_standalone,
-            year: currentQuestion.year,
-            number: currentQuestion.number,
-            skill: currentQuestion.skill,
-            difficulty: currentQuestion.difficulty,
-            graph_data: currentQuestion.graph_data || {},
-            question_graph_data:
-              currentQuestion.graph_data || {},
-            solution_graph_data:
-              storedSolution.graph_data || {},
-          },
-          stored_solution: storedSolution,
+          regenerate: Boolean(forceRegenerate),
         },
         {
           headers: {
@@ -914,6 +1122,13 @@ export default function BacExercisesList({ data }) {
         ...previous,
         [questionKey]: parsed,
       }));
+
+      if (currentQuestion?.id) {
+        setLoadedSavedSimpleSolutions((previous) => ({
+          ...previous,
+          [currentQuestion.id]: true,
+        }));
+      }
 
       setVisibleSimpleExplanations((previous) => ({
         ...previous,
@@ -939,16 +1154,76 @@ export default function BacExercisesList({ data }) {
   return (
     <section
       dir="rtl"
-      className="min-h-full bg-gradient-to-b from-slate-50 via-blue-50/30 to-slate-50 px-4 py-6 sm:px-6"
+      className="
+        bac-responsive-root
+        min-h-full
+        w-full
+        min-w-0
+        overflow-x-hidden
+        bg-gradient-to-b
+        from-slate-50
+        via-blue-50/30
+        to-slate-50
+        px-2
+        py-3
+        min-[360px]:px-3
+        sm:px-5
+        sm:py-5
+        lg:px-6
+      "
     >
-      <div className="mx-auto max-w-5xl">
+      <style>{`
+        @keyframes solutionStepIn {
+          from { opacity: 0; transform: translateY(14px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .bac-responsive-root,
+        .bac-responsive-root * {
+          box-sizing: border-box;
+        }
+
+        .bac-responsive-root img,
+        .bac-responsive-root canvas,
+        .bac-responsive-root video {
+          max-width: 100%;
+          height: auto;
+        }
+
+        .bac-responsive-root img {
+          display: block;
+        }
+
+        .bac-responsive-root mjx-container {
+          max-width: 100%;
+        }
+
+        /* المعادلات المضمنة لا تنشئ شريط تمرير صغيراً. */
+        .bac-responsive-root mjx-container[jax="CHTML"][display="false"] {
+          display: inline-block !important;
+          overflow: visible !important;
+          margin: 0 0.08em !important;
+          vertical-align: middle;
+        }
+
+        .bac-responsive-root bdi > mjx-container {
+          overflow: visible !important;
+        }
+
+        @media (max-width: 359px) {
+          .bac-responsive-root button {
+            touch-action: manipulation;
+          }
+        }
+      `}</style>
+      <div className="mx-auto w-full min-w-0 max-w-5xl">
         <ExercisesHeader
           axis={axis}
           currentIndex={currentIndex}
           total={questions.length}
         />
 
-        <article className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_20px_70px_-38px_rgba(15,23,42,0.4)]">
+        <article className="overflow-hidden rounded-2xl sm:rounded-[32px] border border-slate-200/80 bg-white shadow-[0_20px_70px_-38px_rgba(15,23,42,0.4)]">
           <ExerciseNavigation
             currentIndex={currentIndex}
             total={questions.length}
@@ -958,38 +1233,20 @@ export default function BacExercisesList({ data }) {
             onNext={goToNext}
           />
 
-          <div className="p-4 sm:p-6 lg:p-7">
-            <ExerciseQuestion question={currentQuestion} />
+          <div className="min-w-0 p-3 min-[360px]:p-4 sm:p-6 lg:p-7">
+            <ExerciseQuestion
+              question={currentQuestion}
+              graphData={hasCurrentGraph ? currentGraphData : {}}
+              scienceVisual={hasCurrentScienceVisual ? currentScienceVisual : {}}
+              documents={hasCurrentDocuments ? currentDocuments : []}
+              revealGraphSolution={isStoredSolutionVisible}
+            />
 
-            {hasCurrentGraph && (
-              <SequenceGraphRenderer
-                graphData={currentGraphData}
-                eyebrow="الرسم المعطى"
-                title="الرسم الموجود في نص التمرين"
-                description="هذا الرسم جزء من معطيات التمرين، لذلك يظهر قبل فتح الحل."
-              />
-            )}
-
-            {currentError && (
-              <ErrorMessage
-                message={currentError}
-                loading={isLoading}
-                onRetry={() => handleSimpleExplanation(true)}
-              />
-            )}
-
-            <div className="mt-6 grid gap-3 md:grid-cols-2">
+            <div className="mt-5 min-w-0 md:mt-6">
               <StoredSolutionButton
                 hasSolution={hasStoredSolution}
                 visible={isStoredSolutionVisible}
                 onClick={toggleStoredSolution}
-              />
-
-              <SimpleExplanationButton
-                loading={isLoading}
-                hasExplanation={Boolean(simpleExplanation)}
-                visible={isSimpleExplanationVisible}
-                onClick={() => handleSimpleExplanation(false)}
               />
             </div>
 
@@ -1000,13 +1257,32 @@ export default function BacExercisesList({ data }) {
               />
             )}
 
-            {simpleExplanation && isSimpleExplanationVisible && (
-              <SimpleExplanation
-                key={`simple-${questionKey}`}
-                explanation={simpleExplanation}
-                loading={isLoading}
-                onRegenerate={() => handleSimpleExplanation(true)}
-              />
+            {((hasStoredSolution && isStoredSolutionVisible) || simpleExplanation) && (
+              <>
+                <AIHelpCard
+                  loading={isLoading}
+                  hasExplanation={Boolean(simpleExplanation)}
+                  visible={isSimpleExplanationVisible}
+                  onClick={() => handleSimpleExplanation(false)}
+                />
+
+                {currentError && (
+                  <ErrorMessage
+                    message={currentError}
+                    loading={isLoading}
+                    onRetry={() => handleSimpleExplanation(true)}
+                  />
+                )}
+
+                {simpleExplanation && isSimpleExplanationVisible && (
+                  <SimpleExplanation
+                    key={`simple-${questionKey}`}
+                    explanation={simpleExplanation}
+                    loading={isLoading}
+                    onRegenerate={() => handleSimpleExplanation(true)}
+                  />
+                )}
+              </>
             )}
           </div>
         </article>
@@ -1019,10 +1295,10 @@ function ExercisesHeader({ axis, currentIndex, total }) {
   const progress = total > 0 ? ((currentIndex + 1) / total) * 100 : 0;
 
   return (
-    <header className="mb-5 overflow-hidden rounded-[30px] border border-blue-100 bg-white shadow-sm">
-      <div className="bg-gradient-to-l from-blue-600 via-indigo-600 to-violet-600 px-5 py-7 text-white sm:px-7">
-        <div className="flex items-start gap-4">
-          <div className="flex h-13 w-13 shrink-0 items-center justify-center rounded-2xl bg-white/15 p-3 backdrop-blur">
+    <header className="mb-5 overflow-hidden rounded-2xl sm:rounded-[30px] border border-blue-100 bg-white shadow-sm">
+      <div className="bg-gradient-to-l from-blue-600 via-indigo-600 to-violet-600 px-4 py-5 text-white sm:px-7 sm:py-7">
+        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15 p-2.5 backdrop-blur sm:h-13 sm:w-13 sm:rounded-2xl sm:p-3">
             <GraduationCap size={29} />
           </div>
 
@@ -1031,7 +1307,7 @@ function ExercisesHeader({ axis, currentIndex, total }) {
               تمارين بكالوريا محلولة
             </p>
 
-            <h1 className="text-2xl font-black leading-9 sm:text-3xl">
+            <h1 className="text-lg font-black leading-7 min-[360px]:text-xl sm:text-3xl sm:leading-9">
               تعلم طريقة الحل خطوة بخطوة
             </h1>
 
@@ -1044,7 +1320,7 @@ function ExercisesHeader({ axis, currentIndex, total }) {
         </div>
       </div>
 
-      <div className="px-5 py-4 sm:px-7">
+      <div className="px-4 py-4 sm:px-7">
         <div className="mb-2 flex items-center justify-between text-sm font-extrabold">
           <span className="text-slate-700">
             التمرين {currentIndex + 1} من {total}
@@ -1075,7 +1351,7 @@ function ExerciseNavigation({
   onNext,
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-4 py-3 sm:px-6">
+    <div className="flex min-w-0 items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-2 py-2.5 min-[360px]:px-3 sm:px-6 sm:py-3">
       <NavigationButton
         onClick={onPrevious}
         disabled={isFirst}
@@ -1084,7 +1360,7 @@ function ExerciseNavigation({
         السابق
       </NavigationButton>
 
-      <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm">
+      <div className="shrink-0 rounded-full border border-slate-200 bg-white px-2.5 py-2 text-xs font-black text-slate-700 shadow-sm min-[360px]:px-3 sm:px-4 sm:text-sm">
         {currentIndex + 1} / {total}
       </div>
 
@@ -1109,7 +1385,7 @@ function NavigationButton({
   return (
     <button
       type="button"
-      className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-extrabold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex min-h-10 shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-extrabold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40 min-[360px]:gap-2 min-[360px]:px-3 sm:text-sm"
       {...props}
     >
       {iconPosition === "right" && icon}
@@ -1124,64 +1400,118 @@ function splitQuestionBlocks(value) {
   let text = repairMathDelimiters(value).trim();
   if (!text) return [];
 
-  // فصل المعطيات، العلاقات، ثم المطالب المرقمة بطريقة مستقرة.
+  /*
+   * نفصل فقط عند بداية سؤال مرقّم.
+   * لا نفصل قبل كلمات مثل "حدد" و"احسب" لأن ذلك كان يحول:
+   * 1) حدد المتفاعل المحد
+   * إلى كتلتين منفصلتين: "1)" ثم "حدد المتفاعل المحد".
+   */
   text = text
-    .replace(/\s+(?=(?:\(?\d{1,2}\)?|[أبجدهـوزحطيكلمنسعفصقرشتثخذضظغ])\s*[\)）.\-]\s+)/g, "\n")
-    .replace(/\s+(?=(?:استنتج|أثبت|بيّن|بين|احسب|ادرس|تحقق|برهن|أوجد|حدد)\s+)/g, "\n")
+    .replace(
+      /[ \t]+(?=(?:\(\s*\d{1,2}\s*\)|\d{1,2}\s*[\)）.\-]|[أبجدهـوزحطيكلمنسعفصقرشتثخذضظغ]\s*[\)）.\-])\s*)/g,
+      "\n",
+    )
     .replace(/\s*(\\\[[\s\S]*?\\\])\s*/g, "\n$1\n")
     .replace(/\n{3,}/g, "\n\n");
 
-  return text
+  const rawLines = text
     .split(/\n+/)
     .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const match = line.match(/^((?:\(?\d{1,2}\)?|[أبجدهـوزحطيكلمنسعفصقرشتثخذضظغ])\s*[\)）.\-])\s*(.*)$/);
-      return {
-        id: index,
-        marker: match?.[1] || "",
-        content: match?.[2] || line,
-        formulaOnly: shouldUseDisplayMath(match?.[2] || line),
-      };
+    .filter(Boolean);
+
+  const markerPattern =
+    /^(?:\(\s*(\d{1,2})\s*\)|(\d{1,2})\s*[\)）.\-]|([أبجدهـوزحطيكلمنسعفصقرشتثخذضظغ])\s*[\)）.\-])\s*(.*)$/;
+
+  const blocks = [];
+
+  for (let index = 0; index < rawLines.length; index += 1) {
+    const line = rawLines[index];
+    const match = line.match(markerPattern);
+
+    if (!match) {
+      blocks.push({
+        id: blocks.length,
+        marker: "",
+        content: line,
+        formulaOnly: shouldUseDisplayMath(line),
+      });
+      continue;
+    }
+
+    const marker = match[1] || match[2] || match[3] || "";
+    let content = (match[4] || "").trim();
+
+    // معالجة البيانات القديمة التي تحتوي على رقم السؤال في سطر مستقل.
+    if (!content && index + 1 < rawLines.length) {
+      const nextLine = rawLines[index + 1];
+      if (!markerPattern.test(nextLine)) {
+        content = nextLine;
+        index += 1;
+      }
+    }
+
+    blocks.push({
+      id: blocks.length,
+      marker,
+      content,
+      formulaOnly: shouldUseDisplayMath(content),
     });
+  }
+
+  return blocks.filter((block) => block.marker || block.content);
 }
 
-function StructuredQuestionText({ value }) {
+function StructuredQuestionText({ value, graphNode = null }) {
   const blocks = splitQuestionBlocks(value);
   if (!blocks.length) return null;
 
+  /*
+   * نحافظ على مقدمة التمرين كنص عادي، ثم نجعل كل سؤال مرقّم
+   * في سطر مستقل. لا توجد Cards ولا خطوط فاصلة بين الأسئلة.
+   */
   return (
     <div
       dir="rtl"
-      className="divide-y divide-blue-100"
+      className="min-w-0 text-right"
       style={{ direction: "rtl", unicodeBidi: "isolate" }}
     >
-      {blocks.map((block, index) => {
+      {blocks.map((block, blockIndex) => {
+        const firstQuestionIndex = blocks.findIndex((item) => Boolean(item.marker));
+        const shouldInsertGraph =
+          graphNode &&
+          firstQuestionIndex >= 0 &&
+          blockIndex === firstQuestionIndex;
+
         if (block.marker) {
           return (
-            <div
-              key={block.id}
-              className="flex min-w-0 items-start gap-3 py-4 first:pt-0 last:pb-0"
-            >
-              <span className="mt-1 flex h-8 min-w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 px-2 text-sm font-black text-white">
-                {block.marker.replace(/[\)）.\-]/g, "")}
-              </span>
+            <div key={`question-with-graph-${block.id}`}>
+              {shouldInsertGraph && (
+                <div className="my-5">{graphNode}</div>
+              )}
+              <div
+                className="flex min-w-0 items-start gap-3 py-1.5 sm:gap-3.5 sm:py-2"
+              >
+                <span className="mt-[4px] flex h-7 min-w-7 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-1.5 text-[13px] font-black text-slate-800 sm:h-8 sm:min-w-8 sm:text-sm">
+                  {block.marker}
+                </span>
 
-              <div className="min-w-0 flex-1 text-right text-[17px] font-bold leading-10 text-slate-900">
-                <MathTextParser
-                  text={block.content}
-                  display={block.formulaOnly}
-                />
+                <div className="min-w-0 flex-1 break-words text-[15px] font-semibold leading-8 text-slate-900 sm:text-[17px] sm:leading-9">
+                  <MathTextParser
+                    text={block.content}
+                    display={block.formulaOnly}
+                  />
+                </div>
               </div>
             </div>
           );
         }
 
+
         if (block.formulaOnly) {
           return (
             <div
               key={block.id}
-              className="w-full overflow-x-auto py-4 text-center first:pt-0 last:pb-0"
+              className="my-2 w-full overflow-x-auto bg-white px-0 py-2 text-center"
             >
               <MathTextParser text={block.content} display />
             </div>
@@ -1191,38 +1521,648 @@ function StructuredQuestionText({ value }) {
         return (
           <div
             key={block.id}
-            className="min-w-0 py-4 text-right text-[17px] font-semibold leading-10 text-slate-900 first:pt-0 last:pb-0"
+            className="mb-2 min-w-0 break-words bg-white text-[15px] font-semibold leading-8 text-slate-900 last:mb-0 sm:text-[17px] sm:leading-9"
           >
             <MathTextParser text={block.content} />
           </div>
         );
       })}
+
+      {graphNode && !blocks.some((item) => Boolean(item.marker)) && (
+        <div className="my-5">{graphNode}</div>
+      )}
     </div>
   );
 }
 
-function ExerciseQuestion({ question }) {
+function simplifyExerciseText(value) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    // نحافظ على LaTeX كما هو، ونحوّل فقط فواصل الأسطر إلى نص متصل.
+    .replace(/[ \t]*\n+[ \t]*/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+
+
+function getQuestionDocuments(question) {
+  if (!question || typeof question !== "object") return [];
+
+  if (Array.isArray(question.documents)) {
+    return question.documents.filter(Boolean);
+  }
+
+  const metadataDocuments = question?.metadata?.documents;
+
+  if (Array.isArray(metadataDocuments)) {
+    return metadataDocuments.filter(Boolean);
+  }
+
+  return [];
+}
+
+function EmbeddedSvgElement({ element, index }) {
+  if (!element || typeof element !== "object") return null;
+
+  const type = String(element.type || "").toLowerCase().trim();
+  const common = {
+    key: `${type || "element"}-${index}`,
+  };
+
+  if (type === "circle") {
+    return (
+      <circle
+        {...common}
+        cx={Number(element.cx) || 0}
+        cy={Number(element.cy) || 0}
+        r={Number(element.r) || 0}
+        fill={element.fill ?? "none"}
+        stroke={element.stroke ?? "none"}
+        strokeWidth={Number(element.strokeWidth) || 0}
+      />
+    );
+  }
+
+  if (type === "ellipse") {
+    return (
+      <ellipse
+        {...common}
+        cx={Number(element.cx) || 0}
+        cy={Number(element.cy) || 0}
+        rx={Number(element.rx) || 0}
+        ry={Number(element.ry) || 0}
+        fill={element.fill ?? "none"}
+        stroke={element.stroke ?? "none"}
+        strokeWidth={Number(element.strokeWidth) || 0}
+      />
+    );
+  }
+
+  if (type === "rect") {
+    return (
+      <rect
+        {...common}
+        x={Number(element.x) || 0}
+        y={Number(element.y) || 0}
+        width={Number(element.width) || 0}
+        height={Number(element.height) || 0}
+        rx={Number(element.rx) || 0}
+        ry={Number(element.ry) || 0}
+        fill={element.fill ?? "none"}
+        stroke={element.stroke ?? "none"}
+        strokeWidth={Number(element.strokeWidth) || 0}
+      />
+    );
+  }
+
+  if (type === "line") {
+    return (
+      <line
+        {...common}
+        x1={Number(element.x1) || 0}
+        y1={Number(element.y1) || 0}
+        x2={Number(element.x2) || 0}
+        y2={Number(element.y2) || 0}
+        stroke={element.stroke ?? "#000"}
+        strokeWidth={Number(element.strokeWidth) || 1}
+      />
+    );
+  }
+
+  if (type === "path") {
+    return (
+      <path
+        {...common}
+        d={String(element.d || "")}
+        fill={element.fill ?? "none"}
+        stroke={element.stroke ?? "#000"}
+        strokeWidth={Number(element.strokeWidth) || 1}
+        strokeLinecap={element.strokeLinecap || "round"}
+        strokeLinejoin={element.strokeLinejoin || "round"}
+      />
+    );
+  }
+
+  if (type === "text") {
+    const anchorMap = {
+      start: "start",
+      middle: "middle",
+      end: "end",
+    };
+
+    return (
+      <text
+        {...common}
+        x={Number(element.x) || 0}
+        y={Number(element.y) || 0}
+        fill={element.fill ?? "#000"}
+        fontSize={Number(element.fontSize) || 18}
+        fontWeight={element.fontWeight || 700}
+        textAnchor={anchorMap[element.anchor] || "middle"}
+        dominantBaseline={element.dominantBaseline || "middle"}
+        direction={containsArabic(element.text) ? "rtl" : "ltr"}
+        style={{
+          fontFamily: "Tajawal, Cairo, Arial, sans-serif",
+          unicodeBidi: "plaintext",
+        }}
+      >
+        {String(element.text || "")}
+      </text>
+    );
+  }
+
+  return null;
+}
+
+function EmbeddedSvgDocument({ document }) {
+  const normalized = normalizeObject(document);
+  const elements = normalizeArray(normalized.elements);
+  const width = Number(normalized.width) || 760;
+  const height = Number(normalized.height) || 420;
+  const viewBox = hasText(normalized.viewBox)
+    ? normalized.viewBox
+    : `0 0 ${width} ${height}`;
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
+        <Eye size={17} className="shrink-0 text-blue-600" />
+        <p className="min-w-0 break-words text-sm font-black text-slate-800">
+          {normalized.title || "وثيقة علمية"}
+        </p>
+      </div>
+
+      <div className="flex w-full items-center justify-center overflow-x-auto bg-white p-3 sm:p-5">
+        <svg
+          viewBox={viewBox}
+          width={width}
+          height={height}
+          role="img"
+          aria-label={normalized.title || normalized.caption || "وثيقة علمية"}
+          className="h-auto w-full max-w-[820px]"
+          preserveAspectRatio="xMidYMid meet"
+          style={{ maxHeight: "520px" }}
+        >
+          {elements.map((element, index) => (
+            <EmbeddedSvgElement
+              key={`${normalized.id || "document"}-${index}`}
+              element={element}
+              index={index}
+            />
+          ))}
+        </svg>
+      </div>
+
+      {normalized.caption && (
+        <div className="border-t border-slate-100 px-4 py-3 text-sm font-semibold leading-7 text-slate-700">
+          <MathTextParser text={normalized.caption} />
+        </div>
+      )}
+
+      {Array.isArray(normalized.legend) && normalized.legend.length > 0 && (
+        <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-3">
+          <div className="flex flex-wrap gap-3">
+            {normalized.legend.map((item, index) => (
+              <div
+                key={`legend-${index}`}
+                className="flex items-center gap-2 text-xs font-bold text-slate-700"
+              >
+                <span dir="ltr" className="text-base text-slate-950">
+                  {item?.symbol || "●"}
+                </span>
+                <span>{item?.meaning || ""}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmbeddedSequenceDocument({ document }) {
+  const normalized = normalizeObject(document);
+  const stages = normalizeArray(normalized.stages);
+  const [stageIndex, setStageIndex] = useState(0);
+
+  useEffect(() => {
+    setStageIndex(0);
+  }, [document]);
+
+  if (!stages.length) return null;
+
+  const safeIndex = Math.min(stageIndex, stages.length - 1);
+  const activeStage = stages[safeIndex];
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-xs font-black text-blue-600">وثيقة متدرجة</p>
+          <p className="mt-0.5 break-words text-sm font-black text-slate-900">
+            {normalized.title || "وثيقة علمية"}
+          </p>
+        </div>
+
+        <span
+          dir="ltr"
+          className="shrink-0 text-xs font-extrabold text-slate-500"
+        >
+          {safeIndex + 1} / {stages.length}
+        </span>
+      </div>
+
+      <div className="p-3 sm:p-5">
+        <EmbeddedDocumentRenderer document={activeStage} />
+      </div>
+
+      {stages.length > 1 && (
+        <div className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setStageIndex((value) => Math.max(value - 1, 0))}
+            disabled={safeIndex === 0}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            السابق
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setStageIndex((value) => Math.min(value + 1, stages.length - 1))
+            }
+            disabled={safeIndex === stages.length - 1}
+            className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            التالي
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStageIndex(0)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-100"
+          >
+            إعادة
+          </button>
+        </div>
+      )}
+
+      {normalized.caption && (
+        <div className="border-t border-slate-100 px-4 py-3 text-sm font-semibold leading-7 text-slate-700">
+          <MathTextParser text={normalized.caption} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmbeddedDocumentRenderer({ document }) {
+  const normalized = normalizeObject(document);
+  const type = String(normalized.type || "").toLowerCase().trim();
+  const render = String(normalized.render || "").toLowerCase().trim();
+
+  if (!isNonEmptyObject(normalized)) return null;
+
+  if (
+    type === "sequence_diagram" ||
+    (Array.isArray(normalized.stages) && normalized.stages.length > 0)
+  ) {
+    return <EmbeddedSequenceDocument document={normalized} />;
+  }
+
+  if (
+    render === "svg" ||
+    ["diagram", "process_diagram", "svg"].includes(type) ||
+    Array.isArray(normalized.elements)
+  ) {
+    return <EmbeddedSvgDocument document={normalized} />;
+  }
+
+  return (
+    <ScienceVisualRenderer
+      visual={normalized}
+      title={normalized.title || "الوثيقة العلمية"}
+    />
+  );
+}
+
+function DocumentsRenderer({ documents }) {
+  const normalizedDocuments = normalizeArray(documents).filter(Boolean);
+
+  if (!normalizedDocuments.length) return null;
+
+  return (
+    <div className="mb-5 space-y-4">
+      {normalizedDocuments.map((document, index) => (
+        <EmbeddedDocumentRenderer
+          key={document?.id || `document-${index}`}
+          document={document}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ScienceVisualRenderer({ visual, title = "الوثيقة العلمية" }) {
+  const normalized = normalizeObject(visual);
+  const type = String(normalized.type || "").toLowerCase().trim();
+
+  const rawFrames = normalizeArray(
+    normalized.frames ||
+    normalized.images ||
+    normalized.steps
+  );
+
+  const rawItems = normalizeArray(
+    normalized.items ||
+    normalized.images ||
+    normalized.documents
+  );
+
+  const frames = rawFrames.filter(Boolean);
+  const items = rawItems.filter(Boolean);
+
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [playing, setPlaying] = useState(Boolean(normalized.autoplay));
+  const [failedSources, setFailedSources] = useState({});
+
+  useEffect(() => {
+    setFrameIndex(0);
+    setPlaying(Boolean(normalized.autoplay));
+    setFailedSources({});
+  }, [visual]);
+
+  useEffect(() => {
+    if (!playing || frames.length <= 1) return undefined;
+
+    const timer = window.setInterval(() => {
+      setFrameIndex((previous) => (previous + 1) % frames.length);
+    }, Number(normalized.interval_ms) || 1700);
+
+    return () => window.clearInterval(timer);
+  }, [playing, frames.length, normalized.interval_ms]);
+
+  const markSourceAsFailed = (source) => {
+    if (!source) return;
+
+    setFailedSources((previous) => ({
+      ...previous,
+      [source]: true,
+    }));
+  };
+
+  const getItemSource = (item) => {
+    if (typeof item === "string") return getVisualSource(item);
+    return getVisualSource(item);
+  };
+
+  const getItemCaption = (item, fallback = title) => {
+    if (!item || typeof item !== "object") return fallback;
+    return item.caption || item.title || item.label || fallback;
+  };
+
+  const ImageFallback = ({ caption = title }) => (
+    <div className="flex min-h-[220px] w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-amber-200 bg-amber-50/60 px-5 py-8 text-center">
+      <AlertTriangle size={28} className="text-amber-500" />
+      <div>
+        <p className="font-black text-slate-800">تعذر تحميل الوثيقة</p>
+        <p className="mt-1 text-xs font-semibold leading-6 text-slate-500">
+          تأكد أن مسار الصورة موجود وأن Django يقدّم ملفات media بشكل صحيح.
+        </p>
+      </div>
+      {caption && (
+        <p className="max-w-xl text-xs font-bold text-slate-600">{caption}</p>
+      )}
+    </div>
+  );
+
+  const ImageCard = ({ item, fallbackCaption = title }) => {
+    const source = getItemSource(item);
+    const caption = getItemCaption(item, fallbackCaption);
+    const alt = getVisualAlt(
+      typeof item === "object" ? item : null,
+      caption || fallbackCaption
+    );
+    const failed = !source || Boolean(failedSources[source]);
+
+    return (
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
+          <Eye size={17} className="shrink-0 text-slate-600" />
+          <p className="min-w-0 break-words text-sm font-black text-slate-800">
+            {caption || fallbackCaption}
+          </p>
+        </div>
+
+        <div className="flex min-h-[220px] items-center justify-center bg-white p-3 sm:p-5">
+          {failed ? (
+            <ImageFallback caption={caption} />
+          ) : (
+            <img
+              src={source}
+              alt={alt}
+              loading="eager"
+              decoding="async"
+              onError={() => markSourceAsFailed(source)}
+              className="block max-h-[460px] w-auto max-w-full object-contain"
+            />
+          )}
+        </div>
+
+        {typeof item === "object" && item?.description && item.description !== caption && (
+          <div className="border-t border-slate-100 px-4 py-3 text-sm font-semibold leading-7 text-slate-700">
+            <MathTextParser text={item.description} />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /*
+   * بعض البيانات القديمة لا تحتوي type لكن تحتوي src مباشرة.
+   * نعتبرها صورة بدل إخفائها.
+   */
+  const directSource = getVisualSource(normalized);
+  const inferredType =
+    type ||
+    (frames.length > 0
+      ? "animation"
+      : items.length > 0
+        ? "comparison"
+        : directSource
+          ? "image"
+          : "");
+
+  if (!inferredType) return null;
+
+  if (["image", "document", "figure", "photo"].includes(inferredType)) {
+    return <ImageCard item={normalized} fallbackCaption={title} />;
+  }
+
+  if (
+    ["comparison", "images", "gallery"].includes(inferredType) &&
+    items.length > 0
+  ) {
+    return (
+      <div className="grid gap-3 md:grid-cols-2">
+        {items.map((item, index) => (
+          <ImageCard
+            key={`${getItemSource(item) || "science"}-${index}`}
+            item={item}
+            fallbackCaption={`الوثيقة ${index + 1}`}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (
+    ["animation", "animated", "frames", "sequence"].includes(inferredType) &&
+    frames.length > 0
+  ) {
+    const safeFrameIndex = Math.min(frameIndex, frames.length - 1);
+    const active = frames[safeFrameIndex] || {};
+    const activeSource = getItemSource(active);
+    const activeTitle = getItemCaption(active, title);
+    const activeAlt = getVisualAlt(
+      typeof active === "object" ? active : null,
+      activeTitle
+    );
+    const activeFailed =
+      !activeSource || Boolean(failedSources[activeSource]);
+
+    return (
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-black text-blue-600">رسم متحرك</p>
+              <p className="mt-0.5 break-words text-sm font-black text-slate-900">
+                {activeTitle}
+              </p>
+            </div>
+
+            <span
+              dir="ltr"
+              className="shrink-0 text-xs font-extrabold text-slate-500"
+            >
+              {safeFrameIndex + 1} / {frames.length}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex min-h-[260px] items-center justify-center bg-white p-3 sm:p-5">
+          {activeFailed ? (
+            <ImageFallback caption={activeTitle} />
+          ) : (
+            <img
+              key={activeSource}
+              src={activeSource}
+              alt={activeAlt}
+              loading="eager"
+              decoding="async"
+              onError={() => markSourceAsFailed(activeSource)}
+              className="block max-h-[440px] w-auto max-w-full object-contain"
+            />
+          )}
+        </div>
+
+        {typeof active === "object" && active?.description && (
+          <div className="border-t border-slate-100 px-4 py-3 text-sm font-semibold leading-7 text-slate-700">
+            <MathTextParser text={active.description} />
+          </div>
+        )}
+
+        {frames.length > 1 && (
+          <div className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-100 bg-slate-50 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => {
+                setPlaying(false);
+                setFrameIndex((previous) => Math.max(previous - 1, 0));
+              }}
+              disabled={safeFrameIndex === 0}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              السابق
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPlaying((value) => !value)}
+              className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white transition hover:bg-blue-700"
+            >
+              {playing ? "إيقاف" : "تشغيل ▶"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPlaying(false);
+                setFrameIndex((previous) =>
+                  Math.min(previous + 1, frames.length - 1)
+                );
+              }}
+              disabled={safeFrameIndex === frames.length - 1}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              التالي
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setPlaying(false);
+                setFrameIndex(0);
+              }}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-100"
+            >
+              إعادة
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /*
+   * fallback: إذا جاء type غير معروف لكن يوجد src،
+   * لا نخفي الوثيقة.
+   */
+  if (directSource) {
+    return <ImageCard item={normalized} fallbackCaption={title} />;
+  }
+
+  return null;
+}
+
+function ExerciseQuestion({
+  question,
+  graphData = {},
+  revealGraphSolution = false,
+  scienceVisual = {},
+  documents = [],
+}) {
   const questionText = getQuestionDisplayText(question);
 
   return (
     <div>
       <div className="mb-5 flex items-start gap-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
-          <BookOpen size={24} />
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+          <BookOpen size={22} />
         </div>
 
         <div className="min-w-0">
-          <p className="mb-1 text-xs font-extrabold text-blue-600">
-            تمرين بكالوريا
-          </p>
-
-          <div className="text-xl font-black leading-9 text-slate-900">
+          <p className="mb-1 text-xs font-extrabold text-blue-600">تمرين بكالوريا</p>
+          <div className="break-words text-lg font-black leading-8 text-slate-900 sm:text-xl">
             <MathTextParser
               text={
                 question?.title ||
                 question?.skill ||
                 question?.exercise ||
-                "دراسة اتجاه تغير متتالية"
+                "تمرين"
               }
             />
           </div>
@@ -1235,34 +2175,58 @@ function ExerciseQuestion({ question }) {
             بكالوريا {question.year}
           </MetaBadge>
         )}
-
         {question?.number && (
           <MetaBadge icon={<Hash size={14} />} variant="violet">
             السؤال {question.number}
           </MetaBadge>
         )}
-
         {question?.skill && (
           <MetaBadge icon={<Award size={14} />} variant="amber">
             {question.skill}
           </MetaBadge>
         )}
-
         {question?.difficulty && (
           <MetaBadge icon={<Trophy size={14} />} variant="green">
             {translateDifficulty(question.difficulty)}
           </MetaBadge>
         )}
-
       </div>
 
-      <div className="border-t border-blue-100 pt-5">
-        <div className="mb-4 flex items-center gap-2 text-blue-800">
-          <BookOpen size={19} />
-          <p className="font-black">نص التمرين</p>
+      {normalizeArray(documents).length > 0 && (
+        <DocumentsRenderer documents={documents} />
+      )}
+
+      {normalizeArray(documents).length === 0 &&
+        isNonEmptyObject(normalizeObject(scienceVisual)) && (
+          <div className="mb-5">
+            <ScienceVisualRenderer
+              visual={scienceVisual}
+              title="الوثيقة العلمية للتمرين"
+            />
+          </div>
+        )}
+
+      {/* نص التمرين: المقدمة عادية، وكل سؤال مرقّم يظهر في سطر مستقل. */}
+      <div className="border-t border-slate-200 bg-white pt-5">
+        <div className="mb-3 flex items-center gap-2">
+          <BookOpen size={18} className="text-slate-500" />
+          <p className="text-sm font-black text-slate-700">نص التمرين</p>
         </div>
 
-        <StructuredQuestionText value={questionText} />
+        <StructuredQuestionText
+          value={questionText}
+          graphNode={
+            isNonEmptyObject(normalizeObject(graphData)) ? (
+              <SequenceGraphRenderer
+                graphData={graphData}
+                eyebrow="الرسم المعطى"
+                title="الرسم الموجود في نص التمرين"
+                description="هذا الرسم جزء من معطيات التمرين."
+                revealSolution={revealGraphSolution}
+              />
+            ) : null
+          }
+        />
       </div>
     </div>
   );
@@ -1303,47 +2267,189 @@ function getGraphReactData(graphData) {
   const normalizedGraph = normalizeObject(graphData);
   const reactData = normalizeObject(normalizedGraph.react_data);
 
+  // الشكل الحديث المستعمل في بعض بيانات المنصة.
   if (isNonEmptyObject(reactData)) {
-    return reactData;
+    const modernSeries = normalizeArray(reactData.series);
+
+    return {
+      ...reactData,
+      title: reactData.title || normalizedGraph.title || "",
+      axes: {
+        x: {
+          ...normalizeObject(normalizedGraph?.axes?.x),
+          ...normalizeObject(reactData?.axes?.x),
+        },
+        y: {
+          ...normalizeObject(normalizedGraph?.axes?.y),
+          ...normalizeObject(reactData?.axes?.y),
+        },
+      },
+      series: modernSeries,
+    };
   }
 
   const viewport = normalizeObject(normalizedGraph.viewport);
-  const directSeries = normalizeArray(normalizedGraph.series);
+  const sourceAxes = normalizeObject(normalizedGraph.axes);
+  const sourceXAxis = normalizeObject(sourceAxes.x);
+  const sourceYAxis = normalizeObject(sourceAxes.y);
+  const coordinateSystem = normalizeObject(normalizedGraph.coordinate_system);
+  const xDomain = normalizeObject(normalizedGraph.x_domain);
+  const yDomain = normalizeObject(normalizedGraph.y_domain);
+
+  /*
+   * دعم الشكل القديم الموجود في قاعدة البيانات:
+   * graph_data.functions[].points
+   * graph_data.x_domain / y_domain
+   * graph_data.x_label / y_label
+   */
+  const legacyFunctions = normalizeArray(normalizedGraph.functions);
+  const legacySeries = legacyFunctions
+    .map((fn, index) => {
+      const points = normalizeArray(fn?.points)
+        .map(normalizeGraphPoint)
+        .filter(Boolean);
+
+      if (points.length < 2) return null;
+
+      return {
+        id: fn?.id || `function-${index + 1}`,
+        type: "line",
+        label: fn?.label || fn?.expression || `f${index + 1}`,
+        expression: fn?.expression || "",
+        data: points,
+      };
+    })
+    .filter(Boolean);
+
+  // شكل آخر شائع: function.points بدل functions[].points.
+  const singleFunction = normalizeObject(normalizedGraph.function);
+  const singleFunctionPoints = normalizeArray(singleFunction.points)
+    .map(normalizeGraphPoint)
+    .filter(Boolean);
+
+  if (singleFunctionPoints.length >= 2 && legacySeries.length === 0) {
+    legacySeries.push({
+      id: singleFunction.id || "function",
+      type: "line",
+      label: singleFunction.label || singleFunction.expression || "f",
+      expression: singleFunction.expression || "",
+      data: singleFunctionPoints,
+    });
+  }
+
+  // إذا كانت series موجودة أصلًا نفضّلها، وإلا نستعمل الشكل القديم.
+  const directSeries = normalizeArray(normalizedGraph.series)
+    .map((item, index) => {
+      if (!item || typeof item !== "object") return null;
+
+      const points = getSeriesPoints(item);
+      if (points.length < 2 && !hasFiniteNumber(item?.y)) return null;
+
+      return {
+        ...item,
+        id: item.id || `series-${index + 1}`,
+        type: item.type || (item.kind === "curve" ? "line" : item.kind) || "line",
+        data: points.length ? points : item.data,
+      };
+    })
+    .filter(Boolean);
+
+  const series = directSeries.length > 0 ? directSeries : legacySeries;
 
   return {
     schema_version: "fallback",
-    graph_type: normalizedGraph.graph_type || "cartesian",
-    coordinate_system: "cartesian",
+    graph_type: normalizedGraph.graph_type || normalizedGraph.type || "cartesian",
+    coordinate_system: isNonEmptyObject(coordinateSystem) ? "cartesian" : (normalizedGraph.coordinate_system || "cartesian"),
+    title: normalizedGraph.title || "",
+    caption: normalizedGraph.caption || "",
     axes: {
       x: {
-        label: "x",
-        min: Number.isFinite(Number(viewport.xMin))
-          ? Number(viewport.xMin)
-          : 0,
-        max: Number.isFinite(Number(viewport.xMax))
-          ? Number(viewport.xMax)
-          : 10,
+        ...sourceXAxis,
+        label:
+          sourceXAxis.label ||
+          coordinateSystem.x_label ||
+          normalizedGraph.x_label ||
+          "x",
+        min: hasFiniteNumber(sourceXAxis.min)
+          ? Number(sourceXAxis.min)
+          : hasFiniteNumber(xDomain.min)
+            ? Number(xDomain.min)
+            : hasFiniteNumber(viewport.xMin)
+              ? Number(viewport.xMin)
+              : undefined,
+        max: hasFiniteNumber(sourceXAxis.max)
+          ? Number(sourceXAxis.max)
+          : hasFiniteNumber(xDomain.max)
+            ? Number(xDomain.max)
+            : hasFiniteNumber(viewport.xMax)
+              ? Number(viewport.xMax)
+              : undefined,
+        step: hasFiniteNumber(sourceXAxis.step)
+          ? Number(sourceXAxis.step)
+          : hasFiniteNumber(xDomain.step)
+            ? Number(xDomain.step)
+            : undefined,
       },
       y: {
-        label: "y",
-        min: Number.isFinite(Number(viewport.yMin))
-          ? Number(viewport.yMin)
-          : 0,
-        max: Number.isFinite(Number(viewport.yMax))
-          ? Number(viewport.yMax)
-          : 10,
+        ...sourceYAxis,
+        label:
+          sourceYAxis.label ||
+          coordinateSystem.y_label ||
+          normalizedGraph.y_label ||
+          "y",
+        min: hasFiniteNumber(sourceYAxis.min)
+          ? Number(sourceYAxis.min)
+          : hasFiniteNumber(yDomain.min)
+            ? Number(yDomain.min)
+            : hasFiniteNumber(viewport.yMin)
+              ? Number(viewport.yMin)
+              : undefined,
+        max: hasFiniteNumber(sourceYAxis.max)
+          ? Number(sourceYAxis.max)
+          : hasFiniteNumber(yDomain.max)
+            ? Number(yDomain.max)
+            : hasFiniteNumber(viewport.yMax)
+              ? Number(viewport.yMax)
+              : undefined,
+        step: hasFiniteNumber(sourceYAxis.step)
+          ? Number(sourceYAxis.step)
+          : hasFiniteNumber(yDomain.step)
+            ? Number(yDomain.step)
+            : undefined,
       },
     },
-    series: directSeries,
+    series,
     annotations: normalizeArray(normalizedGraph.annotations),
+    solution_annotations: normalizeArray(
+      normalizedGraph.solution_annotations,
+    ),
+    interaction: normalizeObject(normalizedGraph.interaction),
   };
 }
 
 function normalizeGraphPoint(point) {
   if (!point || typeof point !== "object") return null;
 
-  const x = Number(point.x);
-  const y = Number(point.y);
+  // ندعم كل أشكال النقاط الموجودة في قاعدة البيانات:
+  // {x, y} للرياضيات، {t, y} للمنحنيات الزمنية،
+  // وكذلك {time, value} أو {x, value} عند الحاجة.
+  const rawX =
+    point.x ??
+    point.t ??
+    point.time ??
+    point.n ??
+    point.abscissa;
+
+  const rawY =
+    point.y ??
+    point.value ??
+    point.i ??
+    point.v ??
+    point.Vg ??
+    point.ordinate;
+
+  const x = Number(rawX);
+  const y = Number(rawY);
 
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
     return null;
@@ -1357,71 +2463,133 @@ function normalizeGraphPoint(point) {
 }
 
 function getSeriesPoints(series) {
-  return normalizeArray(series?.data)
-    .map(normalizeGraphPoint)
-    .filter(Boolean);
+  const source = Array.isArray(series?.data)
+    ? series.data
+    : Array.isArray(series?.points)
+      ? series.points
+      : [];
+
+  return source.map(normalizeGraphPoint).filter(Boolean);
 }
 
-function getAxisRange(axis, fallbackMin, fallbackMax) {
-  const min = Number(axis?.min);
-  const max = Number(axis?.max);
+function hasFiniteNumber(value) {
+  return value !== null &&
+    value !== undefined &&
+    value !== "" &&
+    Number.isFinite(Number(value));
+}
 
-  if (
-    Number.isFinite(min) &&
-    Number.isFinite(max) &&
-    max > min
-  ) {
-    return { min, max };
+function niceStep(rawStep) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
+
+  const exponent = Math.floor(Math.log10(rawStep));
+  const fraction = rawStep / 10 ** exponent;
+
+  let niceFraction = 1;
+  if (fraction <= 1) niceFraction = 1;
+  else if (fraction <= 2) niceFraction = 2;
+  else if (fraction <= 2.5) niceFraction = 2.5;
+  else if (fraction <= 5) niceFraction = 5;
+  else niceFraction = 10;
+
+  return niceFraction * 10 ** exponent;
+}
+
+function buildAutomaticRange(values, axis, includeZero = false) {
+  const cleanValues = normalizeArray(values)
+    .map(Number)
+    .filter(Number.isFinite);
+
+  let dataMin = cleanValues.length ? Math.min(...cleanValues) : 0;
+  let dataMax = cleanValues.length ? Math.max(...cleanValues) : 1;
+
+  if (includeZero) {
+    dataMin = Math.min(0, dataMin);
+    dataMax = Math.max(0, dataMax);
   }
 
-  return {
-    min: fallbackMin,
-    max: fallbackMax,
-  };
+  if (dataMin === dataMax) {
+    const delta = Math.abs(dataMin) > 0 ? Math.abs(dataMin) * 0.15 : 1;
+    dataMin -= delta;
+    dataMax += delta;
+  }
+
+  const explicitMin = hasFiniteNumber(axis?.min)
+    ? Number(axis.min)
+    : null;
+  const explicitMax = hasFiniteNumber(axis?.max)
+    ? Number(axis.max)
+    : null;
+
+  const rawSpan = Math.max(dataMax - dataMin, Number.EPSILON);
+  const padding = rawSpan * 0.08;
+
+  let min = explicitMin ?? dataMin - padding;
+  let max = explicitMax ?? dataMax + padding;
+
+  if (includeZero && explicitMin === null && dataMin >= 0) {
+    min = 0;
+  }
+
+  if (includeZero && explicitMax === null && dataMax <= 0) {
+    max = 0;
+  }
+
+  if (!(max > min)) {
+    max = min + 1;
+  }
+
+  const step = niceStep((max - min) / 6);
+
+  if (explicitMin === null) {
+    min = Math.floor(min / step) * step;
+  }
+
+  if (explicitMax === null) {
+    max = Math.ceil(max / step) * step;
+  }
+
+  if (includeZero && dataMin >= 0 && explicitMin === null) {
+    min = 0;
+  }
+
+  return { min, max, step };
 }
 
 function getGraphBounds(reactData) {
   const allPoints = normalizeArray(reactData?.series)
     .flatMap(getSeriesPoints);
 
-  const annotationPoints = normalizeArray(
-    reactData?.annotations,
-  )
+  const horizontalValues = normalizeArray(reactData?.series)
+    .filter((item) => String(item?.type || "").toLowerCase() === "horizontal_line")
+    .map((item) => Number(item?.y))
+    .filter(Number.isFinite);
+
+  const annotationPoints = [
+    ...normalizeArray(reactData?.annotations),
+    ...normalizeArray(reactData?.solution_annotations),
+  ]
     .map(normalizeGraphPoint)
     .filter(Boolean);
 
   const points = [...allPoints, ...annotationPoints];
 
   const calculatedX = points.map((point) => point.x);
-  const calculatedY = points.map((point) => point.y);
+  const calculatedY = [
+    ...points.map((point) => point.y),
+    ...horizontalValues,
+  ];
 
-  const fallbackXMin = calculatedX.length
-    ? Math.min(...calculatedX)
-    : 0;
-  const fallbackXMax = calculatedX.length
-    ? Math.max(...calculatedX)
-    : 10;
-  const fallbackYMin = calculatedY.length
-    ? Math.min(...calculatedY)
-    : 0;
-  const fallbackYMax = calculatedY.length
-    ? Math.max(...calculatedY)
-    : 10;
-
-  const xRange = getAxisRange(
+  const xRange = buildAutomaticRange(
+    calculatedX,
     reactData?.axes?.x,
-    fallbackXMin,
-    fallbackXMax === fallbackXMin
-      ? fallbackXMin + 1
-      : fallbackXMax,
+    calculatedX.every((value) => value >= 0),
   );
 
-  const yRange = getAxisRange(
+  const yRange = buildAutomaticRange(
+    calculatedY,
     reactData?.axes?.y,
-    fallbackYMin,
-    fallbackYMax === fallbackYMin
-      ? fallbackYMin + 1
-      : fallbackYMax,
+    calculatedY.every((value) => value >= 0),
   );
 
   return {
@@ -1429,25 +2597,43 @@ function getGraphBounds(reactData) {
     xMax: xRange.max,
     yMin: yRange.min,
     yMax: yRange.max,
+    xStep: xRange.step,
+    yStep: yRange.step,
   };
 }
 
-function createTicks(min, max, preferredTicks) {
+function createTicks(min, max, preferredTicks, preferredStep) {
   const validTicks = normalizeArray(preferredTicks)
     .map(Number)
-    .filter(Number.isFinite);
+    .filter(
+      (value) =>
+        Number.isFinite(value) &&
+        value >= min - Number.EPSILON &&
+        value <= max + Number.EPSILON,
+    );
 
   if (validTicks.length > 0) {
     return validTicks;
   }
 
-  const count = 6;
-  const step = (max - min) / count;
+  const step =
+    Number.isFinite(Number(preferredStep)) &&
+    Number(preferredStep) > 0
+      ? Number(preferredStep)
+      : niceStep((max - min) / 6);
 
-  return Array.from(
-    { length: count + 1 },
-    (_, index) => min + step * index,
-  );
+  const first = Math.ceil((min - Number.EPSILON) / step) * step;
+  const ticks = [];
+
+  for (
+    let value = first, guard = 0;
+    value <= max + step * 0.001 && guard < 100;
+    value += step, guard += 1
+  ) {
+    ticks.push(Number(value.toPrecision(12)));
+  }
+
+  return ticks.length ? ticks : [min, max];
 }
 
 function formatGraphNumber(value) {
@@ -1455,12 +2641,36 @@ function formatGraphNumber(value) {
 
   if (!Number.isFinite(number)) return "";
 
-  if (Math.abs(number) >= 1000) {
-    return number.toExponential(1);
+  const absolute = Math.abs(number);
+
+  if (
+    absolute !== 0 &&
+    (absolute >= 10000 || absolute < 0.001)
+  ) {
+    return number
+      .toExponential(2)
+      .replace(/\.00e/, "e")
+      .replace(/(\.\d*[1-9])0+e/, "$1e");
   }
 
-  const rounded = Math.round(number * 100) / 100;
-  return String(rounded);
+  const decimals =
+    absolute < 0.01 ? 4 :
+    absolute < 0.1 ? 3 :
+    absolute < 1 ? 2 :
+    absolute < 10 ? 2 :
+    1;
+
+  return Number(number.toFixed(decimals)).toString();
+}
+
+function getAxisCaption(axis, fallback) {
+  const label = String(axis?.label || fallback || "").trim();
+  const unit = String(axis?.unit || "").trim();
+
+  if (!unit) return label;
+  if (!label) return `(${unit})`;
+
+  return `${label} (${unit})`;
 }
 
 function getSeriesStroke(index) {
@@ -1477,13 +2687,239 @@ function getSeriesStroke(index) {
   return strokes[index % strokes.length];
 }
 
+
+function BacPhysicsDiagramRenderer({
+  graphData,
+  eyebrow = "الرسم الفيزيائي",
+  title = "الرسم التخطيطي",
+  description = "",
+  variant = "question",
+}) {
+  const normalizedGraph = normalizeObject(graphData);
+  const scene = normalizeObject(normalizedGraph.react_data);
+  const elements = normalizeArray(scene.elements);
+  if (scene.renderer !== "BacPhysicsDiagramSvg" || elements.length === 0) {
+    return null;
+  }
+
+  const width = Number(scene.width) || 900;
+  const height = Number(scene.height) || 500;
+  const markerId = `bac-arrow-${String(normalizedGraph.id || title)
+    .replace(/[^\w-]/g, "-")
+    .slice(0, 40)}`;
+  const solution = variant === "solution";
+
+  const renderElement = (element, index) => {
+    if (!element || typeof element !== "object") return null;
+    const key = element.id || `${element.type || "element"}-${index}`;
+    const stroke = element.stroke || "#111827";
+    const widthValue = Number(element.width) || 2.6;
+    const fill = element.fill === "none" ? "none" : (element.fill || "none");
+    const dash = element.dashed ? "9 7" : undefined;
+
+    if (element.type === "line") {
+      return (
+        <line key={key}
+          x1={element.x1} y1={element.y1}
+          x2={element.x2} y2={element.y2}
+          stroke={stroke} strokeWidth={widthValue}
+          strokeDasharray={dash} strokeLinecap="round"
+        />
+      );
+    }
+
+    if (element.type === "arrow") {
+      return (
+        <g key={key}>
+          <line
+            x1={element.x1} y1={element.y1}
+            x2={element.x2} y2={element.y2}
+            stroke={stroke} strokeWidth={widthValue || 3}
+            strokeDasharray={dash}
+            strokeLinecap="round"
+            markerEnd={`url(#${markerId})`}
+          />
+          {hasText(element.label) && (
+            <text
+              x={element.label_x ?? element.x2 + 12}
+              y={element.label_y ?? element.y2 - 10}
+              fontSize={element.label_size || 18}
+              fontWeight="800"
+              fill="#111827"
+              textAnchor={element.anchor || "middle"}
+              direction={containsArabic(element.label) ? "rtl" : "ltr"}
+              unicodeBidi="plaintext"
+            >
+              {element.label}
+            </text>
+          )}
+        </g>
+      );
+    }
+
+    if (element.type === "rect") {
+      const transform = Number.isFinite(Number(element.rotate))
+        ? `rotate(${element.rotate} ${element.cx ?? (Number(element.x)+Number(element.w)/2)} ${element.cy ?? (Number(element.y)+Number(element.h)/2)})`
+        : undefined;
+      return (
+        <rect key={key}
+          x={element.x} y={element.y}
+          width={element.w} height={element.h}
+          rx={element.rx || 0}
+          fill={fill}
+          stroke={stroke} strokeWidth={widthValue}
+          transform={transform}
+        />
+      );
+    }
+
+    if (element.type === "circle") {
+      return (
+        <circle key={key}
+          cx={element.cx} cy={element.cy} r={element.r}
+          fill={element.fill || "none"}
+          stroke={element.stroke ?? (element.fill && element.fill !== "none" ? "none" : stroke)}
+          strokeWidth={widthValue}
+          strokeDasharray={dash}
+        />
+      );
+    }
+
+    if (element.type === "ellipse") {
+      return (
+        <ellipse key={key}
+          cx={element.cx} cy={element.cy}
+          rx={element.rx} ry={element.ry}
+          fill={fill}
+          stroke={stroke} strokeWidth={widthValue}
+          strokeDasharray={dash}
+        />
+      );
+    }
+
+    if (element.type === "path") {
+      return (
+        <path key={key}
+          d={element.d}
+          fill={fill}
+          stroke={stroke} strokeWidth={widthValue}
+          strokeDasharray={dash}
+          strokeLinecap="round" strokeLinejoin="round"
+        />
+      );
+    }
+
+    if (element.type === "polyline") {
+      return (
+        <polyline key={key}
+          points={element.points}
+          fill={fill}
+          stroke={stroke} strokeWidth={widthValue}
+          strokeDasharray={dash}
+          strokeLinecap="round" strokeLinejoin="round"
+        />
+      );
+    }
+
+    if (element.type === "text") {
+      const text = String(element.text || "");
+      return (
+        <text key={key}
+          x={element.x} y={element.y}
+          fontSize={element.size || 18}
+          fontWeight={element.bold ? "900" : "700"}
+          fill={element.fill || "#111827"}
+          textAnchor={element.anchor || "middle"}
+          direction={containsArabic(text) ? "rtl" : "ltr"}
+          unicodeBidi="plaintext"
+        >
+          {text}
+        </text>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <section
+      className={cn(
+        "mt-6 overflow-hidden rounded-2xl border bg-white shadow-sm",
+        solution ? "border-emerald-200" : "border-slate-200",
+      )}
+      dir="rtl"
+    >
+      <div className={cn(
+        "border-b px-4 py-3 sm:px-5",
+        solution ? "border-emerald-100 bg-emerald-50/60" : "border-slate-200 bg-slate-50/70"
+      )}>
+        <p className={cn(
+          "text-xs font-black",
+          solution ? "text-emerald-700" : "text-slate-600"
+        )}>{eyebrow}</p>
+        <h3 className="mt-1 text-base font-black text-slate-950 sm:text-lg">
+          {normalizedGraph.title || title}
+        </h3>
+        {(normalizedGraph.caption || description) && (
+          <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">
+            {normalizedGraph.caption || description}
+          </p>
+        )}
+      </div>
+
+      <div className="overflow-x-auto bg-white p-3 sm:p-5">
+        <div className="mx-auto min-w-[620px] max-w-[900px]">
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="h-auto w-full"
+            role="img"
+            aria-label={normalizedGraph.title || title}
+          >
+            <defs>
+              <marker
+                id={markerId}
+                markerWidth="11"
+                markerHeight="11"
+                refX="9"
+                refY="5.5"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M0,0 L11,5.5 L0,11 z" fill="#111827" />
+              </marker>
+            </defs>
+
+            <rect x="1" y="1" width={width - 2} height={height - 2}
+              rx="8" fill="#ffffff" stroke="#e5e7eb" strokeWidth="1.5" />
+
+            {elements.map(renderElement)}
+          </svg>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SequenceGraphRenderer({
   graphData,
   eyebrow = "التمثيل البياني",
   title = "الرسم المرتبط بالتمرين",
   description = "",
   variant = "question",
+  revealSolution = false,
 }) {
+  if (graphData?.react_data?.renderer === "BacPhysicsDiagramSvg") {
+    return (
+      <BacPhysicsDiagramRenderer
+        graphData={graphData}
+        eyebrow={eyebrow}
+        title={title}
+        description={description}
+        variant={variant}
+      />
+    );
+  }
+
   const reactData = useMemo(
     () => getGraphReactData(graphData),
     [graphData],
@@ -1536,12 +2972,14 @@ function SequenceGraphRenderer({
     bounds.xMin,
     bounds.xMax,
     reactData?.axes?.x?.ticks,
+    reactData?.axes?.x?.step ?? bounds.xStep,
   );
 
   const yTicks = createTicks(
     bounds.yMin,
     bounds.yMax,
     reactData?.axes?.y?.ticks,
+    reactData?.axes?.y?.step ?? bounds.yStep,
   );
 
   const xAxisY =
@@ -1554,16 +2992,25 @@ function SequenceGraphRenderer({
       ? xScale(0)
       : xScale(bounds.xMin);
 
-  const annotations = normalizeArray(
-    reactData.annotations,
-  );
+  const baseAnnotations = normalizeArray(reactData.annotations);
+  const solutionAnnotations = normalizeArray(reactData.solution_annotations);
+
+  const annotations = [
+    ...baseAnnotations,
+    ...(revealSolution || variant === "solution" ? solutionAnnotations : []),
+  ].filter((annotation) => {
+    const visibility = String(annotation?.visibility || "always");
+    if (variant === "solution") return visibility !== "question_only";
+    if (!revealSolution && visibility === "solution_only") return false;
+    return visibility !== "hidden";
+  });
 
   const isSolutionGraph = variant === "solution";
 
   return (
     <section
       className={cn(
-        "mt-7 overflow-hidden rounded-[28px] bg-white shadow-[0_18px_55px_-35px_rgba(79,70,229,0.45)]",
+        "mt-7 overflow-hidden rounded-2xl sm:rounded-[28px] bg-white shadow-[0_18px_55px_-35px_rgba(79,70,229,0.45)]",
         isSolutionGraph
           ? "border border-emerald-200"
           : "border border-indigo-100"
@@ -1614,13 +3061,13 @@ function SequenceGraphRenderer({
         </span>
       </div>
 
-      <div className="overflow-x-auto p-3 sm:p-5">
-        <div className="min-w-[680px]">
+      <div className="max-w-full overflow-x-auto overscroll-x-contain p-2 sm:p-5">
+        <div className="min-w-[620px] sm:min-w-[680px]">
           <svg
             viewBox={`0 0 ${width} ${height}`}
             className="h-auto w-full"
             role="img"
-            aria-label="التمثيل البياني للمتتالية"
+            aria-label={reactData.title || title || "التمثيل البياني"}
           >
             <rect
               x={padding.left}
@@ -1713,7 +3160,7 @@ function SequenceGraphRenderer({
               fontWeight="900"
               fill="#0f172a"
             >
-              {reactData?.axes?.x?.label || "x"}
+              {getAxisCaption(reactData?.axes?.x, "x")}
             </text>
 
             <text
@@ -1724,13 +3171,13 @@ function SequenceGraphRenderer({
               fontWeight="900"
               fill="#0f172a"
             >
-              {reactData?.axes?.y?.label || "y"}
+              {getAxisCaption(reactData?.axes?.y, "y")}
             </text>
 
             {series.map((item, seriesIndex) => {
               const points = getSeriesPoints(item);
               const stroke =
-                item.color || getSeriesStroke(seriesIndex);
+                item.color || (graphData?.settings?.bac_style ? "#111827" : getSeriesStroke(seriesIndex));
               const type = String(item.type || "line")
                 .trim()
                 .toLowerCase();
@@ -1889,6 +3336,352 @@ function GraphLegend({ series }) {
 }
 
 
+
+
+
+function normalizeVariationLabel(value) {
+  return String(value ?? "")
+    .replace(/\\\(|\\\)/g, "")
+    .replace(/-\\infty/g, "−∞")
+    .replace(/\+\\infty/g, "+∞")
+    .replace(/\\infty/g, "∞")
+    .replace(/\\sqrt\s*\{([^{}]+)\}/g, "√($1)")
+    .replace(/\\,/g, " ")
+    .trim();
+}
+
+function getVariationReactData(table) {
+  const normalizedTable = normalizeObject(table);
+  const stored = normalizeObject(normalizedTable.react_data);
+
+  if (
+    stored.renderer === "VariationTableSvg" &&
+    normalizeArray(stored.points).length >= 2
+  ) {
+    return stored;
+  }
+
+  const criticalPoints = normalizeArray(normalizedTable.critical_points);
+  const derivativeSigns = normalizeArray(
+    normalizedTable?.derivative_row?.signs
+  );
+  const functionValues = normalizeArray(
+    normalizedTable?.function_row?.values
+  );
+  const variations = normalizeArray(
+    normalizedTable?.function_row?.variations
+  );
+
+  const intervalSigns =
+    derivativeSigns.length === criticalPoints.length * 2 - 3
+      ? derivativeSigns.filter((_, index) => index % 2 === 0)
+      : derivativeSigns.slice(0, Math.max(0, criticalPoints.length - 1));
+
+  return {
+    renderer: "VariationTableSvg",
+    points: criticalPoints.map((point, index) => ({
+      index,
+      x: normalizeVariationLabel(point),
+      function_value: normalizeVariationLabel(functionValues[index]),
+      is_excluded: false,
+    })),
+    segments: criticalPoints.slice(0, -1).map((point, index) => {
+      const direction =
+        variations[index] ||
+        (intervalSigns[index] === "+"
+          ? "increasing"
+          : intervalSigns[index] === "-"
+            ? "decreasing"
+            : "constant");
+
+      return {
+        index,
+        from_index: index,
+        to_index: index + 1,
+        derivative_sign: intervalSigns[index] || "",
+        direction,
+        arrow:
+          direction === "increasing"
+            ? "↗"
+            : direction === "decreasing"
+              ? "↘"
+              : "→",
+      };
+    }),
+  };
+}
+
+function VariationTableRenderer({ table }) {
+  const normalizedTable = normalizeObject(table);
+  const reactData = getVariationReactData(normalizedTable);
+  const points = normalizeArray(reactData.points);
+  const segments = normalizeArray(reactData.segments);
+
+  if (points.length < 2 || segments.length === 0) return null;
+
+  const width = 900;
+  const height = 310;
+  const labelWidth = 112;
+  const rightPadding = 28;
+  const top = 24;
+  const xRowBottom = 86;
+  const derivativeBottom = 154;
+  const functionBottom = 286;
+  const usableWidth = width - labelWidth - rightPadding;
+  const columnWidth = usableWidth / Math.max(1, points.length - 1);
+  const xForPoint = (index) => labelWidth + index * columnWidth;
+  const yHigh = 190;
+  const yLow = 258;
+
+  const pointY = points.map((point, index) => {
+    if (index === 0) {
+      return segments[0]?.direction === "increasing" ? yLow : yHigh;
+    }
+
+    const previousDirection = segments[index - 1]?.direction;
+    if (previousDirection === "increasing") return yHigh;
+    if (previousDirection === "decreasing") return yLow;
+    return 224;
+  });
+
+  const markerId = `variation-arrow-${normalizedTable.id || "table"}`;
+
+  return (
+    <section
+      dir="rtl"
+      className="mt-4 overflow-hidden rounded-2xl sm:rounded-[24px] border border-indigo-100 bg-white shadow-sm"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-100 bg-indigo-50/70 px-4 py-3">
+        <div>
+          <p className="text-xs font-black text-indigo-600">
+            تمثيل بصري
+          </p>
+          <h4 className="mt-1 font-black text-slate-950">
+            {normalizedTable.title || "جدول تغيرات الدالة"}
+          </h4>
+        </div>
+
+        {normalizedTable.domain && (
+          <div className="rounded-full border border-indigo-200 bg-white px-3 py-1.5 text-sm font-bold text-indigo-800">
+            <MathTextParser text={normalizedTable.domain} dir="ltr" />
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-x-auto p-3 sm:p-4">
+        <div className="min-w-[720px]">
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="h-auto w-full"
+            role="img"
+            aria-label={normalizedTable.title || "جدول تغيرات الدالة"}
+          >
+            <defs>
+              <marker
+                id={markerId}
+                markerWidth="10"
+                markerHeight="10"
+                refX="8"
+                refY="5"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M0,0 L10,5 L0,10 z" fill="#4f46e5" />
+              </marker>
+            </defs>
+
+            <rect
+              x="1"
+              y={top}
+              width={width - 2}
+              height={functionBottom - top}
+              rx="18"
+              fill="#ffffff"
+              stroke="#c7d2fe"
+              strokeWidth="2"
+            />
+
+            <line
+              x1={labelWidth}
+              y1={top}
+              x2={labelWidth}
+              y2={functionBottom}
+              stroke="#cbd5e1"
+              strokeWidth="2"
+            />
+            <line
+              x1="1"
+              y1={xRowBottom}
+              x2={width - 1}
+              y2={xRowBottom}
+              stroke="#cbd5e1"
+              strokeWidth="2"
+            />
+            <line
+              x1="1"
+              y1={derivativeBottom}
+              x2={width - 1}
+              y2={derivativeBottom}
+              stroke="#cbd5e1"
+              strokeWidth="2"
+            />
+
+            <text
+              x={labelWidth / 2}
+              y="60"
+              textAnchor="middle"
+              fontSize="19"
+              fontWeight="800"
+              fill="#312e81"
+            >
+              x
+            </text>
+            <text
+              x={labelWidth / 2}
+              y="126"
+              textAnchor="middle"
+              fontSize="18"
+              fontWeight="800"
+              fill="#312e81"
+            >
+              {normalizeVariationLabel(
+                normalizedTable?.derivative_row?.label || "f'(x)"
+              )}
+            </text>
+            <text
+              x={labelWidth / 2}
+              y="225"
+              textAnchor="middle"
+              fontSize="18"
+              fontWeight="800"
+              fill="#312e81"
+            >
+              {normalizeVariationLabel(
+                normalizedTable?.function_row?.label || "f(x)"
+              )}
+            </text>
+
+            {points.map((point, index) => {
+              const x = xForPoint(index);
+              return (
+                <g key={`variation-point-${index}`}>
+                  {index > 0 && index < points.length - 1 && (
+                    <line
+                      x1={x}
+                      y1={top}
+                      x2={x}
+                      y2={functionBottom}
+                      stroke={point.is_excluded ? "#ef4444" : "#e2e8f0"}
+                      strokeWidth={point.is_excluded ? "3" : "1.5"}
+                      strokeDasharray={point.is_excluded ? "7 5" : undefined}
+                    />
+                  )}
+
+                  <text
+                    x={x}
+                    y="60"
+                    textAnchor="middle"
+                    fontSize="18"
+                    fontWeight="800"
+                    fill="#0f172a"
+                  >
+                    {normalizeVariationLabel(point.x)}
+                  </text>
+
+                  {point.function_value && (
+                    <text
+                      x={x}
+                      y={pointY[index] + (pointY[index] === yHigh ? -10 : 23)}
+                      textAnchor="middle"
+                      fontSize="18"
+                      fontWeight="800"
+                      fill="#0f172a"
+                    >
+                      {normalizeVariationLabel(point.function_value)}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+
+            {segments.map((segment, index) => {
+              const fromX = xForPoint(index) + 34;
+              const toX = xForPoint(index + 1) - 34;
+              const fromY = pointY[index];
+              const toY = pointY[index + 1];
+              const middleX = (fromX + toX) / 2;
+
+              return (
+                <g key={`variation-segment-${index}`}>
+                  <text
+                    x={middleX}
+                    y="128"
+                    textAnchor="middle"
+                    fontSize="20"
+                    fontWeight="900"
+                    fill={
+                      segment.derivative_sign === "-"
+                        ? "#dc2626"
+                        : "#059669"
+                    }
+                  >
+                    {normalizeVariationLabel(segment.derivative_sign)}
+                  </text>
+
+                  <line
+                    x1={fromX}
+                    y1={fromY}
+                    x2={toX}
+                    y2={toY}
+                    stroke="#4f46e5"
+                    strokeWidth="4"
+                    strokeLinecap="round"
+                    markerEnd={`url(#${markerId})`}
+                  />
+                </g>
+              );
+            })}
+
+            {points.slice(1, -1).map((point, index) => (
+              <text
+                key={`critical-zero-${index}`}
+                x={xForPoint(index + 1)}
+                y="128"
+                textAnchor="middle"
+                fontSize="18"
+                fontWeight="900"
+                fill="#475569"
+              >
+                {point.is_excluded ? "∥" : "0"}
+              </text>
+            ))}
+          </svg>
+        </div>
+      </div>
+
+      <div className="border-t border-indigo-100 bg-slate-50 px-4 py-3">
+        <div className="flex flex-wrap gap-2">
+          {segments.map((segment, index) => (
+            <span
+              key={`variation-summary-${index}`}
+              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700"
+            >
+              {normalizeVariationLabel(points[index]?.x)} إلى{" "}
+              {normalizeVariationLabel(points[index + 1]?.x)}:{" "}
+              {segment.direction === "increasing"
+                ? "متزايدة ↗"
+                : segment.direction === "decreasing"
+                  ? "متناقصة ↘"
+                  : "ثابتة →"}
+            </span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
 function StoredSolutionButton({
   hasSolution,
   visible,
@@ -1906,108 +3699,94 @@ function StoredSolutionButton({
       {!hasSolution
         ? "لا يوجد حل محفوظ"
         : visible
-          ? "إخفاء الحل المفصل"
-          : "عرض الحل المفصل"}
+          ? "إخفاء التصحيح النموذجي"
+          : "عرض التصحيح النموذجي"}
     </button>
   );
 }
 
-function SimpleExplanationButton({
+function AIHelpCard({
   loading,
   hasExplanation,
   visible,
   onClick,
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={loading}
-      className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-blue-600 to-violet-600 px-5 py-3.5 font-black text-white shadow-sm transition hover:from-blue-700 hover:to-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+    <section
+      dir="rtl"
+      className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 sm:mt-6 sm:rounded-[24px]"
     >
-      {loading ? (
-        <>
-          <Loader2 size={21} className="animate-spin" />
-          جاري إعداد شرح أبسط...
-        </>
-      ) : hasExplanation ? (
-        <>
-          {visible ? <EyeOff size={21} /> : <Eye size={21} />}
-          {visible ? "إخفاء الشرح المبسط" : "عرض الشرح المبسط"}
-        </>
-      ) : (
-        <>
-          <Sparkles size={21} />
-          لم أفهم، اشرح لي بطريقة أبسط
-        </>
-      )}
-    </button>
+      <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-5">
+        <div className="flex min-w-0 items-start gap-3.5">
+          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200">
+            <Brain size={21} strokeWidth={2.2} />
+            <span className="absolute -left-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-slate-50 bg-indigo-500" />
+          </div>
+
+          <div className="min-w-0 pt-0.5">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <p className="text-[11px] font-black tracking-wide text-indigo-600">
+                هل بقيت خطوة غير واضحة؟
+              </p>
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-black text-indigo-600">
+                AI
+              </span>
+            </div>
+
+            <h3 className="text-[15px] font-black leading-7 text-slate-950 sm:text-base">
+              أعد لي الحل من البداية بطريقة أبسط
+            </h3>
+
+            <p className="mt-1 max-w-2xl text-[13px] font-medium leading-6 text-slate-600 sm:text-sm sm:leading-7">
+              سأقسم نفس التمرين إلى خطوات صغيرة جدًا، وأوضح لك ماذا نفعل ولماذا، دون تغيير السؤال أو النتيجة الصحيحة.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={loading}
+          className="group inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-[205px]"
+        >
+          {loading ? (
+            <>
+              <Loader2 size={18} className="animate-spin" />
+              أشرح التمرين الآن...
+            </>
+          ) : hasExplanation ? (
+            <>
+              {visible ? <EyeOff size={18} /> : <Eye size={18} />}
+              {visible ? "إخفاء الحل الأبسط" : "عرض الحل الأبسط"}
+            </>
+          ) : (
+            <>
+              <Sparkles size={18} className="transition-transform group-hover:rotate-6" />
+              اشرح لي ببساطة
+            </>
+          )}
+        </button>
+      </div>
+    </section>
   );
 }
-
 
 function StoredSolution({ solution }) {
   const normalizedSolution = normalizeObject(solution);
   const simpleSolution = getStoredSimpleSolution(normalizedSolution);
+  const solutionGraphData = normalizeObject(normalizedSolution.graph_data);
+  const hasSolutionGraph = isNonEmptyObject(solutionGraphData);
+  const solutionScienceVisual = normalizeObject(normalizedSolution.science_visual);
+  const hasSolutionScienceVisual = isNonEmptyObject(solutionScienceVisual);
 
-  /*
-   * في JSON الجديد:
-   *
-   * - الرسم المعطى في نص التمرين:
-   *   question.graph_data
-   *
-   * - الرسم الذي يتم إنشاؤه أو شرحه داخل الحل:
-   *   question.solution.graph_data
-   *
-   * لا نستعمل fallback من رسم السؤال هنا حتى لا يظهر رسم داخل الحل
-   * إلا عندما يكون موجودًا فعلًا داخل solution.graph_data.
-   */
-  const solutionGraphData = normalizeObject(
-    normalizedSolution.graph_data
-  );
-
-  const hasSolutionGraph = isNonEmptyObject(
-    solutionGraphData
-  );
-
-  const simpleSteps = normalizeArray(
-    simpleSolution.steps || simpleSolution.solution_steps
-  );
+  const simpleSteps = normalizeArray(simpleSolution.steps || simpleSolution.solution_steps);
   const rootSteps = normalizeArray(normalizedSolution.steps);
+  const displayedSteps = simpleSteps.length > 0 ? simpleSteps : rootSteps;
 
-  /*
-   * في البنية الجديدة توجد الخطوات نفسها داخل:
-   * solution.steps
-   * solution.simple_solution.steps
-   *
-   * لذلك نعرض نسخة واحدة فقط حتى لا يتكرر الحل مرتين.
-   */
-  const displayedSteps =
-    simpleSteps.length > 0 ? simpleSteps : rootSteps;
-
-  const intro =
-    simpleSolution.intro ||
+  const fallbackExplanation =
     simpleSolution.explanation ||
-    normalizedSolution.student_friendly_intro ||
-    normalizedSolution.detailed_explanation;
-
-  const strategy =
-    normalizedSolution.main_idea ||
-    normalizedSolution.strategy ||
-    normalizedSolution.why_this_method ||
-    normalizedSolution.method_name ||
-    simpleSolution.method;
-
-  const whatWeKnow = normalizeArray(normalizedSolution.what_we_know).filter(
-    (item) => hasText(toDisplayString(item))
-  );
-
-  const mistakes = normalizeArray(normalizedSolution.common_mistakes);
-  const hints = normalizeArray(normalizedSolution.hints);
-  const bacWriting = normalizeArray(normalizedSolution.bac_writing);
-  const understandingCheck = normalizeArray(
-    normalizedSolution.understanding_check
-  );
+    normalizedSolution.detailed_explanation ||
+    normalizedSolution.explanation;
 
   const finalAnswer =
     normalizedSolution.final_answer ||
@@ -2015,345 +3794,171 @@ function StoredSolution({ solution }) {
     simpleSolution.answer;
 
   return (
-    <div className="mt-7 overflow-hidden rounded-[32px] border border-emerald-200 bg-white shadow-[0_18px_60px_-30px_rgba(15,118,110,0.45)]">
-      <div className="relative overflow-hidden bg-gradient-to-l from-emerald-700 via-teal-700 to-cyan-700 px-5 py-6 text-white sm:px-7">
-        <div className="absolute -left-10 -top-16 h-44 w-44 rounded-full bg-white/10 blur-2xl" />
-        <div className="absolute -bottom-20 right-0 h-44 w-44 rounded-full bg-cyan-300/15 blur-2xl" />
-
-        <div className="relative flex items-center gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/20 bg-white/15 shadow-inner backdrop-blur">
-            <CheckCircle2 size={29} />
-          </div>
-
-          <div className="min-w-0">
-            <p className="text-xs font-extrabold tracking-wide text-emerald-100">
-              الحل المعتمد في المنصة
-            </p>
-
-            <h2 className="mt-1 text-xl font-black sm:text-2xl">
-              {normalizedSolution.title ||
-                "نفهم الفكرة ثم نحل خطوة بخطوة"}
-            </h2>
-
-            <p className="mt-2 text-sm font-semibold leading-7 text-emerald-50/90">
-              لا نستعمل أي نتيجة قبل إثباتها، وكل خطوة تحتوي على شرح وحساب ونتيجة.
-            </p>
-          </div>
+    <section className="mt-7 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm" dir="rtl">
+      <div className="flex items-center gap-3 border-b border-emerald-100 bg-emerald-50/60 px-5 py-4 sm:px-6">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white">
+          <CheckCircle2 size={19} strokeWidth={2.6} />
+        </span>
+        <div>
+          <p className="text-xs font-black text-emerald-700">التصحيح النموذجي</p>
+          <h2 className="mt-0.5 text-lg font-black text-slate-950">الحل</h2>
         </div>
       </div>
 
-      <div className="space-y-5 bg-gradient-to-b from-emerald-50/45 via-white to-white p-4 sm:p-6 lg:p-7">
-        {intro && (
-          <SolutionSection
-            title="قبل أن نبدأ"
-            description="نقرأ الفكرة بهدوء قبل الدخول في الحساب."
-            icon={<Sparkles size={20} />}
-            variant="violet"
-          >
-            <MathTextParser
-              text={intro}
-              className="text-base font-semibold leading-9 text-slate-800"
+      <div className="px-5 py-5 sm:px-7 sm:py-6">
+        {hasSolutionScienceVisual && (
+          <div className="mb-7">
+            <ScienceVisualRenderer
+              visual={solutionScienceVisual}
+              title="الوثيقة المستعملة في الحل"
             />
-          </SolutionSection>
-        )}
-
-        {strategy && (
-          <SolutionSection
-            title={normalizedSolution.method_name || "خطة الحل"}
-            description="هذه هي الطريق التي سنتبعها من البداية إلى النهاية."
-            icon={<Brain size={20} />}
-            variant="blue"
-          >
-            <MathTextParser
-              text={strategy}
-              className="text-base font-semibold leading-9 text-slate-800"
-            />
-          </SolutionSection>
-        )}
-
-        {normalizeArray(normalizedSolution.before_start).length > 0 && (
-          <ListSolutionSection
-            title="قبل بدء الحل"
-            items={normalizeArray(normalizedSolution.before_start)}
-            icon={<Lightbulb size={20} />}
-            variant="amber"
-          />
-        )}
-
-        {whatWeKnow.length > 0 && (
-          <ListSolutionSection
-            title="المعطيات التي سنستعملها"
-            items={whatWeKnow}
-            icon={<BookOpen size={20} />}
-            variant="blue"
-          />
-        )}
-
-        {normalizedSolution.what_we_need_to_show && (
-          <SolutionSection
-            title="المطلوب"
-            description="نحدد الهدف حتى لا نضيع أثناء الحل."
-            icon={<CircleHelp size={20} />}
-            variant="amber"
-          >
-            <MathTextParser
-              text={normalizedSolution.what_we_need_to_show}
-              className="text-base font-semibold leading-9 text-slate-800"
-            />
-          </SolutionSection>
-        )}
-
-        {hasSolutionGraph && (
-          <SequenceGraphRenderer
-            graphData={solutionGraphData}
-            eyebrow="الرسم في الحل"
-            title="إنشاء الرسم وقراءة النتيجة"
-            description="هذا الرسم تابع للحل، ويظهر فقط بعد فتح الحل المفصل."
-            variant="solution"
-          />
-        )}
-
-        {displayedSteps.length > 0 && (
-          <section>
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm">
-                  <Brain size={21} />
-                </div>
-
-                <div>
-                  <p className="font-black text-emerald-950">
-                    مراحل الحل
-                  </p>
-                  <p className="mt-0.5 text-sm font-semibold leading-6 text-emerald-700">
-                    اقرأ الشرح، ثم تابع الحساب، وبعده احفظ النتيجة.
-                  </p>
-                </div>
-              </div>
-
-              <span className="hidden rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-black text-emerald-700 sm:inline-flex">
-                {displayedSteps.length} خطوات
-              </span>
-            </div>
-
-            <div className="relative space-y-4 before:absolute before:bottom-5 before:right-[25px] before:top-5 before:w-0.5 before:bg-emerald-100 sm:before:right-[29px]">
-              {displayedSteps.map((step, index) => (
-                <StoredSolutionStep
-                  key={`${step?.order || index}-${step?.title || "step"}`}
-                  step={step}
-                  index={index}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {finalAnswer && (
-          <div className="overflow-hidden rounded-[26px] border border-emerald-200 bg-emerald-50 shadow-sm">
-            <div className="flex items-center gap-3 border-b border-emerald-100 bg-emerald-600 px-5 py-4 text-white">
-              <Award size={22} />
-              <div>
-                <p className="text-xs font-bold text-emerald-100">
-                  النتيجة النهائية
-                </p>
-                <h3 className="font-black">
-                  هذا هو الجواب الذي نصل إليه
-                </h3>
-              </div>
-            </div>
-
-            <div className="p-4 sm:p-5">
-              <MathBox text={finalAnswer} variant="green" />
-            </div>
           </div>
         )}
 
-        {normalizedSolution.verification && (
-          <SolutionSection
-            title="كيف نتأكد أن الحل صحيح؟"
-            icon={<CheckCircle2 size={20} />}
-            variant="green"
-          >
-            <MathTextParser
-              text={normalizedSolution.verification}
-              className="font-semibold leading-9 text-slate-800"
+        {hasSolutionGraph && (
+          <div className="mb-7">
+            <SequenceGraphRenderer
+              graphData={solutionGraphData}
+              eyebrow="الرسم"
+              title="الرسم المستعمل في الحل"
+              variant="solution"
             />
-          </SolutionSection>
+          </div>
         )}
 
-        {bacWriting.length > 0 && (
-          <ListSolutionSection
-            title="الكتابة المنظمة في ورقة البكالوريا"
-            items={bacWriting}
-            icon={<GraduationCap size={20} />}
-            variant="blue"
+        {displayedSteps.length > 0 ? (
+          <div>
+            {displayedSteps.map((step, index) => (
+              <StoredSolutionStep
+                key={`${step?.order || index}-${step?.title || "step"}`}
+                step={step}
+                index={index}
+                isLast={index === displayedSteps.length - 1}
+              />
+            ))}
+          </div>
+        ) : fallbackExplanation ? (
+          <MathTextParser
+            text={fallbackExplanation}
+            className="text-[15px] font-semibold leading-9 text-slate-800 sm:text-base"
           />
-        )}
+        ) : null}
 
-        {mistakes.length > 0 && (
-          <SolutionSection
-            title="انتبه إلى هذه الأخطاء"
-            icon={<AlertTriangle size={20} />}
-            variant="red"
-          >
-            <div className="space-y-3">
-              {mistakes.map((item, index) => (
-                <div
-                  key={index}
-                  className="overflow-hidden rounded-2xl border border-red-100 bg-white"
-                >
-                  <div className="border-b border-red-100 bg-red-50 px-4 py-3">
-                    <p className="font-black text-red-800">
-                      الخطأ {index + 1}
-                    </p>
-                  </div>
-
-                  <div className="space-y-3 p-4">
-                    <MathTextParser
-                      text={item?.mistake || toDisplayString(item)}
-                      className="font-semibold leading-8 text-red-950"
-                    />
-
-                    {item?.correction && (
-                      <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
-                        <p className="mb-1 text-xs font-black text-emerald-700">
-                          التصحيح
-                        </p>
-                        <MathTextParser
-                          text={item.correction}
-                          className="font-semibold leading-8 text-emerald-950"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+        {finalAnswer && (
+          <div className="mt-7 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 sm:px-5">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 size={20} className="mt-1 shrink-0 text-emerald-600" />
+              <div className="min-w-0 flex-1">
+                <p className="mb-1.5 text-xs font-black text-emerald-700">النتيجة النهائية</p>
+                <MathTextParser
+                  text={finalAnswer}
+                  className="text-base font-black leading-9 text-slate-950 sm:text-[17px]"
+                />
+              </div>
             </div>
-          </SolutionSection>
-        )}
-
-
-        {understandingCheck.length > 0 && (
-          <ListSolutionSection
-            title="اختبر فهمك بسرعة"
-            items={understandingCheck}
-            icon={<CircleHelp size={20} />}
-            variant="amber"
-          />
+          </div>
         )}
       </div>
+    </section>
+  );
+}
+
+function SimpleStoredSolution({ solution }) {
+  const steps = normalizeArray(solution.steps || solution.solution_steps);
+  const explanation =
+    solution.intro || solution.explanation || solution.detailed_explanation;
+  const finalAnswer =
+    solution.final_answer || solution.answer || solution.final_math;
+
+  return (
+    <div className="space-y-5" dir="rtl">
+      {explanation && (
+        <MathTextParser
+          text={explanation}
+          className="text-[15px] font-semibold leading-9 text-slate-800 sm:text-base"
+        />
+      )}
+
+      {steps.length > 0 && (
+        <div className="divide-y divide-slate-100">
+          {steps.map((step, index) => (
+            <StoredSolutionStep key={`simple-${index}`} step={step} index={index} />
+          ))}
+        </div>
+      )}
+
+      {finalAnswer && (
+        <div className="rounded-2xl bg-emerald-50 px-4 py-4">
+          <p className="mb-1 text-xs font-black text-emerald-700">الجواب النهائي</p>
+          <MathTextParser text={finalAnswer} className="font-black leading-9 text-slate-950" />
+        </div>
+      )}
     </div>
   );
 }
 
+function isMeaninglessSolutionText(value) {
+  const text = String(value ?? "")
+    .replace(/\u200B|\u200C|\u200D|\uFEFF/g, "")
+    .replace(/\\(?:,|;|!|qquad\b|quad\b)/g, " ")
+    .replace(/[\s\-–—_=.:؛،]+/g, "")
+    .trim();
 
-function SimpleStoredSolution({ solution }) {
-  const steps = normalizeArray(
-    solution.steps || solution.solution_steps
-  );
-
-  const intro =
-    solution.intro ||
-    solution.explanation ||
-    solution.detailed_explanation;
-
-  const finalAnswer =
-    solution.final_answer ||
-    solution.answer ||
-    solution.final_math;
-
-  return (
-    <SolutionSection
-      title={solution.title || "الحل البسيط والمشروح"}
-      description={
-        solution.method
-          ? `الطريقة المستعملة: ${solution.method}`
-          : "نقرأ الفكرة، ثم نشرح كل خطوة، ثم ننجز الحساب."
-      }
-      icon={<Sparkles size={20} />}
-      variant="violet"
-    >
-      <div className="space-y-4">
-        {intro && (
-          <MathTextParser
-            text={intro}
-            className="font-semibold leading-8 text-slate-800"
-          />
-        )}
-
-        {steps.length > 0 && (
-          <div className="space-y-3">
-            {steps.map((step, index) => (
-              <StoredSolutionStep
-                key={`simple-${index}`}
-                step={step}
-                index={index}
-                compact
-              />
-            ))}
-          </div>
-        )}
-
-        {finalAnswer && (
-          <MathBox text={finalAnswer} variant="green" />
-        )}
-      </div>
-    </SolutionSection>
-  );
+  return text.length === 0;
 }
 
-function ListSolutionSection({
-  title,
-  items,
-  icon,
-  variant = "blue",
-}) {
-  return (
-    <SolutionSection
-      title={title}
-      icon={icon}
-      variant={variant}
-    >
-      <div className="space-y-3">
-        {normalizeArray(items).map((item, index) => (
-          <div
-            key={index}
-            className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3"
-          >
-            <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-xs font-black text-slate-700 shadow-sm">
-              {index + 1}
-            </span>
+function cleanSolutionMathText(value) {
+  let text = String(value ?? "")
+    .replace(/\\r\\n|\\n/g, "\n")
+    .replace(/\r\n?/g, "\n")
+    // إصلاح متغيرات مختلطة بالعربية داخل LaTeX مثل t_نهاية.
+    // العربية خارج MathJax تبقى كما هي، لكن اسم المتغير يصبح t_f.
+    .replace(/t_\{?\s*نهاية\s*\}?/g, "t_f")
+    .replace(/t_\{?\s*النهاية\s*\}?/g, "t_f")
+    .replace(/t_\{?\s*نهائي\s*\}?/g, "t_f")
+    // توحيد أوامر التقريب.
+    .replace(/\\approx(?=\s*[-+]?\d)/g, "\\approx ")
+    .replace(/\\simeq(?=\s*[-+]?\d)/g, "\\simeq ")
+    // 14\\,min -> 14\\,\\mathrm{min}
+    .replace(/(\d)\\,\s*min\b/g, "$1\\,\\mathrm{min}")
+    .replace(/(\d)\s+min\b/g, "$1\\,\\mathrm{min}")
+    .replace(/(\d)\s*min\b/g, "$1\\,\\mathrm{min}")
+    // 12\\,s, 5\\,V, ... عند وصول الوحدة كنص عادي.
+    .replace(/(\d)\\,\s*(Pa|kPa|MPa|s|ms|V|A|mA|H|F|J|mol|mmol|L|mL|K|W|N|C|Hz)\b/g, "$1\\,\\mathrm{$2}")
+    .replace(/\bPa(?=\s*(?:\\,|\\;|\s))/g, "\\mathrm{Pa}")
+    .replace(/\bm(?=\^\{?[-+]?\d+\}?)/g, "\\mathrm{m}")
+    .replace(/\bmol(?=\^\{?[-+]?\d+\}?|\s*(?:\\,|$))/g, "\\mathrm{mol}")
+    .replace(/\bK(?=\^\{?[-+]?\d+\}?|\s*(?:\\,|$))/g, "\\mathrm{K}")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 
-            <MathTextParser
-              text={toDisplayString(item)}
-              className="font-semibold leading-8 text-slate-800"
-            />
-          </div>
-        ))}
-      </div>
-    </SolutionSection>
-  );
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => !isMeaninglessSolutionText(line));
+
+  return lines.join("\n");
 }
-
 
 function normalizeCalculationLines(value) {
-  if (value === null || value === undefined || value === "") {
-    return "";
-  }
+  if (value === null || value === undefined || value === "") return "";
 
   if (typeof value === "string" || typeof value === "number") {
-    return String(value).trim();
+    const cleaned = cleanSolutionMathText(value);
+    return isMeaninglessSolutionText(cleaned) ? "" : cleaned;
   }
 
   if (Array.isArray(value)) {
     return value
       .map((item) => normalizeCalculationLines(item))
-      .filter(Boolean)
+      .filter((item) => item && !isMeaninglessSolutionText(item))
       .join("\n");
   }
 
   if (typeof value === "object") {
-    const directValue =
+    return normalizeCalculationLines(
       value.math ??
       value.calculation ??
       value.formula ??
@@ -2363,51 +3968,45 @@ function normalizeCalculationLines(value) {
       value.content ??
       value.value ??
       value.result ??
-      "";
-
-    return normalizeCalculationLines(directValue);
+      ""
+    );
   }
 
-  return String(value).trim();
+  const cleaned = cleanSolutionMathText(String(value));
+  return isMeaninglessSolutionText(cleaned) ? "" : cleaned;
 }
 
-function StoredSolutionStep({ step, index, compact = false }) {
-  const normalizedStep =
-    typeof step === "string" ? { explanation: step } : step || {};
+/*
+ * مهم: هذا الـ renderer يتجاهل عمدًا الحقول التعليمية الزائدة مثل:
+ * what_to_do / rule / why / used_rule / step_result_label
+ * ويعرض فقط الحل الفعلي: عنوان مختصر + شرح مباشر + حساب + نتيجة.
+ */
+function StoredSolutionStep({ step, index, isLast = false }) {
+  const normalizedStep = typeof step === "string" ? { explanation: step } : step || {};
 
-  const number =
-    normalizedStep.order ||
-    normalizedStep.number ||
-    normalizedStep.step_number ||
-    index + 1;
+  const number = normalizedStep.order || normalizedStep.number || normalizedStep.step_number || index + 1;
+  const rawTitle = normalizedStep.title || normalizedStep.name || normalizedStep.step_title;
+  const title = isMeaninglessSolutionText(rawTitle) ? "" : cleanSolutionMathText(rawTitle);
 
-  const explanation =
+  const rawExplanation =
+    normalizedStep.simple_explanation ||
     normalizedStep.explanation ||
     normalizedStep.teacher_explanation ||
     normalizedStep.description ||
     normalizedStep.instruction;
 
-  const why =
-    normalizedStep.why ||
-    normalizedStep.goal ||
-    normalizedStep.rule_used;
+  const explanation = isMeaninglessSolutionText(rawExplanation)
+    ? ""
+    : cleanSolutionMathText(rawExplanation);
 
-  /*
-   * calculation_lines في JSON الجديد عبارة عن قائمة:
-   *
-   * [
-   *   "نص عربي",
-   *   "\\[",
-   *   "u_{n+1}=...",
-   *   "\\]"
-   * ]
-   *
-   * الكود القديم كان يقرأ فقط:
-   * calculation_lines?.[0]?.math
-   *
-   * لذلك كانت الحسابات لا تظهر. هنا نجمع كل الأسطر
-   * ونرسلها كاملة إلى MathBox.
-   */
+  const calculationBreakdown = normalizeArray(
+    normalizedStep.calculation_breakdown ||
+    normalizedStep.calculation_details ||
+    normalizedStep.breakdown
+  )
+    .map((item) => cleanSolutionMathText(toDisplayString(item)))
+    .filter((item) => item && !isMeaninglessSolutionText(item));
+
   const calculation = normalizeCalculationLines(
     normalizedStep.calculation_lines ??
     normalizedStep.calculation ??
@@ -2416,98 +4015,100 @@ function StoredSolutionStep({ step, index, compact = false }) {
     normalizedStep.equation
   );
 
-  const result =
+  const rawResult =
     normalizedStep.result ||
-    normalizedStep.conclusion ||
     normalizedStep.answer ||
-    normalizedStep.final_answer;
+    normalizedStep.conclusion ||
+    normalizedStep.final_result;
+
+  const result = isMeaninglessSolutionText(rawResult)
+    ? ""
+    : cleanSolutionMathText(rawResult);
+
+  const variationTables = normalizeArray(normalizedStep.variation_tables).filter(
+    (table) => isNonEmptyObject(normalizeObject(table))
+  );
+
+  const hasContent =
+    title || explanation || calculationBreakdown.length > 0 || calculation || result || variationTables.length > 0;
+  if (!hasContent) return null;
 
   return (
-    <article className="relative pr-14 sm:pr-16">
-      <div className="absolute right-0 top-4 z-10 flex h-[52px] w-[52px] items-center justify-center rounded-2xl border-4 border-white bg-emerald-600 text-lg font-black text-white shadow-md sm:h-[60px] sm:w-[60px]">
-        {number}
+    <div className="relative flex gap-4 pb-7 last:pb-0 sm:gap-5">
+      {/* مسار الخطوات */}
+      <div className="relative flex w-9 shrink-0 justify-center">
+        {!isLast && (
+          <span className="absolute bottom-0 top-9 w-px bg-slate-200" />
+        )}
+        <span className="relative z-10 flex h-9 w-9 items-center justify-center rounded-full border-2 border-blue-600 bg-white text-sm font-black text-blue-700">
+          {number}
+        </span>
       </div>
 
-      <div
-        className={cn(
-          "overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-0.5 hover:shadow-md",
-          compact ? "p-3" : "p-4 sm:p-5"
-        )}
-      >
-        <div className="mb-4 border-b border-slate-100 pb-4">
-          <p className="text-xs font-black text-emerald-600">
-            الخطوة {number}
-          </p>
-
-          <div className="mt-1 text-lg font-black leading-8 text-slate-950">
-            <MathTextParser
-              text={normalizedStep.title || `الخطوة ${number}`}
-            />
+      <div className="min-w-0 flex-1 pt-0.5">
+        {title && (
+          <div className="mb-1.5 text-[15px] font-black leading-8 text-slate-950 sm:text-base">
+            <MathTextParser text={title} />
           </div>
-        </div>
+        )}
 
         {explanation && (
-          <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50/80 p-4">
-            <div className="mb-2 flex items-center gap-2 text-blue-700">
-              <BookOpen size={16} />
-              <p className="text-xs font-black">
-                ماذا نفعل في هذه الخطوة؟
-              </p>
-            </div>
-
-            <MathTextParser
-              text={explanation}
-              className="font-semibold leading-9 text-blue-950"
-            />
-          </div>
+          <MathTextParser
+            text={explanation}
+            className="text-[15px] font-medium leading-8 text-slate-700 sm:text-base"
+          />
         )}
 
-        {why && (
-          <div className="mb-4 rounded-2xl border border-violet-100 bg-violet-50/80 p-4">
-            <div className="mb-2 flex items-center gap-2 text-violet-700">
-              <Lightbulb size={16} />
-              <p className="text-xs font-black">
-                لماذا نفعل ذلك؟
-              </p>
-            </div>
-
-            <MathTextParser
-              text={why}
-              className="font-semibold leading-9 text-violet-950"
-            />
+        {calculationBreakdown.length > 0 && (
+          <div className="mt-3 space-y-2 border-r-2 border-blue-100 pr-3">
+            {calculationBreakdown.map((item, itemIndex) => {
+              const text = cleanSolutionMathText(item);
+              const displayMath = shouldUseDisplayMath(text);
+              return (
+                <MathTextParser
+                  key={`${number}-calc-${itemIndex}`}
+                  text={text}
+                  display={displayMath}
+                  dir={displayMath ? "ltr" : "rtl"}
+                  className={cn(
+                    "font-semibold leading-8 text-slate-800",
+                    displayMath && "overflow-x-auto py-1 text-center"
+                  )}
+                />
+              );
+            })}
           </div>
         )}
 
         {calculation && (
-          <div className="mb-4">
-            <p className="mb-2 flex items-center gap-2 text-xs font-black text-slate-600">
-              <Hash size={15} />
-              الحساب
-            </p>
-            <MathBox text={calculation} />
+          <div className="mt-3 overflow-x-auto rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+            <MathTextParser
+              text={calculation}
+              display={shouldUseDisplayMath(calculation)}
+              dir={shouldUseDisplayMath(calculation) ? "ltr" : "rtl"}
+              className={cn(
+                "font-bold leading-9 text-slate-950",
+                shouldUseDisplayMath(calculation) && "text-center"
+              )}
+            />
           </div>
         )}
 
         {result && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-            <div className="mb-2 flex items-center gap-2 text-emerald-700">
-              <CheckCircle2 size={17} />
-              <p className="text-sm font-black">
-                ماذا نستنتج؟
-              </p>
-            </div>
-
-            <MathTextParser
-              text={result}
-              className="font-bold leading-9 text-emerald-950"
-            />
+          <div className="mt-3 border-r-2 border-emerald-500 pr-3 text-emerald-800">
+            <MathTextParser text={result} className="font-bold leading-8" />
           </div>
         )}
+
+        {variationTables.map((table, tableIndex) => (
+          <div className="mt-4" key={table?.id || `${number}-variation-${tableIndex}`}>
+            <VariationTableRenderer table={table} />
+          </div>
+        ))}
       </div>
-    </article>
+    </div>
   );
 }
-
 
 function HintsSection({ hints }) {
   const [visibleCount, setVisibleCount] = useState(0);
@@ -2582,135 +4183,172 @@ function SimpleExplanation({
       normalizedExplanation?.solution_steps
   );
 
+  const givenItems = normalizeArray(
+    normalizedExplanation?.what_is_given
+  );
+
   return (
-    <div className="mt-6 overflow-hidden rounded-[28px] border border-violet-200 bg-white shadow-sm">
-      <div className="bg-gradient-to-l from-violet-700 to-blue-600 px-5 py-5 text-white sm:px-6">
+    <section className="mt-6 overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-sm sm:rounded-[28px]">
+      <div className="border-b border-indigo-100 bg-indigo-50/60 px-4 py-4 sm:px-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15">
-            <Brain size={24} />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white">
+            <Brain size={21} />
           </div>
-
           <div>
-            <p className="text-xs font-bold text-violet-100">
-              شرح مبسط بالذكاء الاصطناعي
-            </p>
-
-            <h2 className="text-xl font-black">
-              نفس الفكرة بطريقة أسهل
+            <p className="text-xs font-black text-indigo-600">شرح بالذكاء الاصطناعي</p>
+            <h2 className="mt-0.5 text-lg font-black text-slate-950">
+              نحل التمرين من البداية وبأبسط طريقة
             </h2>
           </div>
         </div>
       </div>
 
-      <div className="space-y-5 bg-violet-50/30 p-4 sm:p-6">
-        {(normalizedExplanation?.intro ||
-          normalizedExplanation?.detailed_explanation ||
-          normalizedExplanation?.explanation) && (
-          <SolutionSection
-            title="الشرح المبسط"
-            icon={<Sparkles size={20} />}
-            variant="violet"
-          >
+      <div className="space-y-6 px-4 py-5 sm:px-7 sm:py-6">
+        {normalizedExplanation?.teacher_intro && (
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3.5">
             <MathTextParser
-              text={
-                normalizedExplanation.intro ||
-                normalizedExplanation.detailed_explanation ||
-                normalizedExplanation.explanation
-              }
-              className="font-semibold leading-8 text-slate-800"
+              text={normalizedExplanation.teacher_intro}
+              className="font-semibold leading-8 text-slate-700"
             />
-          </SolutionSection>
-        )}
-
-        {normalizedExplanation?.idea && (
-          <SolutionSection
-            title="الفكرة بسهولة"
-            icon={<Lightbulb size={20} />}
-            variant="amber"
-          >
-            <MathTextParser
-              text={normalizedExplanation.idea}
-              className="font-semibold leading-8 text-slate-800"
-            />
-          </SolutionSection>
-        )}
-
-        {isNonEmptyObject(
-          normalizeObject(normalizedExplanation?.graph_data)
-        ) && (
-          <SequenceGraphRenderer
-            graphData={normalizeObject(
-              normalizedExplanation.graph_data
-            )}
-            eyebrow="الرسم التوضيحي"
-            title="الرسم داخل الشرح المبسط"
-            description="يساعدك هذا الرسم على فهم خطوات الحل بصريًا."
-            variant="solution"
-          />
-        )}
-
-        {steps.length > 0 && (
-          <div className="space-y-4">
-            {steps.map((step, index) => (
-              <StoredSolutionStep
-                key={index}
-                step={{
-                  order: step.order || step.number || index + 1,
-                  title: step.title,
-                  explanation:
-                    step.explanation ||
-                    step.description ||
-                    step.instruction,
-                  why: step.why,
-                  calculation:
-                    step.calculation ||
-                    step.math ||
-                    step.calculation_lines?.[0]?.math,
-                  result:
-                    step.result ||
-                    step.conclusion,
-                }}
-                index={index}
-              />
-            ))}
           </div>
         )}
 
-        {(normalizedExplanation?.final_answer ||
-          normalizedExplanation?.final_math) && (
-          <SolutionSection
-            title="النتيجة"
-            icon={<CheckCircle2 size={20} />}
-            variant="green"
-          >
-            <MathBox
-              text={
-                normalizedExplanation.final_answer ||
-                normalizedExplanation.final_math
-              }
-              variant="green"
-            />
-          </SolutionSection>
+        {givenItems.length > 0 && (
+          <div>
+            <div className="mb-3 flex items-center gap-2">
+              <BookOpen size={18} className="text-blue-600" />
+              <h3 className="font-black text-slate-950">ما الذي نملكه؟</h3>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {givenItems.map((item, index) => (
+                <div
+                  key={`given-${index}`}
+                  className="rounded-xl border border-blue-100 bg-blue-50/50 px-3.5 py-3"
+                >
+                  {item?.label && (
+                    <p className="mb-1 text-xs font-black text-blue-700">
+                      {item.label}
+                    </p>
+                  )}
+                  {item?.value && (
+                    <MathTextParser
+                      text={item.value}
+                      className="font-bold leading-8 text-slate-950"
+                    />
+                  )}
+                  {item?.meaning && (
+                    <MathTextParser
+                      text={item.meaning}
+                      className="mt-1 text-sm font-medium leading-7 text-slate-600"
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
-        <div className="flex justify-center">
+        {normalizedExplanation?.what_is_required && (
+          <div className="rounded-2xl border-r-4 border-r-violet-500 bg-violet-50/60 px-4 py-3.5">
+            <p className="mb-1 text-xs font-black text-violet-700">ما المطلوب؟</p>
+            <MathTextParser
+              text={normalizedExplanation.what_is_required}
+              className="font-bold leading-8 text-slate-800"
+            />
+          </div>
+        )}
+
+        {normalizedExplanation?.idea && (
+          <div className="rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-4">
+            <div className="mb-2 flex items-center gap-2 font-black text-amber-800">
+              <Lightbulb size={18} />
+              الفكرة قبل الحساب
+            </div>
+            <MathTextParser
+              text={normalizedExplanation.idea}
+              className="font-semibold leading-8 text-amber-950"
+            />
+          </div>
+        )}
+
+        {steps.length > 0 && (
+          <div>
+            <h3 className="mb-4 font-black text-slate-950">الحل خطوة بخطوة</h3>
+            <div>
+              {steps.map((step, index) => {
+                const formulaAndCalculation = [
+                  step?.formula,
+                  step?.calculation,
+                ].filter(hasText).join("\n");
+
+                return (
+                  <StoredSolutionStep
+                    key={`ai-step-${index}`}
+                    step={{
+                      order: step?.order || index + 1,
+                      title: step?.title,
+                      explanation: step?.explanation,
+                      calculation: formulaAndCalculation,
+                      result: step?.result,
+                    }}
+                    index={index}
+                    isLast={index === steps.length - 1}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {normalizedExplanation?.final_answer && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 sm:p-5">
+            <div className="mb-2 flex items-center gap-2 font-black text-emerald-800">
+              <CheckCircle2 size={19} />
+              الجواب النهائي
+            </div>
+            <MathBox text={normalizedExplanation.final_answer} variant="green" />
+          </div>
+        )}
+
+        {normalizedExplanation?.verification && (
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <p className="mb-1 text-xs font-black text-slate-500">كيف نتأكد؟</p>
+            <MathTextParser
+              text={normalizedExplanation.verification}
+              className="font-semibold leading-8 text-slate-700"
+            />
+          </div>
+        )}
+
+        {normalizedExplanation?.memory_tip && (
+          <div className="flex items-start gap-3 rounded-xl bg-indigo-50 px-4 py-3.5">
+            <Sparkles size={18} className="mt-1 shrink-0 text-indigo-600" />
+            <div>
+              <p className="text-xs font-black text-indigo-600">تذكّر</p>
+              <MathTextParser
+                text={normalizedExplanation.memory_tip}
+                className="font-semibold leading-8 text-indigo-950"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end border-t border-slate-100 pt-4">
           <button
             type="button"
             onClick={onRegenerate}
             disabled={loading}
-            className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2.5 text-sm font-extrabold text-violet-700 transition hover:bg-violet-50 disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
           >
-            <RefreshCcw
-              size={17}
-              className={loading ? "animate-spin" : ""}
-            />
-            توليد شرح مبسط آخر
+            <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
+            اشرحها بطريقة أبسط مرة أخرى
           </button>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
+
 
 function ErrorMessage({
   message,
@@ -2768,14 +4406,20 @@ function MathBox({
   const lines = splitRenderableLines(text);
   if (!lines.length) return null;
 
+  const formulaOnlyBox = lines.every((line) => shouldUseDisplayMath(line));
+
   return (
     <div
-      dir="rtl"
+      dir={formulaOnlyBox ? "ltr" : "rtl"}
       className={cn(
         "overflow-hidden rounded-2xl border p-4",
         variants[variant] || variants.default,
         className,
       )}
+      style={{
+        direction: formulaOnlyBox ? "ltr" : "rtl",
+        unicodeBidi: "isolate",
+      }}
     >
       <div className="space-y-3">
         {lines.map((line, index) => {
@@ -2875,7 +4519,7 @@ function EmptyState({
   return (
     <div
       dir="rtl"
-      className="mx-auto mt-10 max-w-xl rounded-[28px] border border-slate-200 bg-white p-8 text-center shadow-sm"
+      className="mx-auto mt-6 w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm sm:mt-10 sm:rounded-[28px] sm:p-8"
     >
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
         <BookOpen size={27} />
