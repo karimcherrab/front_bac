@@ -1,12 +1,10 @@
-// src/components/mathCourse/MathLessonCard.jsx
+// src/components/Course/LessonCard.jsx
 
 import {
   Play,
   CheckCircle2,
   Clock3,
 } from "lucide-react";
-
-import { useNavigate } from "react-router-dom";
 
 const colorStyles = {
   green: {
@@ -40,14 +38,31 @@ const colorStyles = {
   },
 };
 
-export default function LessonCard({ lesson }) {
-  const navigate = useNavigate();
-
+export default function LessonCard({
+  lesson,
+  courseName,
+  onOpen,
+}) {
   const styles =
-    colorStyles[lesson.color] || colorStyles.purple;
+    colorStyles[lesson?.color] ||
+    colorStyles.purple;
 
-  const openLesson = () => {
-    navigate(`/lesson/${lesson.chapter}`);
+  const openLesson = (event) => {
+    /*
+     * مهم جدًا:
+     * نمنع الضغط من الوصول إلى div الأب
+     * حتى لا يحدث navigate مرتين.
+     */
+    event.stopPropagation();
+
+    console.log(
+      "اسم المادة داخل LessonCard:",
+      courseName
+    );
+
+    if (onOpen) {
+      onOpen();
+    }
   };
 
   return (
@@ -57,71 +72,96 @@ export default function LessonCard({ lesson }) {
         group grid gap-5 rounded-2xl
         border border-slate-100 bg-white p-4
         shadow-card transition-all duration-300
-        hover:-translate-y-0.5 hover:border-violet-200
+        hover:-translate-y-0.5
+        hover:border-violet-200
         hover:shadow-lg
         lg:grid-cols-[100px_minmax(0,1fr)_180px]
         lg:items-center
       "
     >
       {/* الرقم والأيقونة */}
+
       <div className="flex items-center gap-4 lg:justify-start">
-        <span className="text-xl font-extrabold text-slate-800">
-          {lesson.number}
-        </span>
+        {/* <span className="text-xl font-extrabold text-slate-800">
+          {lesson.number ??
+            lesson.order}
+        </span> */}
 
         <div
           className={`
-            flex h-16 w-16 shrink-0 items-center
-            justify-center rounded-2xl
-            bg-gradient-to-br text-lg
-            font-bold text-white shadow-lg
-            transition group-hover:scale-105
+            flex h-16 w-16 shrink-0
+            items-center justify-center
+            rounded-2xl
+            bg-gradient-to-br
+            text-lg font-bold
+            text-white shadow-lg
+            transition
+            group-hover:scale-105
             ${styles.icon}
           `}
         >
-          {lesson.iconText}
+          {lesson.iconText ??
+            lesson.order}
         </div>
       </div>
 
       {/* معلومات الدرس */}
+
       <div>
         <h3 className="text-base font-extrabold text-slate-900">
           {lesson.title}
         </h3>
 
         <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-500">
-          <span className="flex items-center gap-1.5">
-            <span
-              className={`h-2 w-2 rounded-full ${styles.dot}`}
-            />
-            {lesson.level}
-          </span>
+          {lesson.level && (
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`
+                  h-2 w-2 rounded-full
+                  ${styles.dot}
+                `}
+              />
 
-          <span className="flex items-center gap-1.5">
-            <Clock3 size={14} />
-            {lesson.duration}
-          </span>
+              {lesson.level}
+            </span>
+          )}
+
+          {lesson.duration && (
+            <span className="flex items-center gap-1.5">
+              <Clock3 size={14} />
+
+              {lesson.duration}
+            </span>
+          )}
         </div>
 
-        <p className="mt-2 text-sm leading-6 text-slate-500">
-          {lesson.description}
-        </p>
+        {lesson.description && (
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            {lesson.description}
+          </p>
+        )}
       </div>
 
       {/* التقدم والزر */}
+
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-3">
           <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
             <div
-              className={`h-full rounded-full ${styles.progress}`}
+              className={`
+                h-full rounded-full
+                ${styles.progress}
+              `}
               style={{
-                width: `${lesson.progress}%`,
+                width: `${
+                  lesson.progress ?? 0
+                }%`,
               }}
             />
           </div>
 
           <span className="w-10 text-xs font-bold text-slate-700">
-            {lesson.progress}%
+            {lesson.progress ?? 0}%
           </span>
         </div>
 
@@ -129,26 +169,38 @@ export default function LessonCard({ lesson }) {
           type="button"
           onClick={openLesson}
           className="
-            flex h-11 items-center justify-center gap-2
-            rounded-xl border border-violet-200
-            bg-white text-sm font-bold text-violet-600
-            transition hover:bg-violet-600
+            flex h-11 items-center
+            justify-center gap-2
+            rounded-xl
+            border border-violet-200
+            bg-white
+            text-sm font-bold
+            text-violet-600
+            transition
+            hover:bg-violet-600
             hover:text-white
           "
         >
-          {lesson.progress === 100 ? (
+          {(lesson.progress ?? 0) ===
+          100 ? (
             <>
-              <CheckCircle2 size={17} />
+              <CheckCircle2
+                size={17}
+              />
+
               مراجعة الدرس
             </>
-          ) : lesson.progress > 0 ? (
+          ) : (lesson.progress ??
+              0) > 0 ? (
             <>
               <Play size={17} />
+
               متابعة الدرس
             </>
           ) : (
             <>
               <Play size={17} />
+
               ابدأ الدرس
             </>
           )}

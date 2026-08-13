@@ -2225,6 +2225,15 @@ function GuidedExplanationStep({ content = {} }) {
         </InfoBox>
       )}
 
+      {content.example &&
+        typeof content.example === "object" &&
+        !Array.isArray(content.example) && (
+          <MethodExplicitExample
+            example={content.example}
+            title="مثال تطبيقي"
+          />
+        )}
+
       {content.takeaway && (
         <div className="flex items-start gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-l from-indigo-50 to-white p-4 shadow-sm">
           <CheckCircle2
@@ -4519,6 +4528,29 @@ function GraphRenderer({ graph }) {
 function normalizeVariationColumns(value) {
   if (!value || typeof value !== "object") return [];
 
+  /*
+   * البنية المبسطة الجديدة:
+   * {
+   *   columns: ["x", "-\\infty", "0", "+\\infty"],
+   *   derivative_row: ["f'(x)=e^x", "+", "+", "+"],
+   *   function_row: ["f(x)=e^x", "0", "1", "+\\infty"],
+   *   arrows: ["↗", "↗"]
+   * }
+   *
+   * هذه البنية لها Renderer خاص بالأسفل، لذلك لا نحوّلها
+   * إلى DynamicDataTable حتى لا تظهر كروت منفصلة.
+   */
+  if (
+    Array.isArray(value.columns) &&
+    (
+      Array.isArray(value.derivative_row) ||
+      Array.isArray(value.function_row) ||
+      Array.isArray(value.arrows)
+    )
+  ) {
+    return [];
+  }
+
   const directRows =
     value.rows ||
     value.table ||
@@ -4573,11 +4605,583 @@ function normalizeVariationColumns(value) {
   return [];
 }
 
+
+/* =========================================================
+   Compact variation-table renderer
+   يدعم مباشرة:
+   columns + derivative_row + function_row + arrows
+========================================================= */
+
+function normalizeVariationLatex(value) {
+  let raw = decodeLatexEscapes(value).trim();
+
+  if (!raw) return "";
+
+  // نحذف محددات MathJax القديمة حتى لا تصبح متداخلة.
+  if (
+    (raw.startsWith("\\(") && raw.endsWith("\\)")) ||
+    (raw.startsWith("\\[") && raw.endsWith("\\]"))
+  ) {
+    raw = raw.slice(2, -2).trim();
+  }
+
+  if (raw.startsWith("$$") && raw.endsWith("$$")) {
+    raw = raw.slice(2, -2).trim();
+  } else if (raw.startsWith("$") && raw.endsWith("$")) {
+    raw = raw.slice(1, -1).trim();
+  }
+
+  return raw
+    .replace(/[−–—]/g, "-")
+    .replace(/\+∞/g, "+\\infty")
+    .replace(/-∞/g, "-\\infty")
+    .replace(/∞/g, "\\infty")
+    // إصلاح قيم تصل أحيانًا بشكل infty+ أو infty-
+    .replace(/^infty\+$/i, "+\\infty")
+    .replace(/^infty-$/i, "-\\infty")
+    .replace(/^\+infty$/i, "+\\infty")
+    .replace(/^-infty$/i, "-\\infty")
+    .trim();
+}
+
+
+function VariationMathValue({
+  value,
+  className = "",
+  display = false,
+}) {
+  if (isEmpty(value)) return null;
+
+  const raw = String(value).trim();
+
+  // الأسهم ليست LaTeX؛ نعرضها مباشرة.
+  if (["↗", "↘", "→", "←", "↑", "↓"].includes(raw)) {
+    return (
+      <span
+        dir="ltr"
+        className={cn(
+          "inline-flex items-center justify-center font-black [unicode-bidi:isolate]",
+          className,
+        )}
+      >
+        {raw}
+      </span>
+    );
+  }
+
+  const latex = normalizeVariationLatex(raw);
+  if (!latex) return null;
+
+  return (
+    <MathJax dynamic hideUntilTypeset="first">
+      <span
+        dir="ltr"
+        className={cn(
+          "inline-flex max-w-full items-center justify-center whitespace-nowrap",
+          "font-black [unicode-bidi:isolate]",
+          "[&_mjx-container]:m-0 [&_mjx-container]:direction-ltr",
+          className,
+        )}
+      >
+        {display ? `\\[${latex}\\]` : `\\(${latex}\\)`}
+      </span>
+    </MathJax>
+  );
+}
+
+
+function CompactVariationTable({
+  table,
+  title = "جدول التغيرات",
+}) {
+  if (!table || typeof table !== "object") return null;
+
+  const columns = Array.isArray(table.columns)
+    ? table.columns.filter((value) => value !== undefined)
+    : [];
+
+  const derivativeRow = Array.isArray(table.derivative_row)
+    ? table.derivative_row.filter((value) => value !== undefined)
+    : [];
+
+  const functionRow = Array.isArray(table.function_row)
+    ? table.function_row.filter((value) => value !== undefined)
+    : [];
+
+  const explicitArrows = Array.isArray(table.arrows)
+    ? table.arrows.filter((value) => value !== undefined)
+    : [];
+
+  if (columns.length < 2) return null;
+
+  const xLabel = columns[0] ?? "x";
+  const xPoints = columns.slice(1);
+  const pointCount = xPoints.length;
+  const intervalCount = Math.max(pointCount - 1, 0);
+
+  const derivativeLabel = derivativeRow[0] ?? "f'(x)";
+  const derivativeTokens = derivativeRow.slice(1);
+
+  const functionLabel = functionRow[0] ?? "f(x)";
+  const functionTokens = functionRow.slice(1);
+
+  const normalizeDirection = (value) => {
+    const raw = String(value ?? "")
+      .replace(/\\text\{([^{}]*)\}/g, "$1")
+      .replace(/\\\(|\\\)|\\\[|\\\]/g, "")
+      .replace(/\s+/g, "")
+      .trim();
+
+    if (["↗", "↑", "تزايد", "متزايدة", "متزايد", "تصاعد", "صاعدة", "صاعد"].some((token) => raw.includes(token))) {
+      return "↗";
+    }
+
+    if (["↘", "↓", "تناقص", "متناقصة", "متناقص", "نزول", "نازلة", "نازل"].some((token) => raw.includes(token))) {
+      return "↘";
+    }
+
+    if (["→", "ثابت", "ثابتة"].some((token) => raw.includes(token))) {
+      return "→";
+    }
+
+    return "";
+  };
+
+  const isZeroToken = (value) => {
+    const raw = normalizeVariationLatex(value).replace(/\s+/g, "").trim();
+    return raw === "0";
+  };
+
+  const isForbiddenToken = (value) => {
+    const raw = String(value ?? "").replace(/\s+/g, "").trim();
+    return ["||", "║", "∥", "غيرمعرفة", "غيرمعرف"].includes(raw);
+  };
+
+  const isPlusToken = (value) => String(value ?? "").trim() === "+";
+  const isMinusToken = (value) => ["-", "−", "–", "—"].includes(String(value ?? "").trim());
+
+  /* =======================================================
+     تحليل صف المشتقة
+  ======================================================= */
+  const derivativePointValues = Array.from(
+    { length: pointCount },
+    (_, index) => derivativeTokens[index] ?? "",
+  );
+
+  const intervalSigns = Array.from({ length: intervalCount }, (_, index) => {
+    const left = derivativeTokens[index] ?? "";
+    const right = derivativeTokens[index + 1] ?? "";
+
+    const validSign = (value) => isPlusToken(value) || isMinusToken(value);
+
+    if (validSign(left)) return left;
+    if (validSign(right)) return right;
+
+    return left || right || "";
+  });
+
+  /* =======================================================
+     تحليل صف f
+
+     يدعم:
+     ["0", "1", "+\\infty"] + ["↗", "↗"]
+
+     وكذلك:
+     ["تناقص", "e^{-3}", "تزايد"]
+  ======================================================= */
+  const hasDirectionWords = functionTokens.some(
+    (value) => normalizeDirection(value) !== "",
+  );
+
+  let functionPointValues = Array.from({ length: pointCount }, () => "");
+  let normalizedArrows = Array.from(
+    { length: intervalCount },
+    (_, index) => normalizeDirection(explicitArrows[index]) || explicitArrows[index] || "",
+  );
+
+  if (hasDirectionWords) {
+    const nonDirectionValues = functionTokens.filter(
+      (token) => !normalizeDirection(token),
+    );
+
+    // في صيغة تناقص / قيمة / تزايد تكون القيمة وسطية غالبًا.
+    if (nonDirectionValues.length === 1 && pointCount >= 3) {
+      functionPointValues[Math.floor(pointCount / 2)] = nonDirectionValues[0];
+    } else {
+      nonDirectionValues.slice(0, pointCount).forEach((value, index) => {
+        functionPointValues[index] = value;
+      });
+    }
+
+    let arrowIndex = 0;
+    functionTokens.forEach((token) => {
+      const direction = normalizeDirection(token);
+      if (direction && arrowIndex < intervalCount) {
+        normalizedArrows[arrowIndex] = direction;
+        arrowIndex += 1;
+      }
+    });
+  } else {
+    functionPointValues = Array.from(
+      { length: pointCount },
+      (_, index) => functionTokens[index] ?? "",
+    );
+  }
+
+  normalizedArrows = normalizedArrows.map((arrow) => {
+    const direction = normalizeDirection(arrow);
+    return direction || String(arrow ?? "").trim() || "→";
+  });
+
+  /* =======================================================
+     مستويات القيم في صف f
+  ======================================================= */
+  const pointLevels = [0];
+
+  normalizedArrows.forEach((arrow) => {
+    const direction = normalizeDirection(arrow) || arrow;
+    const delta = direction === "↗" ? 1 : direction === "↘" ? -1 : 0;
+    pointLevels.push(pointLevels[pointLevels.length - 1] + delta);
+  });
+
+  const minLevel = Math.min(...pointLevels);
+  const maxLevel = Math.max(...pointLevels);
+  const levelSpan = Math.max(maxLevel - minLevel, 1);
+
+  const getPointTopPercent = (pointIndex) => {
+    const level = pointLevels[pointIndex] ?? 0;
+    const normalized = (level - minLevel) / levelSpan;
+
+    // هوامش واضحة أعلى وأسفل الصف.
+    return 78 - normalized * 56;
+  };
+
+  const getPointLeftPercent = (pointIndex) => {
+    if (pointCount <= 1) return 50;
+    return 4 + (pointIndex / (pointCount - 1)) * 92;
+  };
+
+  const markerIdBase = `variation-arrow-${String(table.id || title || "table")}`
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .slice(0, 36);
+
+  const hasDomain =
+    table.domain ||
+    table.study_domain ||
+    table.domain_text ||
+    table.definition_domain;
+
+  const domainValue =
+    table.domain ||
+    table.study_domain ||
+    table.domain_text ||
+    table.definition_domain ||
+    "";
+
+  return (
+    <section
+      dir="ltr"
+      className="overflow-hidden rounded-[22px] border-2 border-slate-800 bg-white shadow-sm"
+    >
+      {/* العنوان */}
+      <div className="border-b-2 border-slate-800 bg-slate-50/80 px-5 py-3.5 text-center">
+        <h3 dir="rtl" className="text-base font-black text-slate-950 sm:text-lg">
+          {title}
+        </h3>
+      </div>
+
+      <div className="overflow-x-auto">
+        <div className="min-w-[760px]">
+          {/* ===================================================
+              صف x
+          =================================================== */}
+          <div className="grid grid-cols-[125px_1fr] border-b-2 border-slate-800">
+            <div className="flex min-h-[76px] items-center justify-center border-r-2 border-slate-800 bg-slate-100/85">
+              <VariationMathValue
+                value={xLabel}
+                className="text-xl italic text-slate-950"
+              />
+            </div>
+
+            <div className="relative min-h-[76px] bg-white">
+              {xPoints.map((point, pointIndex) => {
+                const left = getPointLeftPercent(pointIndex);
+                const interior = pointIndex > 0 && pointIndex < pointCount - 1;
+
+                return (
+                  <div
+                    key={`variation-x-point-${pointIndex}`}
+                    className="absolute inset-y-0 -translate-x-1/2"
+                    style={{ left: `${left}%` }}
+                  >
+                    {interior && (
+                      <div className="absolute inset-y-0 left-1/2 border-l border-slate-300" />
+                    )}
+
+                    <div className="relative z-10 flex h-full items-center justify-center bg-white/95 px-2">
+                      <VariationMathValue
+                        value={point}
+                        className="text-base text-slate-950 sm:text-lg"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ===================================================
+              صف f'(x)
+          =================================================== */}
+          {derivativeRow.length > 0 && (
+            <div className="grid grid-cols-[125px_1fr] border-b-2 border-slate-800">
+              <div className="flex min-h-[86px] items-center justify-center border-r-2 border-slate-800 bg-slate-100/85 px-2">
+                <VariationMathValue
+                  value={derivativeLabel}
+                  className="text-base italic text-slate-950 sm:text-lg"
+                />
+              </div>
+
+              <div className="relative min-h-[86px] bg-white">
+                {/* الإشارات توضع في وسط كل مجال */}
+                {intervalSigns.map((sign, intervalIndex) => {
+                  const leftPoint = getPointLeftPercent(intervalIndex);
+                  const rightPoint = getPointLeftPercent(intervalIndex + 1);
+                  const center = (leftPoint + rightPoint) / 2;
+
+                  return (
+                    <div
+                      key={`variation-derivative-sign-${intervalIndex}`}
+                      className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
+                      style={{ left: `${center}%` }}
+                    >
+                      <VariationMathValue
+                        value={sign}
+                        className={cn(
+                          "text-2xl sm:text-3xl",
+                          isPlusToken(sign)
+                            ? "text-emerald-600"
+                            : isMinusToken(sign)
+                              ? "text-rose-600"
+                              : "text-slate-800",
+                        )}
+                      />
+                    </div>
+                  );
+                })}
+
+                {/* 0 أو قيمة ممنوعة عند نقطة حرجة */}
+                {derivativePointValues.map((value, pointIndex) => {
+                  if (
+                    pointIndex <= 0 ||
+                    pointIndex >= pointCount - 1 ||
+                    (!isZeroToken(value) && !isForbiddenToken(value))
+                  ) {
+                    return null;
+                  }
+
+                  const left = getPointLeftPercent(pointIndex);
+
+                  return (
+                    <div
+                      key={`variation-derivative-point-${pointIndex}`}
+                      className="absolute inset-y-0 -translate-x-1/2"
+                      style={{ left: `${left}%` }}
+                    >
+                      <div className="absolute inset-y-0 left-1/2 border-l border-dashed border-slate-300" />
+
+                      <div className="relative z-10 flex h-full items-center justify-center bg-white px-2">
+                        <VariationMathValue
+                          value={value}
+                          className="text-base text-slate-950 sm:text-lg"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ===================================================
+              صف f — رسم مدرسي حقيقي
+          =================================================== */}
+          {functionRow.length > 0 && (
+            <div className="grid grid-cols-[125px_1fr]">
+              <div className="flex min-h-[205px] items-center justify-center border-r-2 border-slate-800 bg-slate-100/85 px-2">
+                <VariationMathValue
+                  value={functionLabel}
+                  className="text-lg italic text-slate-950 sm:text-xl"
+                />
+              </div>
+
+              <div className="relative min-h-[205px] bg-white">
+                {/* الفواصل العمودية عند النقاط الداخلية */}
+                {xPoints.map((_, pointIndex) => {
+                  if (pointIndex <= 0 || pointIndex >= pointCount - 1) {
+                    return null;
+                  }
+
+                  const left = getPointLeftPercent(pointIndex);
+
+                  return (
+                    <div
+                      key={`variation-function-divider-${pointIndex}`}
+                      className="pointer-events-none absolute inset-y-0 border-l border-dashed border-slate-300"
+                      style={{ left: `${left}%` }}
+                    />
+                  );
+                })}
+
+                {/* SVG واحد فوق كامل صف f */}
+                <svg
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+                  aria-hidden="true"
+                >
+                  <defs>
+                    {normalizedArrows.map((_, intervalIndex) => {
+                      const markerId = `${markerIdBase}-${intervalIndex}`;
+                      return (
+                        <marker
+                          key={`marker-${intervalIndex}`}
+                          id={markerId}
+                          viewBox="0 0 10 10"
+                          refX="8.5"
+                          refY="5"
+                          markerWidth="7"
+                          markerHeight="7"
+                          orient="auto-start-reverse"
+                        >
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
+                        </marker>
+                      );
+                    })}
+                  </defs>
+
+                  {normalizedArrows.map((arrow, intervalIndex) => {
+                    const markerId = `${markerIdBase}-${intervalIndex}`;
+
+                    const startPointX = getPointLeftPercent(intervalIndex);
+                    const endPointX = getPointLeftPercent(intervalIndex + 1);
+                    const distance = endPointX - startPointX;
+
+                    // نترك فراغًا قرب القيمة حتى لا يلامس السهم النص.
+                    const x1 = startPointX + distance * 0.11;
+                    const x2 = endPointX - distance * 0.11;
+
+                    const y1 = getPointTopPercent(intervalIndex);
+                    const y2 = getPointTopPercent(intervalIndex + 1);
+
+                    return (
+                      <line
+                        key={`variation-function-line-${intervalIndex}`}
+                        x1={x1}
+                        y1={y1}
+                        x2={x2}
+                        y2={y2}
+                        stroke="#2563eb"
+                        strokeWidth="2.6"
+                        vectorEffect="non-scaling-stroke"
+                        strokeLinecap="round"
+                        markerEnd={`url(#${markerId})`}
+                      />
+                    );
+                  })}
+                </svg>
+
+                {/* قيم f فوق نفس مسار الأسهم */}
+                {functionPointValues.map((value, pointIndex) => {
+                  if (isEmpty(value)) return null;
+
+                  const left = getPointLeftPercent(pointIndex);
+                  const top = getPointTopPercent(pointIndex);
+
+                  return (
+                    <div
+                      key={`variation-function-value-${pointIndex}`}
+                      className="absolute z-20 -translate-x-1/2 -translate-y-1/2 rounded-md bg-white/95 px-2.5 py-1.5"
+                      style={{
+                        left: `${left}%`,
+                        top: `${top}%`,
+                      }}
+                    >
+                      <VariationMathValue
+                        value={value}
+                        className="text-base text-slate-950 sm:text-lg"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {hasDomain && (
+        <div className="border-t-2 border-slate-800 bg-slate-50/80 px-5 py-3">
+          <div
+            dir="rtl"
+            className="flex flex-wrap items-center justify-center gap-2 text-sm font-black text-slate-700"
+          >
+            <span>مجال الدراسة:</span>
+            <VariationMathValue
+              value={domainValue}
+              className="text-base text-slate-950"
+            />
+          </div>
+        </div>
+      )}
+
+      {table.conclusion && (
+        <div className="border-t border-emerald-100 bg-emerald-50/55 px-5 py-4">
+          <MathText className="font-bold text-emerald-950">
+            {table.conclusion}
+          </MathText>
+        </div>
+      )}
+    </section>
+  );
+}
+
+
 function VariationTableRenderer({
   value,
   title = "جدول التغيرات",
 }) {
   if (!value) return null;
+
+  /*
+   * دعم البنية المستعملة حاليًا في JSON:
+   *
+   * {
+   *   columns: ["x", "-\\infty", "0", "+\\infty"],
+   *   derivative_row: ["f'(x)=e^x", "+", "+", "+"],
+   *   function_row: ["f(x)=e^x", "0", "1", "+\\infty"],
+   *   arrows: ["↗", "↗"]
+   * }
+   */
+  const isCompactVariationSchema =
+    !Array.isArray(value) &&
+    value &&
+    typeof value === "object" &&
+    Array.isArray(value.columns) &&
+    (
+      Array.isArray(value.derivative_row) ||
+      Array.isArray(value.function_row) ||
+      Array.isArray(value.arrows)
+    );
+
+  if (isCompactVariationSchema) {
+    return (
+      <CompactVariationTable
+        table={value}
+        title={value.title || title}
+      />
+    );
+  }
 
   if (Array.isArray(value)) {
     return (
@@ -4609,6 +5213,7 @@ function VariationTableRenderer({
             {value.title}
           </MathText>
         )}
+
         <DynamicDataTable
           rows={rows}
           preferredColumns={[
@@ -4624,6 +5229,7 @@ function VariationTableRenderer({
           ]}
           title={title}
         />
+
         {value.conclusion && (
           <InfoBox
             title="الاستنتاج من الجدول"
@@ -4645,6 +5251,7 @@ function VariationTableRenderer({
         <Route size={19} />
         <h3 className="font-black">{title}</h3>
       </div>
+
       <StructuredValue
         value={value}
         fieldKey="variation_table_configuration"
@@ -6404,6 +7011,200 @@ function ComparisonBoundingMethodStep({ content = {} }) {
   );
 }
 
+
+/* =========================================================
+   Method step — compact formulas + explicit example
+========================================================= */
+
+function MethodFormulaGrid({
+  items,
+  title = "تحويلات مفيدة",
+}) {
+  const formulas = Array.isArray(items)
+    ? items.filter((item) => !isEmpty(item))
+    : [];
+
+  if (formulas.length === 0) return null;
+
+  return (
+    <section className="overflow-hidden rounded-[24px] border border-violet-100 bg-white shadow-sm">
+      <div className="flex items-center gap-3 border-b border-violet-100 bg-gradient-to-l from-violet-50/90 via-white to-white px-4 py-3.5 sm:px-5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white shadow-sm">
+          <Sparkles size={17} />
+        </span>
+
+        <div>
+          <p className="text-[10px] font-black text-violet-600">
+            أدوات سريعة
+          </p>
+          <h3 className="text-sm font-black text-slate-950 sm:text-base">
+            {title}
+          </h3>
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          "grid gap-3 p-4 sm:p-5",
+          formulas.length === 1 && "grid-cols-1",
+          formulas.length === 2 && "sm:grid-cols-2",
+          formulas.length >= 3 && "sm:grid-cols-2 xl:grid-cols-4",
+        )}
+      >
+        {formulas.map((formula, index) => (
+          <div
+            key={`method-formula-${index}`}
+            className="group flex min-h-[82px] items-center justify-center rounded-2xl border border-violet-100 bg-gradient-to-b from-violet-50/50 to-white px-4 py-3 shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md"
+          >
+            <MathJax dynamic hideUntilTypeset="first">
+              <div
+                dir="ltr"
+                className="w-full overflow-x-auto text-center text-[15px] font-black text-slate-950 sm:text-base [&_mjx-container]:mx-auto [&_mjx-container]:inline-block [&_mjx-container]:max-w-full"
+              >
+                {`\\(${getPureMathExpression(getDisplayText(formula) || formula)}\\)`}
+              </div>
+            </MathJax>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+function MethodExplicitExample({
+  example,
+  title = "مثال تطبيقي",
+}) {
+  if (
+    !example ||
+    typeof example !== "object" ||
+    Array.isArray(example)
+  ) {
+    return null;
+  }
+
+  const problem =
+    example.problem ||
+    example.question ||
+    example.statement ||
+    example.exercise ||
+    "";
+
+  const rawSteps =
+    example.solution ||
+    example.steps ||
+    example.solution_steps ||
+    example.details ||
+    [];
+
+  const steps = Array.isArray(rawSteps)
+    ? rawSteps.filter((item) => !isEmpty(item))
+    : !isEmpty(rawSteps)
+      ? [rawSteps]
+      : [];
+
+  const finalAnswer =
+    example.final_answer ||
+    example.answer ||
+    example.result ||
+    example.conclusion ||
+    "";
+
+  if (!problem && steps.length === 0 && !finalAnswer) {
+    return null;
+  }
+
+  return (
+    <section className="overflow-hidden rounded-[26px] border border-indigo-100 bg-white shadow-sm">
+      <div className="flex items-center gap-3 border-b border-indigo-100 bg-gradient-to-l from-indigo-50/90 via-white to-white px-4 py-4 sm:px-5">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/15">
+          <Brain size={18} />
+        </span>
+
+        <div>
+          <p className="text-[10px] font-black text-indigo-600">
+            تطبيق مباشر
+          </p>
+          <h3 className="font-black text-slate-950">
+            {title}
+          </h3>
+        </div>
+      </div>
+
+      <div className="space-y-4 p-4 sm:p-5">
+        {problem && (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+            <p className="mb-2 text-[11px] font-black text-slate-500">
+              المطلوب
+            </p>
+
+            <MathText className="text-sm font-black leading-8 text-slate-950 sm:text-[15px]">
+              {problem}
+            </MathText>
+          </div>
+        )}
+
+        {steps.length > 0 && (
+          <div>
+            <div className="mb-3 flex items-center gap-2">
+              <ListChecks size={17} className="text-indigo-600" />
+              <h4 className="text-sm font-black text-slate-950">
+                خطوات الحل
+              </h4>
+            </div>
+
+            <div className="space-y-2.5">
+              {steps.map((step, index) => (
+                <div
+                  key={`method-example-step-${index}`}
+                  className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm"
+                >
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-xs font-black text-white">
+                    {index + 1}
+                  </span>
+
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    {typeof step === "object" && step !== null ? (
+                      <StructuredValue
+                        value={step}
+                        depth={1}
+                      />
+                    ) : (
+                      <MathText className="text-sm font-semibold leading-7 text-slate-700">
+                        {String(step)}
+                      </MathText>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {finalAnswer && (
+          <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
+            <CheckCircle2
+              size={18}
+              className="mt-1 shrink-0 text-emerald-600"
+            />
+
+            <div className="min-w-0">
+              <p className="mb-1 text-[11px] font-black text-emerald-700">
+                النتيجة
+              </p>
+              <MathText className="text-sm font-black leading-7 text-emerald-950">
+                {finalAnswer}
+              </MathText>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
 function MethodStep({ content = {} }) {
   const methods = Array.isArray(content.methods)
     ? content.methods.filter(
@@ -6488,6 +7289,12 @@ function MethodStep({ content = {} }) {
     ? algorithmSource
     : algorithmSource
       ? [algorithmSource]
+      : [];
+
+  const usefulTransformations = Array.isArray(content.useful_transformations)
+    ? content.useful_transformations.filter((item) => !isEmpty(item))
+    : !isEmpty(content.useful_transformations)
+      ? [content.useful_transformations]
       : [];
 
   const usefulIdentitiesSource =
@@ -6893,6 +7700,16 @@ function MethodStep({ content = {} }) {
         </section>
       )}
 
+      {usefulTransformations.length > 0 && (
+        <MethodFormulaGrid
+          items={usefulTransformations}
+          title={
+            content.useful_transformations_title ||
+            "تحويلات مفيدة قبل حساب النهاية"
+          }
+        />
+      )}
+
       {usefulIdentities.length > 0 && (
         <RelationCards
           items={usefulIdentities}
@@ -7017,12 +7834,13 @@ function MethodStep({ content = {} }) {
         </div>
       )}
 
-      {content.worked_example && (
-        <WorkedExample
-          example={content.worked_example}
-          tone="indigo"
-        />
-      )}
+      {content.worked_example &&
+        content.worked_example !== content.example && (
+          <WorkedExample
+            example={content.worked_example}
+            tone="indigo"
+          />
+        )}
 
       {content.alternative_factorization && (
         <RevealBox
@@ -9051,11 +9869,21 @@ function StructuredValue({ value, fieldKey, depth = 0 }) {
     );
   }
 
-  if (
-    ["table", "comparison_table"].includes(fieldKey) &&
+  const isStandardTableField =
     value &&
-    typeof value === "object"
-  ) {
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (
+      ["table", "comparison_table", "rule_table", "reference_table", "cases_table"].includes(fieldKey) ||
+      (
+        typeof fieldKey === "string" &&
+        fieldKey.endsWith("_table") &&
+        (Array.isArray(value.headers) || Array.isArray(value.columns)) &&
+        (Array.isArray(value.rows) || Array.isArray(value.data))
+      )
+    );
+
+  if (isStandardTableField) {
     return (
       <FlexibleTable
         table={value}
@@ -11561,7 +12389,148 @@ function CompositionDomainConceptStep({ content = {} }) {
   );
 }
 
+
+/* =========================================================
+   Compact ln-domain examples
+   يعرض valid_examples / invalid_examples بدون بطاقات ضخمة
+========================================================= */
+
+function LnDomainExamples({
+  validExamples = [],
+  invalidExamples = [],
+}) {
+  const valid = Array.isArray(validExamples)
+    ? validExamples.filter((item) => !isEmpty(item))
+    : [];
+
+  const invalid = Array.isArray(invalidExamples)
+    ? invalidExamples.filter((item) => !isEmpty(item))
+    : [];
+
+  if (valid.length === 0 && invalid.length === 0) return null;
+
+  const renderExample = (item, index, tone) => {
+    const isValid = tone === "valid";
+
+    return (
+      <div
+        key={`${tone}-${index}`}
+        className={cn(
+          "flex min-h-[62px] items-center justify-center rounded-2xl border px-4 py-3 shadow-sm",
+          "transition duration-200 hover:-translate-y-0.5 hover:shadow-md",
+          isValid
+            ? "border-emerald-200 bg-emerald-50/60"
+            : "border-rose-200 bg-rose-50/60",
+        )}
+      >
+        <MathJax dynamic hideUntilTypeset="first">
+          <div
+            dir="ltr"
+            className={cn(
+              "w-full overflow-x-auto text-center text-[15px] font-black sm:text-base",
+              "[&_mjx-container]:mx-auto [&_mjx-container]:inline-block",
+              "[&_mjx-container]:max-w-full",
+              isValid ? "text-emerald-950" : "text-rose-950",
+            )}
+          >
+            {`\\(${getPureMathExpression(getDisplayText(item) || item)}\\)`}
+          </div>
+        </MathJax>
+      </div>
+    );
+  };
+
+  return (
+    <section className="grid gap-4 lg:grid-cols-2">
+      {valid.length > 0 && (
+        <div className="overflow-hidden rounded-[24px] border border-emerald-200 bg-white shadow-sm">
+          <div className="flex items-center gap-3 border-b border-emerald-100 bg-emerald-50/80 px-4 py-3.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
+              <CheckCircle2 size={18} />
+            </span>
+
+            <div>
+              <p className="text-[10px] font-black text-emerald-700">
+                داخل مجال التعريف
+              </p>
+              <h3 className="text-sm font-black text-slate-950 sm:text-base">
+                أمثلة صحيحة
+              </h3>
+            </div>
+          </div>
+
+          <div
+            className={cn(
+              "grid gap-3 p-4",
+              valid.length === 1 && "grid-cols-1",
+              valid.length === 2 && "sm:grid-cols-2",
+              valid.length >= 3 && "sm:grid-cols-2",
+            )}
+          >
+            {valid.map((item, index) =>
+              renderExample(item, index, "valid"),
+            )}
+          </div>
+
+          <div className="border-t border-emerald-100 bg-emerald-50/35 px-4 py-3">
+            <p className="text-center text-xs font-bold text-emerald-800">
+              السبب: العدد داخل ln موجب تمامًا.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {invalid.length > 0 && (
+        <div className="overflow-hidden rounded-[24px] border border-rose-200 bg-white shadow-sm">
+          <div className="flex items-center gap-3 border-b border-rose-100 bg-rose-50/80 px-4 py-3.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-600 text-white shadow-sm">
+              <XCircle size={18} />
+            </span>
+
+            <div>
+              <p className="text-[10px] font-black text-rose-700">
+                خارج مجال التعريف
+              </p>
+              <h3 className="text-sm font-black text-slate-950 sm:text-base">
+                أمثلة غير معرفة
+              </h3>
+            </div>
+          </div>
+
+          <div
+            className={cn(
+              "grid gap-3 p-4",
+              invalid.length === 1 && "grid-cols-1",
+              invalid.length === 2 && "sm:grid-cols-2",
+              invalid.length >= 3 && "sm:grid-cols-2",
+            )}
+          >
+            {invalid.map((item, index) =>
+              renderExample(item, index, "invalid"),
+            )}
+          </div>
+
+          <div className="border-t border-rose-100 bg-rose-50/35 px-4 py-3">
+            <p className="text-center text-xs font-bold text-rose-800">
+              السبب: ln لا تقبل الصفر ولا عددًا سالبًا في ℝ.
+            </p>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+
 function ConceptStep({ content = {} }) {
+  const validExamples = Array.isArray(content.valid_examples)
+    ? content.valid_examples.filter((item) => !isEmpty(item))
+    : [];
+
+  const invalidExamples = Array.isArray(content.invalid_examples)
+    ? content.invalid_examples.filter((item) => !isEmpty(item))
+    : [];
+
   const isReciprocalCompositionConcept =
     Array.isArray(content.cases) &&
     content.cases.length > 0 &&
@@ -11680,6 +12649,8 @@ function ConceptStep({ content = {} }) {
     "how_to_think",
     "attention",
     "takeaway",
+    "valid_examples",
+    "invalid_examples",
   ]);
 
   // المثال الكائني يعرضه التصميم الخاص، أما المثال النصي فيمر إلى العارض العام.
@@ -11727,6 +12698,13 @@ function ConceptStep({ content = {} }) {
             </MathText>
           </div>
         </div>
+      )}
+
+      {(validExamples.length > 0 || invalidExamples.length > 0) && (
+        <LnDomainExamples
+          validExamples={validExamples}
+          invalidExamples={invalidExamples}
+        />
       )}
 
       {machineView.length > 0 && (

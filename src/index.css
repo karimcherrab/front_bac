@@ -1,2 +1,36 @@
 @config "../tailwind.config.js";
 @import "tailwindcss";
+
+
+/* ======================================================
+   Tutor Chat Scrollbar
+====================================================== */
+
+.tutor-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.tutor-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tutor-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tutor-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.tutor-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #a78bfa;
+}
+
+
+/* يمنع scroll الخارجي داخل صفحة الشات */
+
+.tutor-chat-page {
+  overscroll-behavior: none;
+}

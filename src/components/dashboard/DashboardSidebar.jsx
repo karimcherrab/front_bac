@@ -36,15 +36,15 @@ const navigationItems = [
     icon: ClipboardList,
     path: "/exams",
   },
-  {
-    label: "الملاحظات",
-    icon: Bookmark,
-    path: "/notes",
-  },
+  // {
+  //   label: "الملاحظات",
+  //   icon: Bookmark,
+  //   path: "/notes",
+  // },
   {
     label: "المساعد الذكي",
     icon: Bot,
-    path: "/assistant",
+    path: "/tutor",
   },
 ];
 

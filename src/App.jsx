@@ -7,12 +7,17 @@ import LessonPage from "./pages/LessonPage";
 import SubjectsPage from "./pages/SubjectsPage";
 import CoursePage from "./pages/CoursePage";
 
+import DashboardHomePage from "./pages/DashboardHomePage";
+
+
+
 import LogInPage from "./pages/LogInPage";
 import SignupPage from "./pages/SignupPage";
 import CheckEmailPage from "./pages/CheckEmailPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
 
 import SettingsPage from "./pages/SettingsPage";
+import TutorChatPage from "./pages/TutorChatPage";
 
 
 import ProtectedRoute from "./Utils/ProtectedRoute";
@@ -100,6 +105,27 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
+     <Route
+        path="/tutor"
+          element={
+            <DashboardLayout>
+              <TutorChatPage />
+            </DashboardLayout>
+          }
+      
+      />
+
+   <Route
+        path="/home"
+          element={
+            <DashboardLayout>
+              <DashboardHomePage />
+            </DashboardLayout>
+          }
+      
+      />
+
 
       <Route
         path="/"

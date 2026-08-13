@@ -369,20 +369,24 @@ export default function MathCoursePage() {
     subjectDetails,
   ]);
 
-  const handleChapterClick = (
-    chapter
-  ) => {
-    if (
-      chapter.is_active ===
-      false
-    ) {
-      return;
-    }
+  const handleChapterClick = (chapter) => {
+  if (chapter.is_active === false) {
+    return;
+  }
 
-    navigate(
-      `/subjects/${id_subjects}/lesson/${chapter.id}`
-    );
-  };
+  console.log("Nom matière envoyé :", courseData.name);
+
+  navigate(
+    `/subjects/${id_subjects}/lesson/${chapter.id}`,
+    {
+      state: {
+        courseName: courseData.name,
+        subjectName: courseData.name,
+        subjectId: courseData.id,
+      },
+    }
+  );
+};
 
   const handleChapterKeyDown = (
     event,
@@ -1022,10 +1026,10 @@ export default function MathCoursePage() {
                           `}
                         >
                           <LessonCard
-                            lesson={
-                              chapter
-                            }
-                          />
+  lesson={chapter}
+  courseName={courseData.name}
+  onOpen={() => handleChapterClick(chapter)}
+/>
                         </div>
                       );
                     }
