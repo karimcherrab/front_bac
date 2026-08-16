@@ -2,11 +2,11 @@ import { useContext, useEffect, useState } from "react";
 import axios from "axios";
 
 import StepTabs from "./StepTabs";
+
+import IntroStep from "./IntroStep";
 import ScienceLesson from "./module/ScienceLesson";
-import IntroStep from "./module/IslamicLesson";
-
-// import IntroStep from "./IntroStep";
-
+import HistoryStoryLesson from "./module/HistoryStoryLesson";
+import IslamicLesson from "./module/IslamicLesson";
 
 import QuestionBac from "./QuestionBac";
 import GeneratedAIExercises from "./Questions/Generate_question";
@@ -14,7 +14,7 @@ import BacChapterExercises from "./Questions/BacChapterExercises";
 import GeneratedBacExercisesPage from "./Questions/GeneratedBacExercisesPage";
 
 import AxisRevisionPage from "./Course/AxisRevisionPage";
-import IslamicLessonOnePageSummary from "./module/IslamicLessonOnePageSummary"
+
 import { lessonSteps } from "../data/lessonData";
 import { UserContext } from "../Utils/UserContext";
 
@@ -24,6 +24,11 @@ import {
 } from "react-router-dom";
 
 const API_BASE_URL = import.meta.env.VITE_COURSE_URL;
+
+
+// =====================================================
+// Parse JSON
+// =====================================================
 
 function parseMaybeJson(value) {
   if (
@@ -45,7 +50,15 @@ function parseMaybeJson(value) {
   }
 }
 
-function getErrorMessage(error, defaultMessage) {
+
+// =====================================================
+// Error message
+// =====================================================
+
+function getErrorMessage(
+  error,
+  defaultMessage
+) {
   if (error?.code === "ERR_NETWORK") {
     return "تعذر الاتصال بالخادم. تأكد من تشغيل Django.";
   }
@@ -65,6 +78,75 @@ function getErrorMessage(error, defaultMessage) {
   );
 }
 
+
+// =====================================================
+// Normaliser le nom de matière
+// =====================================================
+
+function normalizeCourseName(value = "") {
+  return String(value)
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[إأآ]/g, "ا")
+    .replace(/ى/g, "ي");
+}
+
+
+// =====================================================
+// Détecter matière islamique
+// =====================================================
+
+function isIslamicCourse(courseName) {
+  const name = normalizeCourseName(
+    courseName
+  );
+
+  return (
+    name.includes("اسلام") ||
+    name.includes("شريعة") ||
+    name.includes("تربية اسلامية") ||
+    name.includes("علوم اسلامية")
+  );
+}
+
+
+// =====================================================
+// Détecter Histoire
+// =====================================================
+
+function isHistoryCourse(courseName) {
+  const name = normalizeCourseName(
+    courseName
+  );
+
+  return (
+    name === "التاريخ" ||
+    name === "تاريخ" ||
+    name.includes("التاريخ")
+  );
+}
+
+
+// =====================================================
+// Détecter Sciences
+// =====================================================
+
+function isScienceCourse(courseName) {
+  const name = normalizeCourseName(
+    courseName
+  );
+
+  return (
+    name === "علوم تجريبية" ||
+    name === "العلوم التجريبية"
+  );
+}
+
+
+// =====================================================
+// LessonCard
+// =====================================================
+
 export default function LessonCard() {
   const {
     current_axis,
@@ -76,42 +158,77 @@ export default function LessonCard() {
 
   const { id_chapter } = useParams();
 
-  // =====================================================
-  // Récupérer courseName envoyé avec navigate()
-  // =====================================================
   const location = useLocation();
 
-  const courseName = location.state?.courseName || "";
 
-  console.log("Course name :", courseName);
+  // =====================================================
+  // Nom matière envoyé avec navigate()
+  // =====================================================
+
+  const courseName =
+    location.state?.courseName || "";
+
+  console.log(
+    "Course name :",
+    courseName
+  );
+
 
   // =====================================================
   // States
   // =====================================================
 
-  const [coursByAxis, setCoursByAxis] = useState({});
-  const [questionsByAxis, setQuestionsByAxis] = useState({});
+  const [
+    coursByAxis,
+    setCoursByAxis,
+  ] = useState({});
 
-  const [loadingCourse, setLoadingCourse] = useState(false);
-  const [loadingQuestions, setLoadingQuestions] = useState(false);
+  const [
+    questionsByAxis,
+    setQuestionsByAxis,
+  ] = useState({});
 
-  const [courseError, setCourseError] = useState("");
-  const [questionsError, setQuestionsError] = useState("");
+  const [
+    loadingCourse,
+    setLoadingCourse,
+  ] = useState(false);
+
+  const [
+    loadingQuestions,
+    setLoadingQuestions,
+  ] = useState(false);
+
+  const [
+    courseError,
+    setCourseError,
+  ] = useState("");
+
+  const [
+    questionsError,
+    setQuestionsError,
+  ] = useState("");
+
 
   // =====================================================
   // Current axis
   // =====================================================
 
-  const axisId = current_axis?.id;
-  const axisTag = current_axis?.tag;
+  const axisId =
+    current_axis?.id;
+
+  const axisTag =
+    current_axis?.tag;
+
 
   const cour = axisId
     ? coursByAxis[axisId]
     : null;
 
+
   const questionBac = axisId
     ? questionsByAxis[axisId]
     : null;
+
 
   const questions = Array.isArray(
     questionBac?.questions
@@ -119,25 +236,40 @@ export default function LessonCard() {
     ? questionBac.questions
     : [];
 
+
   // =====================================================
-  // Chargement selon l'onglet actif
+  // Chargement selon onglet
   // =====================================================
 
   useEffect(() => {
     if (!axisId) return;
 
+    // ==========================
+    // Cours
+    // ==========================
+
     if (
       activeId === "intro" &&
       !coursByAxis[axisId]
     ) {
-      getCour(axisId, axisTag);
+      getCour(
+        axisId,
+        axisTag
+      );
     }
+
+
+    // ==========================
+    // Questions BAC
+    // ==========================
 
     if (
       activeId === "question_bac" &&
       !questionsByAxis[axisId]
     ) {
-      getQuestionBac(axisId);
+      getQuestionBac(
+        axisId
+      );
     }
   }, [
     activeId,
@@ -148,6 +280,7 @@ export default function LessonCard() {
     questionsByAxis,
   ]);
 
+
   // =====================================================
   // Charger le cours
   // =====================================================
@@ -156,37 +289,58 @@ export default function LessonCard() {
     selectedAxisId,
     selectedAxisTag
   ) {
-    if (!selectedAxisId) return;
+    if (!selectedAxisId) {
+      return;
+    }
 
     try {
       setLoadingCourse(true);
+
       setCourseError("");
 
-      const response = await axios.get(
-        `${API_BASE_URL}axes/${selectedAxisId}/`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+
+      const response =
+        await axios.get(
+          `${API_BASE_URL}axes/${selectedAxisId}/`,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+            },
+          }
+        );
+
+
+      console.log(
+        "بيانات الدرس:",
+        response.data
       );
 
-      console.log("بيانات الدرس:", response.data);
 
-      const rawCourse = response.data;
+      const rawCourse =
+        response.data;
+
 
       const parsedCourse =
-        parseMaybeJson(rawCourse);
+        parseMaybeJson(
+          rawCourse
+        );
 
-      setCoursByAxis((previous) => ({
-        ...previous,
-        [selectedAxisId]: parsedCourse,
-      }));
+
+      setCoursByAxis(
+        (previous) => ({
+          ...previous,
+
+          [selectedAxisId]:
+            parsedCourse,
+        })
+      );
     } catch (error) {
       console.error(
         "خطأ تحميل الدرس:",
         error
       );
+
 
       setCourseError(
         getErrorMessage(
@@ -199,32 +353,41 @@ export default function LessonCard() {
     }
   }
 
+
   // =====================================================
-  // Charger questions BAC
+  // Charger Questions BAC
   // =====================================================
 
   async function getQuestionBac(
     selectedAxisId
   ) {
-    if (!selectedAxisId) return;
+    if (!selectedAxisId) {
+      return;
+    }
 
     try {
       setLoadingQuestions(true);
+
       setQuestionsError("");
 
-      const response = await axios.get(
-        `${API_BASE_URL}axes/${selectedAxisId}/questions/`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+
+      const response =
+        await axios.get(
+          `${API_BASE_URL}axes/${selectedAxisId}/questions/`,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+            },
+          }
+        );
+
 
       console.log(
         "بيانات تمارين البكالوريا:",
         response.data
       );
+
 
       const normalizedData = {
         axis:
@@ -234,24 +397,34 @@ export default function LessonCard() {
 
         count:
           response.data?.count ??
-          response.data?.questions?.length ??
+          response.data
+            ?.questions
+            ?.length ??
           0,
 
         filters:
-          response.data?.filters || {},
+          response.data?.filters ||
+          {},
 
-        questions: Array.isArray(
-          response.data?.questions
-        )
-          ? response.data.questions
-          : Array.isArray(response.data)
+        questions:
+          Array.isArray(
+            response.data
+              ?.questions
+          )
             ? response.data
-            : [],
+                .questions
+            : Array.isArray(
+                  response.data
+                )
+              ? response.data
+              : [],
       };
+
 
       setQuestionsByAxis(
         (previous) => ({
           ...previous,
+
           [selectedAxisId]:
             normalizedData,
         })
@@ -262,6 +435,7 @@ export default function LessonCard() {
         error
       );
 
+
       setQuestionsError(
         getErrorMessage(
           error,
@@ -269,9 +443,12 @@ export default function LessonCard() {
         )
       );
     } finally {
-      setLoadingQuestions(false);
+      setLoadingQuestions(
+        false
+      );
     }
   }
+
 
   // =====================================================
   // Retry
@@ -280,40 +457,75 @@ export default function LessonCard() {
   function retryCurrentSection() {
     if (!axisId) return;
 
-    if (activeId === "intro") {
-      setCoursByAxis((previous) => {
-        const next = { ...previous };
 
-        delete next[axisId];
+    // ===================================================
+    // Retry cours
+    // ===================================================
 
-        return next;
-      });
-
-      getCour(axisId, axisTag);
-
-      return;
-    }
-
-    if (activeId === "question_bac") {
-      setQuestionsByAxis(
+    if (
+      activeId === "intro"
+    ) {
+      setCoursByAxis(
         (previous) => {
-          const next = { ...previous };
+          const next = {
+            ...previous,
+          };
 
-          delete next[axisId];
+          delete next[
+            axisId
+          ];
 
           return next;
         }
       );
 
-      getQuestionBac(axisId);
+
+      getCour(
+        axisId,
+        axisTag
+      );
+
+      return;
+    }
+
+
+    // ===================================================
+    // Retry questions BAC
+    // ===================================================
+
+    if (
+      activeId ===
+      "question_bac"
+    ) {
+      setQuestionsByAxis(
+        (previous) => {
+          const next = {
+            ...previous,
+          };
+
+          delete next[
+            axisId
+          ];
+
+          return next;
+        }
+      );
+
+
+      getQuestionBac(
+        axisId
+      );
     }
   }
+
 
   // =====================================================
   // Loading
   // =====================================================
 
-  function renderLoading(message) {
+  function renderLoading(
+    message
+  ) {
     return (
       <div
         dir="rtl"
@@ -340,18 +552,26 @@ export default function LessonCard() {
           "
         />
 
-        <p className="font-bold text-slate-600">
+        <p
+          className="
+            font-bold
+            text-slate-600
+          "
+        >
           {message}
         </p>
       </div>
     );
   }
 
+
   // =====================================================
   // Error
   // =====================================================
 
-  function renderError(message) {
+  function renderError(
+    message
+  ) {
     return (
       <div
         dir="rtl"
@@ -398,7 +618,9 @@ export default function LessonCard() {
 
           <button
             type="button"
-            onClick={retryCurrentSection}
+            onClick={
+              retryCurrentSection
+            }
             className="
               mt-5
               rounded-xl
@@ -417,6 +639,7 @@ export default function LessonCard() {
       </div>
     );
   }
+
 
   // =====================================================
   // Empty
@@ -474,11 +697,100 @@ export default function LessonCard() {
     );
   }
 
+
   // =====================================================
-  // Render content
+  // Render Lesson
+  // =====================================================
+
+  function renderLesson() {
+    // ===================================================
+    // علوم تجريبية
+    // ===================================================
+
+    if (
+      isScienceCourse(
+        courseName
+      )
+    ) {
+      return (
+        <ScienceLesson
+          key={
+            `science-${axisId}`
+          }
+          data={cour}
+          axisId={axisId}
+        />
+      );
+    }
+
+
+    // ===================================================
+    // العلوم الإسلامية
+    // ===================================================
+
+    if (
+      isIslamicCourse(
+        courseName
+      )
+    ) {
+      return (
+        <IslamicLesson
+          key={
+            `islamic-${axisId}`
+          }
+          data={cour}
+          axisId={axisId}
+        />
+      );
+    }
+
+
+    // ===================================================
+    // التاريخ
+    // ===================================================
+
+    if (
+      isHistoryCourse(
+        courseName
+      )
+    ) {
+      return (
+        <HistoryStoryLesson
+          key={
+            `history-${axisId}`
+          }
+          data={cour}
+          axisId={axisId}
+        />
+      );
+    }
+
+
+    // ===================================================
+    // جميع المواد الأخرى
+    // ===================================================
+
+    return (
+      <IntroStep
+        key={
+          `intro-${axisId}`
+        }
+        data={cour}
+        axisId={axisId}
+      />
+    );
+  }
+
+
+  // =====================================================
+  // Render Content
   // =====================================================
 
   function renderContent() {
+    // ===================================================
+    // Pas d'axe
+    // ===================================================
+
     if (!axisId) {
       return renderEmpty(
         "لم يتم اختيار محور",
@@ -486,11 +798,14 @@ export default function LessonCard() {
       );
     }
 
+
     // ===================================================
     // COURS
     // ===================================================
 
-    if (activeId === "intro") {
+    if (
+      activeId === "intro"
+    ) {
       if (
         loadingCourse &&
         !cour
@@ -500,11 +815,13 @@ export default function LessonCard() {
         );
       }
 
+
       if (courseError) {
         return renderError(
           courseError
         );
       }
+
 
       if (!cour) {
         return renderEmpty(
@@ -513,59 +830,29 @@ export default function LessonCard() {
         );
       }
 
-      // =================================================
-      // SCIENCES EXPÉRIMENTALES
-      // =================================================
-
-      if (
-        courseName.trim() ===
-        "علوم تجريبية"
-      ) {
-        return (
-          <ScienceLesson
-            key={`science-${axisId}`}
-            data={cour}
-            axisId={axisId}
-          />
-        );
-      }
-      // else if(
-      //     courseName.trim() ===
-      //   "اللغة الاسلامية"
-
-      // ){
-      //   <IslamicLesson
-      //       key={`islamic-${axisId}`}
-      //       data={cour}
-      //       axisId={axisId}
-      //     />
-
-      // }
 
       // =================================================
-      // AUTRES MATIÈRES
+      // Sélection automatique du composant
       // =================================================
 
-      return (
-        <IntroStep
-          key={`intro-${axisId}`}
-          data={cour}
-          axisId={axisId}
-        />
-      );
+      return renderLesson();
     }
+
 
     // ===================================================
     // Résumé
     // ===================================================
 
-    if (activeId === "resume") {
+    if (
+      activeId === "resume"
+    ) {
       return (
         <AxisRevisionPage
           axisId={axisId}
         />
       );
     }
+
 
     // ===================================================
     // Questions BAC
@@ -584,11 +871,15 @@ export default function LessonCard() {
         );
       }
 
-      if (questionsError) {
+
+      if (
+        questionsError
+      ) {
         return renderError(
           questionsError
         );
       }
+
 
       if (
         !questionBac ||
@@ -600,13 +891,19 @@ export default function LessonCard() {
         );
       }
 
+
       return (
         <QuestionBac
-          key={`questions-axis-${axisId}`}
-          data={questionBac}
+          key={
+            `questions-axis-${axisId}`
+          }
+          data={
+            questionBac
+          }
         />
       );
     }
+
 
     // ===================================================
     // Exercices AI
@@ -624,17 +921,23 @@ export default function LessonCard() {
       );
     }
 
+
     // ===================================================
     // Exercices BAC chapitre
     // ===================================================
 
-    if (activeId === "bac") {
+    if (
+      activeId === "bac"
+    ) {
       return (
         <BacChapterExercises
-          chapterId={id_chapter}
+          chapterId={
+            id_chapter
+          }
         />
       );
     }
+
 
     // ===================================================
     // BAC généré
@@ -646,7 +949,9 @@ export default function LessonCard() {
     ) {
       return (
         <GeneratedBacExercisesPage
-          chapterId={id_chapter}
+          chapterId={
+            id_chapter
+          }
           branchCode={
             user?.branch?.code
           }
@@ -654,8 +959,10 @@ export default function LessonCard() {
       );
     }
 
+
     return null;
   }
+
 
   // =====================================================
   // Main
@@ -675,9 +982,15 @@ export default function LessonCard() {
     >
       {activeId !== "bac" ? (
         <StepTabs
-          steps={lessonSteps}
-          activeId={activeId}
-          onSelect={setActiveId}
+          steps={
+            lessonSteps
+          }
+          activeId={
+            activeId
+          }
+          onSelect={
+            setActiveId
+          }
         />
       ) : (
         <div />
