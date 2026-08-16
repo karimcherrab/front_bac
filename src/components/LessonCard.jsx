@@ -3,7 +3,10 @@ import axios from "axios";
 
 import StepTabs from "./StepTabs";
 import ScienceLesson from "./module/ScienceLesson";
-import IntroStep from "./IntroStep";
+import IntroStep from "./module/IslamicLesson";
+
+// import IntroStep from "./IntroStep";
+
 
 import QuestionBac from "./QuestionBac";
 import GeneratedAIExercises from "./Questions/Generate_question";
@@ -11,7 +14,7 @@ import BacChapterExercises from "./Questions/BacChapterExercises";
 import GeneratedBacExercisesPage from "./Questions/GeneratedBacExercisesPage";
 
 import AxisRevisionPage from "./Course/AxisRevisionPage";
-
+import IslamicLessonOnePageSummary from "./module/IslamicLessonOnePageSummary"
 import { lessonSteps } from "../data/lessonData";
 import { UserContext } from "../Utils/UserContext";
 
@@ -526,6 +529,18 @@ export default function LessonCard() {
           />
         );
       }
+      // else if(
+      //     courseName.trim() ===
+      //   "اللغة الاسلامية"
+
+      // ){
+      //   <IslamicLesson
+      //       key={`islamic-${axisId}`}
+      //       data={cour}
+      //       axisId={axisId}
+      //     />
+
+      // }
 
       // =================================================
       // AUTRES MATIÈRES
