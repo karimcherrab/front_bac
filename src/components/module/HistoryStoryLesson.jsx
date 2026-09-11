@@ -377,19 +377,92 @@ function createFallbackPhases(lesson) {
   ];
 }
 
+function appendFinalMindMapPhase(
+  mastery,
+  lesson,
+) {
+  const map =
+    lesson?.final_mind_map;
+
+  if (!map) {
+    return mastery;
+  }
+
+  const currentPhases =
+    toArray(mastery?.phases);
+
+  const alreadyExists =
+    currentPhases.some(
+      (phase) =>
+        phase?.id ===
+          "final_mind_map_phase" ||
+        toArray(phase?.items).some(
+          (item) =>
+            item?.kind ===
+            "final_mind_map",
+        ),
+    );
+
+  if (alreadyExists) {
+    return mastery;
+  }
+
+  return {
+    ...mastery,
+    phases: [
+      ...currentPhases,
+      {
+        id:
+          "final_mind_map_phase",
+        number:
+          String(
+            currentPhases.length +
+              1,
+          ).padStart(
+            2,
+            "0",
+          ),
+        label:
+          "خريطة الحفظ",
+        title:
+          map?.title ||
+          "الخريطة الذهنية النهائية",
+        description:
+          map?.subtitle ||
+          "راجع الدرس كاملًا من خريطة واحدة.",
+        items: [
+          {
+            id:
+              "final_mind_map_item",
+            kind:
+              "final_mind_map",
+            label:
+              "الخريطة النهائية",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function normalizeMastery(lesson) {
   const mastery =
     lesson?.mastery_experience;
 
   if (
     mastery &&
-    Array.isArray(mastery.phases) &&
+    Array.isArray(
+      mastery.phases,
+    ) &&
     mastery.phases.length
   ) {
-    return mastery;
+    return appendFinalMindMapPhase(
+      mastery,
+      lesson,
+    );
   }
 
-  return {
+  const fallback = {
     version: 1,
     mode: "history_story",
     design: {
@@ -402,11 +475,14 @@ function normalizeMastery(lesson) {
       title:
         lesson?.axis_title ||
         lesson?.title ||
+        lesson?.lesson?.title ||
         "درس التاريخ",
       subtitle:
         lesson?.lesson_goal ||
+        lesson?.lesson?.big_idea ||
         "افهم الأحداث كقصة مترابطة بدل حفظها كقائمة.",
-      primary_action: "ابدأ القصة",
+      primary_action:
+        "ابدأ القصة",
       secondary_action: "",
       plan: [],
     },
@@ -416,6 +492,11 @@ function normalizeMastery(lesson) {
         lesson,
       ),
   };
+
+  return appendFinalMindMapPhase(
+    fallback,
+    lesson,
+  );
 }
 
 /* =========================================================
@@ -4463,6 +4544,201 @@ function QuizStep({
   );
 }
 
+
+function FinalLessonMindMap({
+  map,
+}) {
+  if (!map) {
+    return null;
+  }
+
+  const branches =
+    toArray(map?.branches);
+
+  const chain =
+    toArray(
+      map?.memory_chain,
+    );
+
+  return (
+    <article className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 bg-gradient-to-b from-amber-50/80 to-white p-5 sm:p-7">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-[11px] font-black text-amber-800">
+              <Brain
+                size={14}
+              />
+              نهاية الدرس
+            </div>
+
+            <h2 className="mt-3 text-2xl font-black text-slate-950">
+              {map?.title ||
+                "الخريطة الذهنية النهائية"}
+            </h2>
+
+            {map?.subtitle && (
+              <p className="mt-2 max-w-3xl text-sm font-semibold leading-7 text-slate-500">
+                {
+                  map.subtitle
+                }
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-2xl bg-slate-950 px-4 py-3 text-center text-xs font-black text-white">
+            الدرس في 4 فروع
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5 sm:p-7">
+        {/* المركز */}
+        <div className="mx-auto flex min-h-28 max-w-md items-center justify-center rounded-full bg-slate-950 px-8 py-5 text-center text-lg font-black text-white shadow-xl">
+          {map?.center ||
+            "الدرس"}
+        </div>
+
+        <div className="mx-auto h-8 w-px bg-slate-200" />
+
+        {/* الفروع الرئيسية */}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {branches.map(
+            (
+              branch,
+              index,
+            ) => (
+              <section
+                key={`${branch?.id || branch?.title}-${index}`}
+                className="relative rounded-[26px] border border-slate-200 bg-slate-50 p-4"
+              >
+                <div className="absolute -top-3 right-4 flex h-7 min-w-7 items-center justify-center rounded-full bg-amber-500 px-2 text-[10px] font-black text-white shadow-sm">
+                  {
+                    branch
+                      ?.memory_word ||
+                    index + 1
+                  }
+                </div>
+
+                <h3 className="pt-2 text-sm font-black text-slate-950">
+                  {
+                    branch?.title
+                  }
+                </h3>
+
+                <div className="mt-4 space-y-2">
+                  {toArray(
+                    branch?.items,
+                  ).map(
+                    (
+                      item,
+                      itemIndex,
+                    ) => (
+                      <div
+                        key={`${item?.title || itemIndex}-${itemIndex}`}
+                        className="rounded-2xl border border-slate-200 bg-white p-3"
+                      >
+                        <p className="text-xs font-black text-amber-700">
+                          {
+                            item?.title
+                          }
+                        </p>
+
+                        <p className="mt-1 text-[11px] font-semibold leading-6 text-slate-600">
+                          {
+                            item?.text
+                          }
+                        </p>
+                      </div>
+                    ),
+                  )}
+                </div>
+              </section>
+            ),
+          )}
+        </div>
+
+        {/* سلسلة الحفظ */}
+        {chain.length > 0 && (
+          <div className="mt-7 rounded-[26px] bg-slate-950 p-5 text-white">
+            <div className="flex items-center gap-2 text-xs font-black text-amber-300">
+              <Sparkles
+                size={15}
+              />
+              سلسلة الحفظ
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
+              {chain.map(
+                (
+                  item,
+                  index,
+                ) => (
+                  <Fragment
+                    key={`${item}-${index}`}
+                  >
+                    <div className="flex-1 rounded-2xl bg-white/10 px-3 py-3 text-center text-xs font-black">
+                      {
+                        item
+                      }
+                    </div>
+
+                    {index <
+                      chain.length -
+                        1 && (
+                      <ArrowLeft
+                        className="hidden shrink-0 text-slate-500 lg:block"
+                        size={17}
+                      />
+                    )}
+                  </Fragment>
+                ),
+              )}
+            </div>
+
+            {map?.memory_sentence && (
+              <p className="mt-4 text-center text-sm font-black text-white">
+                {
+                  map.memory_sentence
+                }
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* تدريب الاسترجاع */}
+        {map?.practice && (
+          <div className="mt-4 flex items-start gap-3 rounded-[24px] border border-amber-200 bg-amber-50 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-white">
+              <Target
+                size={18}
+              />
+            </div>
+
+            <div>
+              <p className="text-sm font-black text-amber-950">
+                {
+                  map.practice
+                    ?.title ||
+                  "اختبر نفسك"
+                }
+              </p>
+
+              <p className="mt-1 text-xs font-semibold leading-6 text-amber-900/80">
+                {
+                  map.practice
+                    ?.text
+                }
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+
 function RenderPhaseItem({
   item,
   stepMap,
@@ -4472,6 +4748,20 @@ function RenderPhaseItem({
   lesson,
   onReExplain,
 }) {
+  if (
+    item?.kind ===
+    "final_mind_map"
+  ) {
+    return (
+      <FinalLessonMindMap
+        map={
+          lesson
+            ?.final_mind_map
+        }
+      />
+    );
+  }
+
   if (
     item?.kind ===
     "micro_recall"

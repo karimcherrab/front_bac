@@ -2,8 +2,10 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useState,
+  useRef,
 } from "react";
 
 import axios from "axios";
@@ -39,6 +41,15 @@ const API_BASE_URL =
 
 const GENERATED_BAC_BASE_URL =
   `${API_BASE_URL}/api/bac`;
+
+const RAW_MEDIA_BASE_URL =
+  import.meta.env.VITE_MEDIA_URL ||
+  (API_BASE_URL
+    ? `${API_BASE_URL}/media`
+    : "/media");
+
+const MEDIA_BASE_URL =
+  RAW_MEDIA_BASE_URL.replace(/\/+$/, "");
 
 const MATHJAX_CONFIG = {
   loader: {
@@ -459,6 +470,33 @@ function wrapLooseMathExpressions(value) {
     /(^|[\s:،؛(=])([-+]?\d+(?:[.,]\d+)?\s*(?:kg|g|mg|N|Pa|J|W|V|A|mH|H|mF|F|kΩ|Ω|m|cm|mm|s|ms|mol|L)(?:\s*\/\s*(?:kg|g|N|m|s|mol|L))?(?:\^\{?-?\d+\}?)?)(?=$|[\s،؛).!؟])/g,
     (full, prefix, expression) =>
       `${prefix}\\(${cleanLooseExpression(expression)}\\)`,
+  );
+
+
+  /*
+   * 3.5) أوامر LaTeX خام تصل داخل جملة عربية بدون delimiters.
+   * أمثلة:
+   * \displaystyle\lim_{x\to+\infty}\bigl(q(x)-(x-2)\bigr)=0
+   * \lim_{x\to2^+}q(x)=+\infty
+   * إذا تركناها كما هي ستظهر نصاً خاماً داخل الواجهة.
+   */
+  text = text.replace(
+    /(^|[\s:،؛(])((?:\\displaystyle\s*)?(?:\\lim(?:_[^\s{]+|_\{[^}]+\})?[^\u0600-\u06FF:،؛!?\n]{0,170}?=[^\u0600-\u06FF:،؛!?\n]{1,80}|\\(?:frac|dfrac)\{[^\n]+?\}\{[^\n]+?\}|\\sqrt\{[^\n]+?\}|[A-Za-z]\([^\n]*?\)\s*=\s*[^\u0600-\u06FF:،؛!?\n]{1,80}))(?=$|[\s:،؛,.!؟\u0600-\u06FF\n])/g,
+    (full, prefix, expression) => {
+      if (expression.includes('@@MATH_BLOCK_')) {
+        return full;
+      }
+
+      const cleaned = normalizeDisplayLatex(
+        cleanLooseExpression(
+          expression.replace(/^\\displaystyle\s*/, ''),
+        ),
+      );
+
+      return cleaned
+        ? `${prefix}\\(${cleaned}\\)`
+        : full;
+    },
   );
 
   /* 4) مشتقات ورموز بفهرس/أس فقط. */
@@ -1053,6 +1091,8 @@ function normalizeFormulaBody(value) {
     .replace(/\r\n?/g, " ")
     .replace(/\\n+/g, " ")
     .replace(/\n+/g, " ")
+    .replace(/−/g, "-")
+    .replace(/∞/g, "\\infty")
     .trim();
 
   if (!text) {
@@ -1070,13 +1110,30 @@ function normalizeFormulaBody(value) {
     .replace(/\$$/, "")
     .trim();
 
+  /*
+   * إصلاح الرموز التي يعيدها الـ AI كثيرًا بدون backslash.
+   * أهم نقطة هنا هي infinity لأن كتابتها كنص داخل RTL كانت
+   * تقلب [0,+infty) بصريًا إلى شكل غير مفهوم.
+   */
   text = text
+    .replace(/(?<!\\)\binfinity\b/gi, "\\infty")
+    .replace(/(?<!\\)\binfty\b/gi, "\\infty")
+    .replace(/\\infty\s*\+/g, "+\\infty")
+    .replace(/\\infty\s*-/g, "-\\infty")
     .replace(/(?<!\\)\btau\b/g, "\\tau")
-    .replace(/(?<!\\)\binfty\b/g, "\\infty")
     .replace(/(?<!\\)\bOmega\b/g, "\\Omega")
     .replace(/(?<!\\)\bapprox\b/g, "\\approx")
     .replace(/(?<!\\)\btimes\b/g, "\\times")
     .replace(/(?<!\\)\bRightarrow\b/g, "\\Rightarrow")
+    .replace(/(?<!\\)\bLeftarrow\b/g, "\\Leftarrow")
+    .replace(/(?<!\\)\bLeftrightarrow\b/g, "\\Leftrightarrow")
+    .replace(/(?<!\\)\bforall\b/g, "\\forall")
+    .replace(/(?<!\\)\bexists\b/g, "\\exists")
+    .replace(/(?<!\\)\bgeq\b/g, "\\geq")
+    .replace(/(?<!\\)\bleq\b/g, "\\leq")
+    .replace(/(?<!\\)\bneq\b/g, "\\neq")
+    .replace(/(?<!\\)\bdownarrow\b/g, "\\downarrow")
+    .replace(/(?<!\\)\buparrow\b/g, "\\uparrow")
     .replace(/(?<!\\)\btoinfty\b/g, "\\to\\infty")
     .replace(/(?<!\\)\bttoinfty\b/g, "t\\to\\infty")
     .replace(/(?<!\\)\bln\b/g, "\\ln");
@@ -1085,7 +1142,7 @@ function normalizeFormulaBody(value) {
     .replace(/\bv0\b/g, "v_0")
     .replace(/\bU0\b/g, "U_0")
     .replace(/\buC\b/g, "u_C")
-    .replace(/\btau(?=[A-Za-z])/g, "\\tau ");
+    .replace(/\\tau(?=[A-Za-z])/g, "\\tau ");
 
   text = text.replace(
     /(\d+(?:\.\d+)?)\s*(ms|mH|mF|kg|mol|Pa|Hz|A|V|N|J|W|H|F|g|m|s|L)\b/g,
@@ -1240,29 +1297,219 @@ function wrapOnlyClearBareEquations(value) {
   return protectedMath.restore(text);
 }
 
-function normalizeMathText(value) {
-  let text = normalizeExplicitMathBlocks(
+
+function wrapClearLatexRuns(value) {
+  const protectedMath = protectExplicitMath(value);
+  let text = protectedMath.text;
+
+  /*
+   * يلتقط سلاسل LaTeX الصريحة التي يرسلها الـ AI أحياناً
+   * داخل جملة عربية بدون $...$ أو \\( ... \\).
+   * مثال:
+   * \\displaystyle\\lim_{x\\to+\\infty}(q(x)-(x-2))=0
+   */
+  text = text.replace(
+    /(^|[\s:،؛;(])((?:\\(?:displaystyle|lim|dfrac|frac|sqrt|sum|prod|int|ln|log|exp|sin|cos|tan|arctan|big|Big|left|right|infty|to|pm|mp|times|cdot|approx|leq|geq|neq)[^\u0600-\u06FF\n]{1,520}))(?=$|[\u0600-\u06FF\n])/g,
+    (full, prefix, expression) => {
+      if (expression.includes('@@SAFE_MATH_')) {
+        return full;
+      }
+
+      const cleaned = normalizeFormulaBody(
+        expression
+          .replace(/[،؛;,.!?؟\s]+$/g, '')
+          .trim(),
+      );
+
+      return cleaned
+        ? `${prefix}\\(${cleaned}\\)`
+        : full;
+    },
+  );
+
+  return protectedMath.restore(text);
+}
+
+/*
+ * أوامر \\text{...} تكون صحيحة داخل كتلة MathJax، لكن النموذج
+ * يرسلها أحيانًا خارج أي delimiters. في هذه الحالة يجب تحويلها
+ * إلى نص عادي بدل عرض "\\text" حرفيًا في الواجهة.
+ */
+function unwrapLooseTextCommands(value) {
+  const protectedMath = protectExplicitMath(
     String(value ?? ""),
   );
 
-  /*
-   * إذا كانت هناك أوامر LaTeX واضحة خارج delimiters
-   * داخل معادلة مساواة، نغلف المعادلة فقط.
-   */
-  text = wrapOnlyClearBareEquations(text);
+  let text = protectedMath.text;
+
+  text = text
+    .replace(
+      /\\?text\s*\{([^{}\n]*)\}/g,
+      "$1",
+    )
+    .replace(
+      /(?<!\\)\btext\s*\{([^{}\n]*)\}/g,
+      "$1",
+    );
+
+  return protectedMath.restore(text);
+}
+
+/*
+ * تغليف المجالات الرياضية القصيرة مثل:
+ * [0,+infty) ، (-infty,-2) ، ]-2,0]
+ * حتى لا يفسد اتجاه RTL ترتيب الأقواس والإشارات.
+ */
+function wrapClearIntervalFragments(value) {
+  const protectedMath = protectExplicitMath(value);
+  let text = protectedMath.text;
+
+  const endpoint =
+    String.raw`(?:[-+]?\\?infty|[-+]?∞|[-+]?\d+(?:[.,]\d+)?(?:\\?frac\{[^{}]+\}\{[^{}]+\})?|[-+]?\\?frac\{[^{}]+\}\{[^{}]+\})`;
+
+  const intervalPattern = new RegExp(
+    String.raw`([\[(\]]\s*${endpoint}\s*,\s*${endpoint}\s*[\])\[])`,
+    "g",
+  );
+
+  text = text.replace(
+    intervalPattern,
+    (full) => `\\(${normalizeFormulaBody(full)}\\)`,
+  );
+
+  return protectedMath.restore(text);
+}
+
+/*
+ * المعادلات/المتراجحات داخل جملة عربية لا تبدأ دائمًا بشكل x=...
+ * فقد تكون g'(x)>0 أو f'(x)=2-frac{...}. النسخة السابقة لم تكن
+ * تلتقط prime ونتيجة ذلك ظهور \\frac و \\ge كنص خام.
+ */
+function wrapClearComparisonExpressions(value) {
+  const protectedMath = protectExplicitMath(value);
+  let text = protectedMath.text;
+
+  text = text.replace(
+    /(^|[\s:،؛;(])((?:[A-Za-z](?:\s*(?:['′]|\\prime))?\s*(?:\([^()\n]*\))?|[A-Za-z][A-Za-z0-9_{}\\^]*)(?:\s*(?:=|<|>|≤|≥|\\leq?|\\geq?|\\neq)\s*)[^\u0600-\u06FF،؛.!؟\n]{1,300})(?=$|[\u0600-\u06FF،؛.!؟\n])/g,
+    (full, prefix, expression) => {
+      if (expression.includes("@@SAFE_MATH_")) {
+        return full;
+      }
+
+      const cleaned = normalizeFormulaBody(
+        expression
+          .replace(/[،؛;,.!?؟\s]+$/g, "")
+          .trim(),
+      );
+
+      const trailingSpace = /\s$/.test(expression) ? " " : "";
+
+      return cleaned
+        ? `${prefix}\\(${cleaned}\\)${trailingSpace}`
+        : full;
+    },
+  );
+
+  return protectedMath.restore(text);
+}
+
+function looksLikeArabicAdjacentMath(value) {
+  const text = String(value ?? "").trim();
+  if (!text || containsArabic(text)) {
+    return false;
+  }
+
+  return (
+    /\\(?:frac|dfrac|sqrt|lim|to|infty|geq?|leq?|neq|forall|exists|times|cdot|ln|log|exp|sin|cos|tan)\b/.test(text) ||
+    /[=<>≤≥^_]/.test(text) ||
+    /[A-Za-z]\s*(?:['′]|\([^)]*\))/.test(text) ||
+    (/[+\-*/]/.test(text) && /[A-Za-z0-9]/.test(text))
+  );
+}
+
+/*
+ * يعزل كل جزيرة رياضية واقعة بين كلمات عربية. هذا يعالج تحديدًا أسطرًا مثل:
+ * لـ x\ge0 يكون (x+2)^2\ge4، وبالتالي \frac{5}{...}\le...
+ *
+ * إبقاء هذه الأجزاء كنص خام داخل RTL هو ما كان يقلب ترتيبها في الصورة.
+ */
+function wrapArabicAdjacentMathRuns(value) {
+  const source = String(value ?? "");
+  if (!containsArabic(source)) {
+    return source;
+  }
+
+  const protectedMath = protectExplicitMath(source);
+  const parts = protectedMath.text.split(/([\u0600-\u06FF]+)/u);
+
+  const wrapped = parts.map((part) => {
+    if (
+      !part ||
+      containsArabic(part) ||
+      part.includes("@@SAFE_MATH_")
+    ) {
+      return part;
+    }
+
+    const match = part.match(/^([\s،؛:]*)((?:.|\n)*?)([\s،؛:.!?؟]*)$/u);
+    if (!match) {
+      return part;
+    }
+
+    const [, prefix, rawCore, suffix] = match;
+    const core = rawCore.trim();
+
+    if (!looksLikeArabicAdjacentMath(core)) {
+      return part;
+    }
+
+    const latex = normalizeFormulaBody(core);
+    return latex
+      ? `${prefix}\\(${latex}\\)${suffix}`
+      : part;
+  }).join("");
+
+  return protectedMath.restore(wrapped);
+}
+
+function containsNaturalLanguageMath(value) {
+  const raw = String(value ?? "");
+
+  return (
+    containsArabic(raw) ||
+    /\\begin\{(?:tabular|array)\}/.test(raw) ||
+    /\\?text\s*\{[^{}]*[A-Za-z\u0600-\u06FF][^{}]*\}/.test(raw) ||
+    /\b(?:increasing|decreasing|increase|decrease|on|when|therefore|thus|hence|croissante|décroissante|decroissante|sur|donc)\b/i.test(raw)
+  );
+}
+
+function normalizeMathText(value) {
+  // Explicit formulas from the new backend are authoritative: never repair their algebra.
+  if (typeof value === "string" && /\$[^$]+\$/.test(value)) return value;
 
   /*
-   * رموز قصيرة شائعة وسط الجملة العربية.
-   * نغلفها فقط عندما يكون شكلها واضحًا حتى لا نعيد
-   * مشكلة إدخال الجملة العربية كلها في MathJax.
+   * 1) نفصل \\text{...} الحر عن LaTeX.
+   * 2) نصلح الأوامر المعروفة.
+   * 3) نغلف فقط الأجزاء الرياضية المؤكدة، لا الجملة العربية كلها.
    */
+  let text = unwrapLooseTextCommands(
+    String(value ?? ""),
+  );
+
+  text = normalizeExplicitMathBlocks(text);
+  text = wrapOnlyClearBareEquations(text);
+  text = wrapClearComparisonExpressions(text);
+  text = wrapClearIntervalFragments(text);
+  text = wrapClearLatexRuns(text);
+
   const protectedMath =
     protectExplicitMath(text);
 
   let plain = protectedMath.text;
 
+  /* x\\to+\\infty / t\\to-\\infty داخل الجملة العربية. */
   plain = plain.replace(
-    /(^|[\s:،؛(])(t\s*(?:\\to|to)\s*(?:\\infty|infty))(?=$|[\s،؛).!؟])/g,
+    /(^|[\s:،؛(])([A-Za-z]\s*(?:\\to|to)\s*[-+]?\s*(?:\\infty|infty))(?=$|[\s،؛).!؟])/g,
     (full, prefix, expression) =>
       `${prefix}\\(${normalizeFormulaBody(expression)}\\)`,
   );
@@ -1279,7 +1526,9 @@ function normalizeMathText(value) {
       `${prefix}\\(${normalizeFormulaBody(expression)}\\)`,
   );
 
-  return protectedMath.restore(plain);
+  return wrapArabicAdjacentMathRuns(
+    protectedMath.restore(plain),
+  );
 }
 
 function normalizeDisplayLatex(value) {
@@ -1326,28 +1575,25 @@ function MathResult({
   }
 
   /*
-   * إذا كانت النتيجة تحتوي نصًا عربيًا، نترك MathText
-   * يفصل النص عن الرياضيات كما يفعل في بقية الصفحة.
+   * النتيجة قد تكون جملة مثل:
+   * g decreasing on (-infty,-2) and [0,2]
+   * لا يجوز إرسال الجملة كاملة إلى MathJax. RichMathText يعزل
+   * الرياضيات فقط ويحافظ على النص والاتجاه الصحيحين.
    */
-  if (containsArabic(raw)) {
+  if (containsNaturalLanguageMath(raw)) {
     return (
-      <MathText
+      <RichMathText
         className={cn(
           "text-center",
           className,
         )}
-        dir="rtl"
+        dir={containsArabic(raw) ? "rtl" : "ltr"}
       >
         {raw}
-      </MathText>
+      </RichMathText>
     );
   }
 
-  /*
-   * النتيجة الرياضية الخالصة لا نعتمد فيها على وجود
-   * $...$ أو \( ... \) من النموذج. ننظفها ثم نضعها
-   * مباشرة داخل MathJax.
-   */
   const latex = normalizeDisplayLatex(raw);
 
   if (!latex) {
@@ -1389,7 +1635,43 @@ function FormulaBlock({
   value,
   className = "",
 }) {
-  const latex = normalizeDisplayLatex(value);
+  const raw = String(value ?? "").trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  /*
+   * مهم جدًا:
+   * حقل latex قد يصل أحيانًا وفيه شرح عربي مع صيغة رياضية.
+   * تمرير السطر كاملًا داخل \[...\] يجعل MathJax يحاول تفسير العربية
+   * كأوامر LaTeX، وهذا هو سبب النص المشوّه الظاهر بجانب المعادلة.
+   * في السطر المختلط نترك MathText يعزل الرياضيات عن العربية بأمان.
+   */
+  if (containsArabic(raw)) {
+    return (
+      <div
+        dir="rtl"
+        className={cn(
+          `
+            mt-3 min-w-0 overflow-hidden
+            rounded-xl border border-slate-200
+            bg-slate-50 px-4 py-4
+          `,
+          className,
+        )}
+      >
+        <RichMathText
+          className="text-center font-semibold leading-9 text-slate-800"
+          dir="rtl"
+        >
+          {raw}
+        </RichMathText>
+      </div>
+    );
+  }
+
+  const latex = normalizeDisplayLatex(raw);
 
   if (!latex) {
     return null;
@@ -1475,8 +1757,8 @@ function parseLatexTabular(value) {
   const tables = [];
 
   const cleanedText = source.replace(
-    /\\begin\{tabular\}\{([^}]*)\}([\s\S]*?)\\end\{tabular\}/g,
-    (full, alignment, body) => {
+    /\\begin\{(tabular|array)\}\{([^}]*)\}([\s\S]*?)\\end\{\1\}/g,
+    (full, environment, alignment, body) => {
       const rows = String(body ?? "")
         .replace(/\\hline/g, "")
         .split(/\\\\/)
@@ -1513,13 +1795,176 @@ function parseLatexTabular(value) {
   };
 }
 
+
+function variationFromLatexRows(rows, contextText = "") {
+  const normalizedRows = asArray(rows)
+    .map((row) => asArray(row).map((cell) => String(cell ?? "").trim()))
+    .filter((row) => row.length >= 2);
+
+  if (normalizedRows.length < 2) {
+    return null;
+  }
+
+  /*
+   * الشكل الذي يرجعه مولد الحل غالبًا ليس صفوف x/f'/f الكلاسيكية، بل:
+   *
+   * الفترة | x | f(x)
+   * I1     | a -> b | u ↓ v
+   * I2     | b -> c | v ↑ w
+   *
+   * أو الشكل العمودي:
+   * x | g(x)
+   * 0 | 5/2
+   * ↑ | ↑
+   * +∞ | +∞
+   *
+   * نحوله أولًا إلى النموذج الموحد حتى يصل إلى VariationTable بدل
+   * أن يظهر كجدول HTML/MathJax عادي.
+   */
+  const convertedHeaderTable = variationFromGenericDataTable({
+    id: "latex-final-answer-variation",
+    type: "variation_table",
+    title: "جدول التغيّرات",
+    columns: normalizedRows[0],
+    rows: normalizedRows.slice(1),
+  });
+
+  if (convertedHeaderTable) {
+    return convertedHeaderTable;
+  }
+
+  const normalizeLabel = (value) =>
+    stripMathDelimiters(value)
+      .replace(/\s+/g, "")
+      .replace(/\left|\right/g, "")
+      .toLowerCase();
+
+  const xRow = normalizedRows.find((row) => {
+    const label = normalizeLabel(row[0]);
+    return label === "x" || label === "t";
+  });
+
+  if (!xRow) {
+    return null;
+  }
+
+  const derivativeRow = normalizedRows.find((row) => {
+    const label = normalizeLabel(row[0]);
+    return (
+      /['′]/.test(label) ||
+      /\\prime/.test(label) ||
+      /d[a-z]+\/d[a-z]+/.test(label)
+    );
+  });
+
+  const functionRow = normalizedRows.find((row) => {
+    if (row === xRow || row === derivativeRow) {
+      return false;
+    }
+
+    const label = normalizeLabel(row[0]);
+    return (
+      /[a-z]+\(x\)/i.test(label) ||
+      /[a-z]+\(t\)/i.test(label) ||
+      label === "f(x)" ||
+      label === "p(x)"
+    );
+  });
+
+  if (!functionRow) {
+    return null;
+  }
+
+  const pointLabels = xRow.slice(1).filter(hasText);
+  if (pointLabels.length < 2) {
+    return null;
+  }
+
+  const functionValues = functionRow.slice(1);
+  const derivativeCells = derivativeRow ? derivativeRow.slice(1) : [];
+  const nonZeroSigns = derivativeCells
+    .map(normalizeVariationSign)
+    .filter((value) => value === "+" || value === "-");
+
+  const context = String(contextText ?? "");
+  const contextDirection = /متزايد|متزايدة|تزايد|croissant|croissante/i.test(context)
+    ? "up"
+    : /متناقص|متناقصة|تناقص|décroissant|decroissant/i.test(context)
+      ? "down"
+      : "";
+
+  const points = pointLabels.map((x, index) => ({
+    id: `legacy-point-${index}`,
+    x,
+    derivative:
+      normalizeVariationSign(derivativeCells[index]) === "0"
+        ? "0"
+        : "",
+    value: functionValues[index] ?? "",
+    excluded: false,
+  }));
+
+  const intervals = Array.from(
+    { length: pointLabels.length - 1 },
+    (_, index) => {
+      const sign = nonZeroSigns[index] || (
+        contextDirection === "up"
+          ? "+"
+          : contextDirection === "down"
+            ? "-"
+            : ""
+      );
+
+      return {
+        id: `legacy-interval-${index}`,
+        sign,
+        direction:
+          sign === "+"
+            ? "up"
+            : sign === "-"
+              ? "down"
+              : contextDirection || "constant",
+      };
+    },
+  );
+
+  const functionLabel = functionRow[0] || "f(x)";
+  const derivativeLabel = derivativeRow?.[0] || (
+    functionLabel.includes("(x)")
+      ? functionLabel.replace("(x)", "'(x)")
+      : "f'(x)"
+  );
+
+  return {
+    type: "variation_table",
+    id: "legacy-latex-variation",
+    title: "جدول التغيّرات",
+    variable_label: xRow[0] || "x",
+    derivative_label: derivativeLabel,
+    function_label: functionLabel,
+    show_derivative: Boolean(derivativeRow),
+    points,
+    intervals,
+  };
+}
+
 function LatexTable({
   table,
+  contextText = "",
 }) {
   const rows = asArray(table?.rows);
 
   if (rows.length === 0) {
     return null;
+  }
+
+  const variation = variationFromLatexRows(
+    rows,
+    contextText,
+  );
+
+  if (variation) {
+    return <VariationTable table={variation} />;
   }
 
   const maxColumns = Math.max(
@@ -1739,15 +2184,46 @@ function RichMathText({
     parsed.text ?? "",
   ).trim();
 
+  const hasConvertedVariationTable = parsed.tables.some(
+    (table) =>
+      Boolean(
+        variationFromLatexRows(
+          table?.rows,
+          plainText,
+        ),
+      ),
+  );
+
+  // لا نكرر "جدول التغيّر:" فوق عنوان الجدول المصمم نفسه.
+  const visiblePlainText = hasConvertedVariationTable
+    ? plainText.replace(
+        /^\s*جدول\s*(?:التغيّر|التغير|التغيّرات|التغيرات)\s*[:：]?\s*$/u,
+        "",
+      )
+    : plainText;
+
+  const blocks = splitRichTextBlocks(
+    visiblePlainText,
+  );
+
   return (
     <>
-      {plainText && (
-        <MathText
-          className={className}
-          dir={dir}
-        >
-          {plainText}
-        </MathText>
+      {blocks.map((block, index) =>
+        block.type === "formula" ? (
+          <FormulaBlock
+            key={`formula-${index}`}
+            value={block.value}
+            className="mt-0"
+          />
+        ) : (
+          <MathText
+            key={`text-${index}`}
+            className={className}
+            dir={dir}
+          >
+            {block.value}
+          </MathText>
+        ),
       )}
 
       {parsed.tables.map(
@@ -1755,6 +2231,7 @@ function RichMathText({
           <LatexTable
             key={table.id}
             table={table}
+            contextText={plainText}
           />
         ),
       )}
@@ -1777,9 +2254,33 @@ function getErrorMessage(
     return "لم يتم العثور على العنصر المطلوب.";
   }
 
-  if (error?.response?.status === 422) {
+  if (error?.response?.status === 429) {
     return (
       error?.response?.data?.detail ||
+      "خدمة التوليد مشغولة مؤقتًا. أعد المحاولة بعد قليل."
+    );
+  }
+
+  if (error?.response?.status === 422) {
+    const detail = String(
+      error?.response?.data?.detail || "",
+    );
+
+    // لا نعرض أخطاء parser/مزود طويلة للتلميذ. الـbackend V3 يصلحها
+    // تلقائيًا، وهذا fallback مفيد إذا كان الخادم ما زال على نسخة أقدم.
+    if (
+      /json_validate_failed|failed_generation|expecting ['",]|json الناتج|jsondecodeerror/i.test(
+        detail,
+      )
+    ) {
+      return (
+        "تعذر إكمال الإخراج المنظم للحل. " +
+        "أعد المحاولة؛ التمرين وبياناتك محفوظة."
+      );
+    }
+
+    return (
+      detail ||
       "تعذر إنشاء التمرين بهذه المعطيات."
     );
   }
@@ -1805,6 +2306,27 @@ function getErrorMessage(
   );
 }
 
+function getRetryAfterSeconds(error) {
+  const dataValue = Number(
+    error?.response?.data?.retry_after,
+  );
+
+  if (Number.isFinite(dataValue) && dataValue > 0) {
+    return Math.ceil(dataValue);
+  }
+
+  const rawHeader =
+    error?.response?.headers?.["retry-after"] ??
+    error?.response?.headers?.["Retry-After"];
+  const headerValue = Number(rawHeader);
+
+  if (Number.isFinite(headerValue) && headerValue > 0) {
+    return Math.ceil(headerValue);
+  }
+
+  return error?.response?.status === 429 ? 8 : 0;
+}
+
 function formatDate(value) {
   if (!value) {
     return "";
@@ -1823,14 +2345,259 @@ function formatDate(value) {
   }
 }
 
+
+function replaceLatexFractions(source) {
+  let text = String(source ?? '');
+
+  const findGroup = (value, start) => {
+    if (value[start] !== '{') {
+      return null;
+    }
+
+    let depth = 0;
+    for (let index = start; index < value.length; index += 1) {
+      if (value[index] === '{') depth += 1;
+      if (value[index] === '}') depth -= 1;
+      if (depth === 0) {
+        return {
+          content: value.slice(start + 1, index),
+          end: index,
+        };
+      }
+    }
+    return null;
+  };
+
+  for (let guard = 0; guard < 20; guard += 1) {
+    const index = text.search(/\\(?:d?frac)\s*\{/);
+    if (index < 0) break;
+
+    const commandMatch = text.slice(index).match(/^\\(?:d?frac)\s*/);
+    if (!commandMatch) break;
+
+    const numStart = index + commandMatch[0].length;
+    const numerator = findGroup(text, numStart);
+    if (!numerator) break;
+
+    let denStart = numerator.end + 1;
+    while (/\s/.test(text[denStart] || '')) denStart += 1;
+    const denominator = findGroup(text, denStart);
+    if (!denominator) break;
+
+    const replacement = `(( ${numerator.content} )/( ${denominator.content} ))`;
+    text =
+      text.slice(0, index) +
+      replacement +
+      text.slice(denominator.end + 1);
+  }
+
+  return text;
+}
+
+function latexExpressionToSafeJs(value) {
+  let expression = replaceLatexFractions(value)
+    .replace(/\\displaystyle\b/g, '')
+    .replace(/\\left|\\right/g, '')
+    .replace(/\\cdot|\\times/g, '*')
+    .replace(/\\ln\b/g, 'ln')
+    .replace(/\\log\b/g, 'log')
+    .replace(/\\exp\b/g, 'exp')
+    .replace(/\\sqrt\b/g, 'sqrt')
+    .replace(/\\sin\b/g, 'sin')
+    .replace(/\\cos\b/g, 'cos')
+    .replace(/\\tan\b/g, 'tan')
+    .replace(/\\pi\b/g, 'pi')
+    .replace(/\\,/g, '')
+    .replace(/\{/g, '(')
+    .replace(/\}/g, ')')
+    .replace(/\^\s*\(([-+]?\d+(?:\.\d+)?)\)/g, '**($1)')
+    .replace(/\^\s*([-+]?\d+(?:\.\d+)?)/g, '**($1)')
+    .replace(/\s+/g, '');
+
+  expression = expression
+    .replace(/(\d|x)\(/g, '$1*(')
+    .replace(/\)(\d|x)/g, ')*$1')
+    .replace(/\)\(/g, ')*(')
+    .replace(/(\d)x/g, '$1*x')
+    .replace(/x(\d)/g, 'x*$1');
+
+  if (!expression || !/^[0-9A-Za-z_+\-*/().]+$/.test(expression)) {
+    return '';
+  }
+
+  const allowedNames = new Set([
+    'x', 'exp', 'ln', 'log', 'sqrt', 'abs',
+    'sin', 'cos', 'tan', 'pi', 'e',
+  ]);
+  const names = expression.match(/[A-Za-z_]+/g) || [];
+  if (names.some((name) => !allowedNames.has(name))) {
+    return '';
+  }
+
+  return expression
+    .replace(/\b(?:ln|log)\b/g, 'Math.log')
+    .replace(/\bexp\b/g, 'Math.exp')
+    .replace(/\bsqrt\b/g, 'Math.sqrt')
+    .replace(/\babs\b/g, 'Math.abs')
+    .replace(/\bsin\b/g, 'Math.sin')
+    .replace(/\bcos\b/g, 'Math.cos')
+    .replace(/\btan\b/g, 'Math.tan')
+    .replace(/\bpi\b/g, 'Math.PI')
+    .replace(/\be\b/g, 'Math.E');
+}
+
+// Legacy inference is disabled: graphs must come from verified backend data.
+function evaluateSafeXExpression() { return NaN; }
+
+function extractCurveSymbol(statement) {
+  const source = String(statement ?? '');
+  const match = source.match(/C\s*[_\{(]?\s*([A-Za-z])\s*[}\)]?/i);
+  return match?.[1] || '';
+}
+
+function extractFunctionDefinition(statement, preferredName = '') {
+  const source = String(statement ?? '')
+    .replace(/\\\[|\\\]|\\\(|\\\)|\$\$/g, ' ')
+    .replace(/\$/g, ' ')
+    .replace(/\r\n?/g, '\n');
+
+  const names = [];
+  if (preferredName) names.push(preferredName);
+
+  const all = [...source.matchAll(/\b([A-Za-z])\s*\(\s*x\s*\)\s*=\s*/g)];
+  all.forEach((item) => {
+    if (!names.includes(item[1])) names.push(item[1]);
+  });
+
+  for (const name of names) {
+    const regex = new RegExp(
+      `\\b${name}\\s*\\(\\s*x\\s*\\)\\s*=\\s*([^\\n\\u0600-\\u06FF،؛.]{2,260})`,
+      'i',
+    );
+    const match = source.match(regex);
+    if (!match) continue;
+
+    const rawExpression = String(match[1] || '')
+      .replace(/[;،؛]+$/g, '')
+      .trim();
+    const jsExpression = latexExpressionToSafeJs(rawExpression);
+    if (jsExpression) {
+      return {
+        name,
+        rawExpression,
+        jsExpression,
+      };
+    }
+  }
+
+  return null;
+}
+
+function statementSaysCurveIsGiven(statement) {
+  const source = String(statement ?? '');
+  const curveReference =
+    '(?:المنحنى|الشكل\\s+البياني|التمثيل\\s+البياني|' +
+    'تمثيل(?:ها|ه)?\\s+البياني|تمثيل\\s+الدالة\\s+البياني|' +
+    '\\(?\\s*C\\s*[_\\{(]?\\s*[A-Za-z]\\s*[}\\)]?\\s*\\)?)';
+  const givenWord =
+    '(?:معط[ىً]|المعط[ىً]|مرفق|المرفق|مرسوم|' +
+    'مبي[نّ]|موض[حّ]|ظاهر|يعطى|يُعطى)';
+
+  return (
+    new RegExp(
+      `${curveReference}[\\s\\S]{0,140}(?:${givenWord}|في\\s+(?:الشكل|الرسم))`,
+      'i',
+    ).test(source) ||
+    new RegExp(
+      `${givenWord}[\\s\\S]{0,100}${curveReference}`,
+      'i',
+    ).test(source) ||
+    /اعتمادك?\s+على\s+المنحنى/i.test(source)
+  );
+}
+
+function hasExplicitGraphPayload(exercise) {
+  const visuals = asArray(exercise?.visuals);
+  const graphs = asArray(exercise?.statement_graph_data);
+  const documents = asArray(exercise?.documents);
+
+  return Boolean(
+    graphs.some((graph) => asArray(graph?.series).length > 0 || hasText(graph?.expression)) ||
+    visuals.some((item) =>
+      String(item?.type || '').toLowerCase() === 'graph' &&
+      (asArray(item?.series).length > 0 || hasText(item?.expression)),
+    ) ||
+    documents.some((item) =>
+      String(item?.type || '').toLowerCase() === 'graph' &&
+      (asArray(item?.graph?.series).length > 0 || hasText(item?.graph?.expression)),
+    )
+  );
+}
+
+function inferGraphRange(statement) {
+  const source = String(statement ?? '')
+    .replace(/\\infty/g, '∞')
+    .replace(/\s+/g, ' ');
+
+  const leftBound = source.match(/[\]\[]\s*([-+]?\d+(?:[.,]\d+)?)\s*,\s*\+?∞/);
+  if (leftBound) {
+    const left = Number(String(leftBound[1]).replace(',', '.'));
+    if (Number.isFinite(left)) {
+      return [left + 0.12, left + 8];
+    }
+  }
+
+  return [-5, 5];
+}
+
+// Never infer a supplied graph from prose or from a requested solution drawing.
+function buildFallbackStatementGraph() {
+  return null;
+}
+
+function filterStatementGraphics(exercise) {
+  const policy = exercise?.statement_visual_policy;
+  const source = [exercise?.statement, ...asArray(exercise?.statement_sections).map(s => s?.text),
+    ...asArray(exercise?.questions).map(q => q?.text)].filter(Boolean).join(" ").replace(/[\u064b-\u065f\u0640]/g, "");
+  // Legacy records have no reference policy: only explicit given/reading language is evidence.
+  const legacyGiven = /(?:المنحنى|التمثيل البياني|الشكل البياني)\s*(?:ال)?(?:المعطى|معطى|المرفق|مرفق|المبين|مبين|الموضح|موضح)|(?:المنحنى|التمثيل البياني).{0,35}في\s+(?:الشكل|الرسم)|(?:اعتمادا على|بالاعتماد على|انطلاقا من)\s+(?:المنحنى|التمثيل البياني)|(?:اقرأ|عين|حدد|استنتج)\s+بيانيا|يمثل\s+(?:الشكل|الرسم)\s+(?:المقابل|المرفق|التالي)/.test(source);
+  const allowGraph = typeof policy?.allow_graph === "boolean" ? policy.allow_graph : legacyGiven;
+  const allowTable = typeof policy?.allow_variation_table === "boolean" ? policy.allow_variation_table : true;
+  const allowed = v => {
+    const type = String(v?.type || "").toLowerCase();
+    if (!allowGraph && (["graph", "physics_graph", "function_graph", "curve"].includes(type) || v?.graph)) return false;
+    if (!allowTable && ["variation_table", "variations", "sign_variation_table"].includes(type)) return false;
+    return true;
+  };
+  const clean = obj => ({...obj, visuals: asArray(obj?.visuals).filter(allowed),
+    documents: asArray(obj?.documents).filter(allowed),
+    statement_graph_data: allowGraph ? obj?.statement_graph_data : null});
+  return {...clean(exercise), questions: asArray(exercise?.questions).map(clean),
+    statement_sections: asArray(exercise?.statement_sections).map(clean)};
+}
+
+function extractEquationSignatures(value) {
+  const source = String(value ?? '')
+    .replace(/\\\[|\\\]|\\\(|\\\)|\$\$/g, ' ')
+    .replace(/\$/g, ' ');
+
+  return [...source.matchAll(/\b([A-Za-z])\s*\(\s*x\s*\)\s*=\s*([^\n\u0600-\u06FF،؛.]{2,220})/g)]
+    .map((match) =>
+      `${match[1].toLowerCase()}(x)=${String(match[2] || '')}`
+        .replace(/\s+/g, '')
+        .replace(/\\left|\\right|\\displaystyle/g, ''),
+    )
+    .filter(Boolean);
+}
+
 function getExercisePayload(record) {
   const nested = asObject(record?.exercise);
 
   if (Object.keys(nested).length > 0) {
-    return nested;
+    return filterStatementGraphics(nested);
   }
 
-  return asObject(record);
+  return filterStatementGraphics(asObject(record));
 }
 
 function getExerciseQuestions(record) {
@@ -1843,6 +2610,77 @@ function getExerciseQuestions(record) {
         Number(a?.display_order ?? 0) -
         Number(b?.display_order ?? 0),
     );
+}
+
+
+function getExerciseDocuments(record) {
+  return asArray(
+    getExercisePayload(record)?.documents,
+  ).filter(
+    (item) => {
+      if (!item || typeof item !== "object") {
+        return false;
+      }
+
+      return Boolean(
+        hasText(item?.ref_id) ||
+        hasText(item?.title) ||
+        hasText(item?.path) ||
+        hasText(item?.url) ||
+        hasText(item?.src) ||
+        Object.keys(asObject(item?.graph)).length > 0 ||
+        Object.keys(asObject(item?.table)).length > 0,
+      );
+    },
+  );
+}
+
+function normalizeAssetPath(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\\/g, "/");
+}
+
+function resolveDocumentAssetUrl(value) {
+  // Science assets are served from React public, not Django media.
+  const original = String(value || "").replace(/\\/g, "/");
+  const publicPath = original.replace(/^\/?public\//i, "").replace(/^\/+/, "");
+  if (publicPath.startsWith("science/")) return "/" + publicPath.replace(/\/{2,}/g, "/");
+  const path = normalizeAssetPath(value);
+
+  if (!path) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  if (path.startsWith("/media/")) {
+    return API_BASE_URL
+      ? `${API_BASE_URL}${path}`
+      : path;
+  }
+
+  if (path.startsWith("media/")) {
+    return `${MEDIA_BASE_URL}/${path.slice(6)}`;
+  }
+
+  if (path.startsWith("/")) {
+    return API_BASE_URL
+      ? `${API_BASE_URL}${path}`
+      : path;
+  }
+
+  return `${MEDIA_BASE_URL}/${path}`;
+}
+
+function getDocumentByRef(documents, refId) {
+  const target = String(refId ?? "");
+  return asArray(documents).find(
+    (document) =>
+      String(document?.ref_id ?? "") === target,
+  );
 }
 
 function getSolutionPayload(record) {
@@ -1915,6 +2753,78 @@ function stripMathDelimiters(value) {
     .replace(/\\\(([\s\S]*?)\\\)/g, "$1")
     .replace(/\\\[([\s\S]*?)\\\]/g, "$1")
     .trim();
+}
+
+
+function normalizeForContentDedupe(value) {
+  return stripMathDelimiters(
+    normalizeMathText(String(value ?? "")),
+  )
+    .replace(/[\[\](){}$\\]/g, " ")
+    .replace(/[،,:;؛.!?؟\-_=+*/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function unwrapStandaloneMath(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^\\\[/, "")
+    .replace(/\\\]$/, "")
+    .replace(/^\\\(/, "")
+    .replace(/\\\)$/, "")
+    .replace(/^\$\$/, "")
+    .replace(/\$\$$/, "")
+    .replace(/^\$/, "")
+    .replace(/\$$/, "")
+    .trim();
+}
+
+function looksLikeStandaloneMathBlock(value) {
+  const raw = String(value ?? "").trim();
+
+  if (!raw || containsArabic(raw)) {
+    return false;
+  }
+
+  const unwrapped = unwrapStandaloneMath(raw);
+  return Boolean(unwrapped) && looksLikePureMath(unwrapped);
+}
+
+function splitRichTextBlocks(value) {
+  const source = String(value ?? "").replace(/\r\n?/g, "\n");
+  const lines = source.split("\n");
+  const blocks = [];
+  let paragraph = [];
+
+  const pushParagraph = () => {
+    const joined = paragraph.join("\n").trim();
+    if (joined) {
+      blocks.push({ type: "text", value: joined });
+    }
+    paragraph = [];
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      pushParagraph();
+      continue;
+    }
+
+    if (looksLikeStandaloneMathBlock(trimmed)) {
+      pushParagraph();
+      blocks.push({ type: "formula", value: trimmed });
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+
+  pushParagraph();
+  return blocks;
 }
 
 function splitMeasurementValues(value) {
@@ -2112,6 +3022,20 @@ function DataTable({
   table,
   compact = false,
 }) {
+  /*
+   * أي جدول تغيّرات، سواء جاء بالصيغة الحديثة variation_table
+   * أو بالصيغة القديمة columns/rows، نرسله مباشرة إلى الرسم
+   * البكالوري. buildVariationModel يعيد null للجداول العادية.
+   *
+   * مهم: هذا يجعل parsedStatement.table أيضًا يستفيد من نفس
+   * الرسم، وليس فقط الجداول الموجودة داخل TablesBlock.
+   */
+  const variationModel = buildVariationModel(table);
+
+  if (variationModel) {
+    return <VariationTable table={table} />;
+  }
+
   const columns = getTableColumns(table);
   const rows = getTableRows(table);
 
@@ -2245,6 +3169,1355 @@ function DataTable({
   );
 }
 
+
+function normalizeVariationDirection(value) {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (raw === "gap" || raw === "break" || raw === "discontinuity") {
+    return "gap";
+  }
+
+  if (
+    [
+      "down",
+      "decreasing",
+      "decrease",
+      "decroissante",
+      "décroissante",
+      "تناقص",
+      "متناقصة",
+      "ناقص",
+      "-",
+    ].includes(raw)
+  ) {
+    return "down";
+  }
+
+  if (
+    [
+      "up",
+      "increasing",
+      "increase",
+      "croissante",
+      "تزايد",
+      "متزايدة",
+      "زائد",
+      "+",
+    ].includes(raw)
+  ) {
+    return "up";
+  }
+
+  return "constant";
+}
+
+function normalizeVariationSign(value) {
+  const raw = String(value ?? "").trim();
+
+  if (/^(?:\+|plus|positive|موجب)$/i.test(raw)) {
+    return "+";
+  }
+
+  if (/^(?:-|−|minus|negative|سالب)$/i.test(raw)) {
+    return "-";
+  }
+
+  if (/^(?:0|zero|صفر)$/i.test(raw)) {
+    return "0";
+  }
+
+  return raw;
+}
+
+function variationCellText(value) {
+  if (value == null) {
+    return "";
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+
+  if (typeof value === "object") {
+    return String(
+      value?.latex ??
+      value?.value ??
+      value?.text ??
+      value?.label ??
+      value?.name ??
+      value?.title ??
+      value?.content ??
+      "",
+    );
+  }
+
+  return String(value);
+}
+
+function cleanVariationTableCell(value) {
+  return stripMathDelimiters(
+    variationCellText(value)
+      .replace(/\\?text\s*\{([^{}]*)\}/g, "$1")
+      .replace(/\\?mathrm\s*\{([^{}]*)\}/g, "$1")
+      .replace(/\$+/g, ""),
+  )
+    .replace(/\\,+/g, " ")
+    .replace(/\\;+?/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeVariationRows(data, columns) {
+  return getTableRows(data)
+    .map((row) => {
+      if (Array.isArray(row)) {
+        return row.map(variationCellText);
+      }
+
+      if (!row || typeof row !== "object") {
+        return [];
+      }
+
+      const embedded =
+        asArray(row?.cells).length > 0
+          ? row.cells
+          : asArray(row?.values).length > 0
+            ? row.values
+            : asArray(row?.data).length > 0
+              ? row.data
+              : null;
+
+      if (embedded) {
+        return embedded.map(variationCellText);
+      }
+
+      return columns.map((column, index) => {
+        const columnObject =
+          column && typeof column === "object"
+            ? column
+            : {};
+
+        const keys = [
+          columnObject?.key,
+          columnObject?.id,
+          columnObject?.name,
+          variationCellText(column),
+          String(index),
+          index,
+        ].filter(
+          (key) =>
+            key !== undefined &&
+            key !== null &&
+            String(key).length > 0,
+        );
+
+        for (const key of keys) {
+          if (Object.prototype.hasOwnProperty.call(row, key)) {
+            return variationCellText(row[key]);
+          }
+        }
+
+        return "";
+      });
+    })
+    .filter((row) => row.length > 0);
+}
+
+function normalizeVariationHeader(value) {
+  return cleanVariationTableCell(value)
+    .replace(/\\left|\\right/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function isVariationArrow(value) {
+  return /\\(?:downarrow|uparrow|searrow|nearrow)|[↓↑↘↗]/.test(
+    cleanVariationTableCell(value),
+  );
+}
+
+function getVariationDirectionFromArrow(value) {
+  const raw = cleanVariationTableCell(value);
+
+  if (/\\(?:downarrow|searrow)|[↓↘]/.test(raw)) {
+    return "down";
+  }
+
+  if (/\\(?:uparrow|nearrow)|[↑↗]/.test(raw)) {
+    return "up";
+  }
+
+  return "";
+}
+
+function splitVariationTransition(value, mode = "x") {
+  const raw = cleanVariationTableCell(value)
+    .replace(/∞/g, "\\infty")
+    .replace(/(?<!\\)\binfty\b/gi, "\\infty");
+
+  if (!raw) {
+    return null;
+  }
+
+  const pattern = mode === "function"
+    ? /(\\downarrow|\\uparrow|\\searrow|\\nearrow|↓|↑|↘|↗)/
+    : /(\\longrightarrow|\\rightarrow|\\to|⟶|→|->)/;
+
+  const match = raw.match(pattern);
+  if (!match || match.index == null) {
+    return null;
+  }
+
+  const start = raw.slice(0, match.index).trim();
+  const end = raw.slice(match.index + match[0].length).trim();
+
+  if (!start || !end) {
+    return null;
+  }
+
+  const direction = mode === "function"
+    ? getVariationDirectionFromArrow(match[0])
+    : "right";
+
+  return { start, end, direction };
+}
+
+function buildVariationFromSegments({
+  segments,
+  functionLabel,
+  variableLabel = "x",
+  derivativeLabel = "",
+  title = "جدول التغيّرات",
+  note = "",
+  id = "generic-variation-table",
+}) {
+  if (!Array.isArray(segments) || segments.length === 0) {
+    return null;
+  }
+
+  const showDerivative =
+    hasText(derivativeLabel) ||
+    segments.some(
+      (segment) =>
+        hasText(String(segment?.sign ?? "")) ||
+        hasText(String(segment?.startDerivative ?? "")) ||
+        hasText(String(segment?.endDerivative ?? "")),
+    );
+
+  const points = [];
+  const intervals = [];
+
+  const normalizeCompare = (value) =>
+    cleanVariationTableCell(value)
+      .replace(/\s+/g, "")
+      .replace(/∞/g, "\\infty");
+
+  const pushPoint = (x, value, derivative = "", excluded = false) => {
+    points.push({
+      id: `generic-vp-${points.length}`,
+      x: String(x ?? ""),
+      value: String(value ?? ""),
+      derivative: normalizeVariationSign(derivative),
+      excluded: Boolean(excluded),
+    });
+  };
+
+  pushPoint(
+    segments[0].startX,
+    segments[0].startValue,
+    segments[0].startDerivative,
+    segments[0].startExcluded,
+  );
+
+  segments.forEach((segment, segmentIndex) => {
+    const lastPoint = points[points.length - 1];
+    const sameStartX =
+      normalizeCompare(lastPoint?.x) ===
+      normalizeCompare(segment.startX);
+    const sameStartValue =
+      normalizeCompare(lastPoint?.value) ===
+      normalizeCompare(segment.startValue);
+
+    if (!sameStartX || !sameStartValue) {
+      intervals.push({
+        id: `generic-gap-${segmentIndex}`,
+        sign: "",
+        direction: "gap",
+      });
+
+      // نقطتا النهاية اليمنى واليسرى لنفس x تمثلان غالبًا قيمة ممنوعة.
+      const sameBaseX =
+        normalizeVariationBaseX(lastPoint?.x) ===
+        normalizeVariationBaseX(segment.startX);
+
+      if (sameBaseX) {
+        lastPoint.excluded = true;
+      }
+
+      pushPoint(
+        segment.startX,
+        segment.startValue,
+        segment.startDerivative,
+        sameBaseX || segment.startExcluded,
+      );
+    }
+
+    const direction =
+      segment.direction === "up" || segment.direction === "down"
+        ? segment.direction
+        : "constant";
+
+    intervals.push({
+      id: `generic-vi-${segmentIndex}`,
+      sign:
+        segment.sign ||
+        (direction === "up"
+          ? "+"
+          : direction === "down"
+            ? "-"
+            : "0"),
+      direction,
+    });
+
+    pushPoint(
+      segment.endX,
+      segment.endValue,
+      segment.endDerivative,
+      segment.endExcluded,
+    );
+  });
+
+  if (points.length < 2 || intervals.length !== points.length - 1) {
+    return null;
+  }
+
+  // إذا تغير اتجاه الدالة عند نقطة داخلية من - إلى + أو العكس
+  // ونقطة المشتقة لم تُعطَ، نضع 0 بالشكل الكلاسيكي فقط عندما
+  // لا تكون النقطة ممنوعة.
+  for (let index = 1; index < points.length - 1; index += 1) {
+    if (hasText(points[index]?.derivative) || points[index]?.excluded) {
+      continue;
+    }
+
+    const before = intervals[index - 1]?.direction;
+    const after = intervals[index]?.direction;
+
+    if (
+      (before === "down" && after === "up") ||
+      (before === "up" && after === "down")
+    ) {
+      points[index].derivative = "0";
+    }
+  }
+
+  const finalFunctionLabel = functionLabel || "f(x)";
+  const finalDerivativeLabel = derivativeLabel || String(finalFunctionLabel)
+    .replace(/\(x\)/, "'(x)")
+    .replace(/\(t\)/, "'(t)");
+
+  return {
+    type: "variation_table",
+    id: String(id || "generic-variation-table"),
+    title: String(title || "جدول التغيّرات"),
+    variable_label: variableLabel || "x",
+    derivative_label: finalDerivativeLabel || "f'(x)",
+    function_label: finalFunctionLabel,
+    show_derivative: showDerivative,
+    points,
+    intervals,
+    note: String(note || ""),
+  };
+}
+
+function variationFromHorizontalTransitionRows({
+  data,
+  columns,
+  rows,
+  xIndex,
+  functionIndex,
+  derivativeIndex,
+}) {
+  const segments = rows
+    .map((row) => {
+      const xTransition = splitVariationTransition(
+        row[xIndex],
+        "x",
+      );
+      const fTransition = splitVariationTransition(
+        row[functionIndex],
+        "function",
+      );
+
+      if (!xTransition || !fTransition) {
+        return null;
+      }
+
+      const derivativeCell =
+        derivativeIndex >= 0
+          ? normalizeVariationSign(row[derivativeIndex])
+          : "";
+
+      return {
+        startX: xTransition.start,
+        endX: xTransition.end,
+        startValue: fTransition.start,
+        endValue: fTransition.end,
+        direction: fTransition.direction,
+        sign:
+          derivativeCell === "+" || derivativeCell === "-"
+            ? derivativeCell
+            : "",
+      };
+    })
+    .filter(Boolean);
+
+  if (segments.length === 0) {
+    return null;
+  }
+
+  return buildVariationFromSegments({
+    segments,
+    functionLabel: variationCellText(columns[functionIndex]) || "f(x)",
+    variableLabel: variationCellText(columns[xIndex]) || "x",
+    derivativeLabel:
+      derivativeIndex >= 0
+        ? variationCellText(columns[derivativeIndex])
+        : "",
+    title: String(data?.title || "جدول التغيّرات"),
+    note: String(data?.note || ""),
+    id: String(data?.id || "generic-horizontal-variation"),
+  });
+}
+
+/*
+ * يدعم الشكل الذي ظهر في لقطة الشاشة:
+ *
+ * x      | g(x)
+ * 0      | 5/2
+ * ↑      | ↑
+ * +∞     | +∞
+ *
+ * أي أن كل انتقال موزع على ثلاثة أسطر بدلاً من كتابته داخل خلية واحدة.
+ */
+function variationFromVerticalTransitionRows({
+  data,
+  columns,
+  rows,
+  xIndex,
+  functionIndex,
+}) {
+  if (rows.length < 3) {
+    return null;
+  }
+
+  const segments = [];
+
+  for (let index = 0; index <= rows.length - 3; index += 1) {
+    const startRow = rows[index];
+    const arrowRow = rows[index + 1];
+    const endRow = rows[index + 2];
+
+    const startX = cleanVariationTableCell(startRow?.[xIndex]);
+    const startValue = cleanVariationTableCell(startRow?.[functionIndex]);
+    const endX = cleanVariationTableCell(endRow?.[xIndex]);
+    const endValue = cleanVariationTableCell(endRow?.[functionIndex]);
+
+    const arrow =
+      getVariationDirectionFromArrow(arrowRow?.[functionIndex]) ||
+      getVariationDirectionFromArrow(arrowRow?.[xIndex]);
+
+    const startLooksLikePoint =
+      hasText(startX) &&
+      hasText(startValue) &&
+      !isVariationArrow(startX) &&
+      !isVariationArrow(startValue);
+
+    const endLooksLikePoint =
+      hasText(endX) &&
+      hasText(endValue) &&
+      !isVariationArrow(endX) &&
+      !isVariationArrow(endValue);
+
+    if (!startLooksLikePoint || !endLooksLikePoint || !arrow) {
+      continue;
+    }
+
+    segments.push({
+      startX,
+      endX,
+      startValue,
+      endValue,
+      direction: arrow,
+    });
+  }
+
+  if (segments.length === 0) {
+    return null;
+  }
+
+  // إزالة المقاطع المكررة في حالة point/arrow/point/arrow/point.
+  const uniqueSegments = [];
+  const seen = new Set();
+
+  segments.forEach((segment) => {
+    const key = [
+      segment.startX,
+      segment.endX,
+      segment.startValue,
+      segment.endValue,
+      segment.direction,
+    ].join("||");
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueSegments.push(segment);
+    }
+  });
+
+  return buildVariationFromSegments({
+    segments: uniqueSegments,
+    functionLabel: variationCellText(columns[functionIndex]) || "f(x)",
+    variableLabel: variationCellText(columns[xIndex]) || "x",
+    title: String(data?.title || "جدول التغيّرات"),
+    note: String(data?.note || ""),
+    id: String(data?.id || "generic-vertical-variation"),
+  });
+}
+
+/*
+ * يدعم الجدول الكلاسيكي إذا وصل على شكل صفوف:
+ * x      | -2 | -1 | 2
+ * f'(x)  | -  | 0  | +
+ * f(x)   | -3 | -4 | 5
+ */
+function variationFromClassicRows({ data, columns, rows }) {
+  if (rows.length < 2) {
+    return null;
+  }
+
+  const normalized = rows.map((row) =>
+    row.map((cell) => cleanVariationTableCell(cell)),
+  );
+
+  const label = (row) =>
+    normalizeVariationHeader(row?.[0]);
+
+  const xRow = normalized.find((row) => {
+    const current = label(row);
+    return current === "x" || current === "t";
+  });
+
+  const derivativeRow = normalized.find((row) => {
+    const current = label(row);
+    return (
+      /['′]/.test(current) ||
+      /\\prime/.test(current) ||
+      /d[a-z]+\/d[a-z]+/.test(current)
+    );
+  });
+
+  const functionRow = normalized.find((row) => {
+    if (row === xRow || row === derivativeRow) {
+      return false;
+    }
+
+    return /[a-z]+\((?:x|t)\)/i.test(label(row));
+  });
+
+  if (!xRow || !functionRow) {
+    return null;
+  }
+
+  const xValues = xRow.slice(1).filter(hasText);
+  if (xValues.length < 2) {
+    return null;
+  }
+
+  const fValues = functionRow.slice(1);
+  const derivativeValues = derivativeRow?.slice(1) || [];
+
+  const points = xValues.map((x, index) => ({
+    id: `classic-vp-${index}`,
+    x,
+    derivative:
+      normalizeVariationSign(derivativeValues[index]) === "0"
+        ? "0"
+        : "",
+    value: fValues[index] ?? "",
+    excluded: false,
+  }));
+
+  const nonZeroSigns = derivativeValues
+    .map(normalizeVariationSign)
+    .filter((item) => item === "+" || item === "-");
+
+  const intervals = Array.from(
+    { length: points.length - 1 },
+    (_, index) => {
+      const sign = nonZeroSigns[index] || "";
+      let direction =
+        sign === "+"
+          ? "up"
+          : sign === "-"
+            ? "down"
+            : "constant";
+
+      // إذا لم يوجد صف مشتقة نحاول الاستفادة من الأسهم الموجودة في f(x).
+      if (!sign) {
+        const between = functionRow[index + 1];
+        const arrowDirection = getVariationDirectionFromArrow(between);
+        if (arrowDirection) {
+          direction = arrowDirection;
+        }
+      }
+
+      return {
+        id: `classic-vi-${index}`,
+        sign:
+          sign ||
+          (direction === "up"
+            ? "+"
+            : direction === "down"
+              ? "-"
+              : ""),
+        direction,
+      };
+    },
+  );
+
+  return {
+    type: "variation_table",
+    id: String(data?.id || "classic-row-variation"),
+    title: String(data?.title || "جدول التغيّرات"),
+    variable_label: xRow[0] || "x",
+    derivative_label:
+      derivativeRow?.[0] ||
+      String(functionRow[0] || "f(x)")
+        .replace(/\(x\)/, "'(x)")
+        .replace(/\(t\)/, "'(t)"),
+    function_label: functionRow[0] || "f(x)",
+    show_derivative: Boolean(derivativeRow),
+    points,
+    intervals,
+    note: String(data?.note || ""),
+  };
+}
+
+/*
+ * تحويل كل الأشكال الشائعة التي قد يرجعها الـAI إلى variation_table.
+ * بهذه الطريقة لا يظهر جدول HTML عادي عندما تكون البيانات في الحقيقة
+ * جدول تغيّرات.
+ */
+function variationFromGenericDataTable(value) {
+  const data = asObject(value);
+  const rawColumns = getTableColumns(data);
+  const columns = rawColumns.map(variationCellText);
+  const rows = normalizeVariationRows(data, rawColumns);
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  // أحيانًا لا توجد headers لكن الصفوف نفسها كلاسيكية x/f'/f.
+  const classicRows = variationFromClassicRows({
+    data,
+    columns,
+    rows,
+  });
+
+  if (classicRows) {
+    return classicRows;
+  }
+
+  if (columns.length < 2) {
+    return null;
+  }
+
+  const normalizedHeaders = columns.map(normalizeVariationHeader);
+
+  const xIndex = normalizedHeaders.findIndex((header) =>
+    header === "x" ||
+    header === "t" ||
+    header === "المتغير" ||
+    header === "variable",
+  );
+
+  const derivativeIndex = normalizedHeaders.findIndex((header) =>
+    /['′]/.test(header) ||
+    /\\prime/.test(header) ||
+    /d[a-z]+\/d[a-z]+/.test(header),
+  );
+
+  const functionIndex = normalizedHeaders.findIndex((header, index) => {
+    if (index === derivativeIndex) {
+      return false;
+    }
+
+    return /[a-z]+\((?:x|t)\)/i.test(header);
+  });
+
+  const titleSuggestsVariation = /تغي|variation|variations/i.test(
+    String(data?.title ?? ""),
+  );
+
+  const hasVariationArrow = rows.some((row) =>
+    row.some((cell) => isVariationArrow(cell)),
+  );
+
+  if (
+    xIndex < 0 ||
+    functionIndex < 0 ||
+    (!hasVariationArrow && !titleSuggestsVariation)
+  ) {
+    return null;
+  }
+
+  // 1) الفترة | x: a→b | f(x): u↓v
+  const horizontal = variationFromHorizontalTransitionRows({
+    data,
+    columns,
+    rows,
+    xIndex,
+    functionIndex,
+    derivativeIndex,
+  });
+
+  if (horizontal) {
+    return horizontal;
+  }
+
+  // 2) x/g(x) على أسطر: قيمة، سهم، قيمة.
+  const vertical = variationFromVerticalTransitionRows({
+    data,
+    columns,
+    rows,
+    xIndex,
+    functionIndex,
+  });
+
+  if (vertical) {
+    return vertical;
+  }
+
+  return null;
+}
+
+function isVariationTableData(value) {
+  const data = asObject(value);
+  const type = String(data?.type || "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+
+  return (
+    type === "variation_table" ||
+    type === "variations" ||
+    type === "sign_variation_table" ||
+    (
+      asArray(data?.points).length >= 2 &&
+      asArray(data?.intervals).length >= 1
+    ) ||
+    Boolean(variationFromGenericDataTable(data))
+  );
+}
+
+function buildVariationModel(value) {
+  let data = asObject(value);
+
+  if (asArray(data?.points).length < 2) {
+    const converted = variationFromGenericDataTable(data);
+    if (converted) {
+      data = converted;
+    }
+  }
+
+  const rawPoints = asArray(data?.points)
+    .filter((item) => item && typeof item === "object")
+    .slice(0, 9);
+  const rawIntervals = asArray(data?.intervals)
+    .filter((item) => item && typeof item === "object")
+    .slice(0, 8);
+
+  const hasExplicitDerivativeData =
+    rawPoints.some((point) =>
+      hasText(String(
+        point?.derivative ??
+        point?.derivative_value ??
+        point?.sign_at_point ??
+        "",
+      )),
+    ) ||
+    rawIntervals.some((interval) =>
+      hasText(String(
+        interval?.sign ??
+        interval?.derivative_sign ??
+        "",
+      )),
+    );
+
+  const showDerivative =
+    data?.show_derivative !== undefined
+      ? Boolean(data.show_derivative)
+      : data?.showDerivative !== undefined
+        ? Boolean(data.showDerivative)
+        : hasExplicitDerivativeData ||
+          hasText(String(data?.derivative_label ?? ""));
+
+  if (rawPoints.length < 2) {
+    return null;
+  }
+
+  const points = rawPoints.map((point, index) => ({
+    id: String(point?.id ?? `vp-${index}`),
+    x: String(
+      point?.x ??
+      point?.label ??
+      point?.position ??
+      "",
+    ).trim() || `x_${index}`,
+    derivative: normalizeVariationSign(
+      point?.derivative ??
+      point?.derivative_value ??
+      point?.sign_at_point ??
+      "",
+    ),
+    value: String(
+      point?.value ??
+      point?.function_value ??
+      point?.f_value ??
+      "",
+    ).trim(),
+    excluded: Boolean(
+      point?.excluded ??
+      point?.forbidden ??
+      point?.not_in_domain ??
+      false,
+    ),
+  }));
+
+  const intervals = Array.from(
+    { length: points.length - 1 },
+    (_, index) => {
+      const source = rawIntervals[index] || {};
+      const direction = normalizeVariationDirection(
+        source?.direction ??
+        source?.variation ??
+        source?.monotonicity ??
+        source?.sign ??
+        "constant",
+      );
+
+      return {
+        id: String(source?.id ?? `vi-${index}`),
+        from: String(source?.from ?? points[index]?.x ?? ""),
+        to: String(source?.to ?? points[index + 1]?.x ?? ""),
+        sign: normalizeVariationSign(
+          source?.sign ??
+          source?.derivative_sign ??
+          (
+            direction === "up"
+              ? "+"
+              : direction === "down"
+                ? "-"
+                : direction === "gap"
+                  ? ""
+                  : "0"
+          ),
+        ),
+        direction,
+      };
+    },
+  );
+
+  return {
+    id: String(data?.id || "variation-table"),
+    title: String(data?.title || "جدول التغيّرات"),
+    variableLabel: String(
+      data?.variable_label ??
+      data?.variable ??
+      "x",
+    ),
+    derivativeLabel: String(
+      data?.derivative_label ??
+      data?.derivative ??
+      "f'(x)",
+    ),
+    functionLabel: String(
+      data?.function_label ??
+      data?.function ??
+      "f(x)",
+    ),
+    showDerivative,
+    points,
+    intervals,
+    note: String(data?.note || ""),
+  };
+}
+
+function VariationRowLabel({ value, tall = false }) {
+  return (
+    <div
+      className={cn(
+        `
+          flex items-center justify-center
+          border-r-2 border-slate-900
+          bg-slate-100 px-2
+          font-black text-slate-950
+        `,
+        tall ? "min-h-[124px]" : "min-h-[56px]",
+      )}
+    >
+      <ShortMathValue
+        value={value}
+        className="text-center text-base font-black sm:text-lg"
+      />
+    </div>
+  );
+}
+
+/*
+ * يعيد مواضع نقاط جدول التغيّرات داخل المجال [left, right].
+ * الفاصل discontinuity/gap يأخذ عرضًا صغيرًا فقط؛ لذلك مثلا
+ * -2^- و -2^+ يظهران حول نفس المستقيم العمودي بدل أن يبتعدا
+ * عن بعضهما كأنهما نقطتان مختلفتان في المجال.
+ */
+function buildVariationPositions(intervals, count, left = 6, right = 94) {
+  if (count <= 1) {
+    return [50];
+  }
+
+  const weights = Array.from(
+    { length: count - 1 },
+    (_, index) =>
+      intervals[index]?.direction === "gap"
+        ? 0.12
+        : 1,
+  );
+
+  const total = weights.reduce((sum, value) => sum + value, 0) || 1;
+  const span = right - left;
+  const result = [left];
+  let cursor = left;
+
+  weights.forEach((weight) => {
+    cursor += span * (weight / total);
+    result.push(cursor);
+  });
+
+  return result;
+}
+
+function normalizeVariationBaseX(value) {
+  return normalizeFormulaBody(value)
+    .replace(/\^\{?[+-]\}?$/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function VariationTable({ table }) {
+  const reactId = useId().replace(/:/g, "");
+  const model = buildVariationModel(table);
+
+  if (!model) {
+    return <DataTable table={table} />;
+  }
+
+  const { points, intervals } = model;
+  const count = points.length;
+
+  const positions = buildVariationPositions(
+    intervals,
+    count,
+    7,
+    93,
+  );
+
+  const position = (index) => positions[index] ?? 50;
+
+  const clamp = (value, min, max) =>
+    Math.min(max, Math.max(min, value));
+
+  /*
+   * مستوى كل قيمة في صف f(x).
+   * في SVG: y صغير = أعلى، y كبير = أسفل.
+   */
+  const levels = [
+    intervals[0]?.direction === "down"
+      ? 26
+      : intervals[0]?.direction === "up"
+        ? 74
+        : 50,
+  ];
+
+  intervals.forEach((interval, index) => {
+    const current = levels[index] ?? 50;
+    let next = current;
+
+    if (interval.direction === "down") {
+      next = clamp(current + 46, 22, 78);
+    } else if (interval.direction === "up") {
+      next = clamp(current - 46, 22, 78);
+    } else if (interval.direction === "gap") {
+      const nextDirection = intervals[index + 1]?.direction;
+      next =
+        nextDirection === "down"
+          ? 26
+          : nextDirection === "up"
+            ? 74
+            : current;
+    }
+
+    levels.push(next);
+  });
+
+  const markerId = `variation-arrow-${model.id}-${reactId}`
+    .replace(/[^a-zA-Z0-9_-]/g, "-");
+
+  const gapIndexes = intervals
+    .map((interval, index) =>
+      interval.direction === "gap" ? index : -1,
+    )
+    .filter((index) => index >= 0);
+
+  const pointsCoveredByGap = new Set(
+    gapIndexes.flatMap((index) => [index, index + 1]),
+  );
+
+  // فاصل gap يرسم خطًا مزدوجًا واحدًا؛ لا نكرر خطين إضافيين للنقطتين.
+  const excludedIndexes = points
+    .map((point, index) => (point.excluded ? index : -1))
+    .filter(
+      (index) =>
+        index >= 0 &&
+        !pointsCoveredByGap.has(index),
+    );
+
+  const seamPosition = (gapIndex) =>
+    (position(gapIndex) + position(gapIndex + 1)) / 2;
+
+  /*
+   * في حالة -2^- | gap | -2^+ نعرض -2 مرة واحدة فقط في صف x.
+   * أما القيم الجانبية للدالة فتبقى منفصلة حتى نظهر النهايتين.
+   */
+  const hiddenXIndexes = new Set();
+  const mergedXLabels = [];
+
+  gapIndexes.forEach((gapIndex) => {
+    const leftPoint = points[gapIndex];
+    const rightPoint = points[gapIndex + 1];
+    const leftBase = normalizeVariationBaseX(leftPoint?.x);
+    const rightBase = normalizeVariationBaseX(rightPoint?.x);
+
+    if (leftBase && leftBase === rightBase) {
+      hiddenXIndexes.add(gapIndex);
+      hiddenXIndexes.add(gapIndex + 1);
+      mergedXLabels.push({
+        key: `merged-x-${gapIndex}`,
+        x: leftBase,
+        position: seamPosition(gapIndex),
+      });
+    }
+  });
+
+  const renderDoubleBar = (key, leftPercent) => (
+    <div
+      key={key}
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-y-0 w-[8px] -translate-x-1/2 bg-white"
+      style={{ left: `${leftPercent}%` }}
+    >
+      <span className="absolute inset-y-0 left-[1px] w-[1.5px] bg-slate-950" />
+      <span className="absolute inset-y-0 right-[1px] w-[1.5px] bg-slate-950" />
+    </div>
+  );
+
+  return (
+    <div
+      dir="rtl"
+      className="mx-auto my-5 w-full max-w-5xl overflow-hidden rounded-2xl border-2 border-slate-900 bg-white shadow-sm"
+    >
+      {hasText(model.title) && (
+        <div className="border-b-2 border-slate-900 bg-slate-50 px-4 py-3 text-center">
+          <MathText className="text-center text-base font-black text-slate-950 sm:text-lg">
+            {model.title}
+          </MathText>
+        </div>
+      )}
+
+      <div className="w-full overflow-x-auto overflow-y-hidden overscroll-x-contain">
+        <div
+          dir="ltr"
+          className="mx-auto w-full min-w-[520px] overflow-hidden bg-white"
+        >
+          {/* ========================= صف x ========================= */}
+          <div
+            className="grid border-b-2 border-slate-900"
+            style={{ gridTemplateColumns: "84px minmax(436px, 1fr)" }}
+          >
+            <VariationRowLabel value={model.variableLabel} />
+
+            <div className="relative min-h-[56px] bg-white">
+              {points.map((point, index) => {
+                if (hiddenXIndexes.has(index)) {
+                  return null;
+                }
+
+                return (
+                  <div
+                    key={point.id}
+                    className="absolute inset-y-0 z-10 flex items-center justify-center"
+                    style={{
+                      left: `${position(index)}%`,
+                      transform: "translateX(-50%)",
+                    }}
+                  >
+                    <ShortMathValue
+                      value={point.x}
+                      className="bg-white px-2 text-base font-black text-slate-950 sm:text-lg"
+                    />
+                  </div>
+                );
+              })}
+
+              {mergedXLabels.map((item) => (
+                <div
+                  key={item.key}
+                  className="absolute inset-y-0 z-20 flex items-center justify-center"
+                  style={{
+                    left: `${item.position}%`,
+                    transform: "translateX(-50%)",
+                  }}
+                >
+                  <ShortMathValue
+                    value={item.x}
+                    className="bg-white px-2 text-base font-black text-slate-950 sm:text-lg"
+                  />
+                </div>
+              ))}
+
+              {gapIndexes.map((gapIndex) =>
+                renderDoubleBar(
+                  `x-gap-${gapIndex}`,
+                  seamPosition(gapIndex),
+                ),
+              )}
+
+              {excludedIndexes.map((index) =>
+                renderDoubleBar(
+                  `x-excluded-${index}`,
+                  position(index),
+                ),
+              )}
+            </div>
+          </div>
+
+          {/* ====================== صف f'(x) ======================= */}
+          {model.showDerivative && (
+            <div
+              className="grid border-b-2 border-slate-900"
+              style={{ gridTemplateColumns: "84px minmax(436px, 1fr)" }}
+            >
+              <VariationRowLabel value={model.derivativeLabel} />
+
+              <div className="relative min-h-[58px] bg-white">
+              {intervals.map((interval, index) => {
+                if (interval.direction === "gap") {
+                  return null;
+                }
+
+                const mid =
+                  (position(index) + position(index + 1)) / 2;
+
+                return (
+                  <div
+                    key={interval.id}
+                    className="absolute inset-y-0 z-10 flex items-center justify-center"
+                    style={{
+                      left: `${mid}%`,
+                      transform: "translateX(-50%)",
+                    }}
+                  >
+                    <ShortMathValue
+                      value={interval.sign || ""}
+                      className="bg-white px-2 text-xl font-black text-slate-950"
+                    />
+                  </div>
+                );
+              })}
+
+              {points.map((point, index) => {
+                if (!hasText(point.derivative)) {
+                  return null;
+                }
+
+                return (
+                  <div
+                    key={`${point.id}-derivative`}
+                    className="absolute inset-y-0 z-20 flex items-center justify-center"
+                    style={{
+                      left: `${position(index)}%`,
+                      transform: "translateX(-50%)",
+                    }}
+                  >
+                    <ShortMathValue
+                      value={point.derivative}
+                      className="bg-white px-2 text-lg font-black text-slate-950"
+                    />
+                  </div>
+                );
+              })}
+
+              {gapIndexes.map((gapIndex) =>
+                renderDoubleBar(
+                  `derivative-gap-${gapIndex}`,
+                  seamPosition(gapIndex),
+                ),
+              )}
+
+              {excludedIndexes.map((index) =>
+                renderDoubleBar(
+                  `derivative-excluded-${index}`,
+                  position(index),
+                ),
+              )}
+              </div>
+            </div>
+          )}
+
+          {/* ======================= صف f(x) ======================= */}
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: "84px minmax(436px, 1fr)" }}
+          >
+            <VariationRowLabel value={model.functionLabel} tall />
+
+            <div className="relative h-[124px] overflow-hidden bg-white">
+              <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-0 h-full w-full"
+                style={{ maxWidth: "none", height: "100%" }}
+                aria-label="جدول تغيرات الدالة"
+              >
+                <defs>
+                  <marker
+                    id={markerId}
+                    markerWidth="7"
+                    markerHeight="7"
+                    refX="6.4"
+                    refY="3.5"
+                    orient="auto"
+                    markerUnits="strokeWidth"
+                  >
+                    <path
+                      d="M0,0 L7,3.5 L0,7 Z"
+                      fill="#1d4ed8"
+                    />
+                  </marker>
+                </defs>
+
+                {intervals.map((interval, index) => {
+                  if (interval.direction === "gap") {
+                    return null;
+                  }
+
+                  const startX = position(index) + 2.3;
+                  const endX = position(index + 1) - 2.8;
+                  const startY = levels[index] ?? 50;
+                  const endY = levels[index + 1] ?? startY;
+
+                  return (
+                    <line
+                      key={`${interval.id}-arrow`}
+                      x1={startX}
+                      y1={startY}
+                      x2={endX}
+                      y2={endY}
+                      stroke="#1d4ed8"
+                      strokeWidth="2.75"
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                      markerEnd={`url(#${markerId})`}
+                    />
+                  );
+                })}
+              </svg>
+
+              {/* الخطوط المزدوجة للانقطاع */}
+              {gapIndexes.map((gapIndex) =>
+                renderDoubleBar(
+                  `function-gap-${gapIndex}`,
+                  seamPosition(gapIndex),
+                ),
+              )}
+
+              {excludedIndexes.map((index) =>
+                renderDoubleBar(
+                  `function-excluded-${index}`,
+                  position(index),
+                ),
+              )}
+
+              {/* قيم f(x) */}
+              {points.map((point, index) => {
+                if (!hasText(point.value)) {
+                  return null;
+                }
+
+                const level = levels[index] ?? 50;
+                const yTranslate =
+                  level <= 36
+                    ? "-125%"
+                    : level >= 64
+                      ? "25%"
+                      : "-50%";
+
+                return (
+                  <div
+                    key={`${point.id}-value`}
+                    className="absolute z-30"
+                    style={{
+                      left: `${position(index)}%`,
+                      top: `${level}%`,
+                      transform: `translate(-50%, ${yTranslate})`,
+                    }}
+                  >
+                    <div
+                      className="bg-white px-2 py-0.5 text-center"
+                      style={{
+                        boxShadow: "0 0 0 4px rgba(255,255,255,.98)",
+                      }}
+                    >
+                      <ShortMathValue
+                        value={point.value}
+                        className="text-base font-black text-slate-950 sm:text-lg"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {hasText(model.note) && (
+        <div className="border-t border-slate-300 bg-amber-50 px-4 py-2 text-right">
+          <MathText className="text-sm font-bold leading-7 text-amber-950">
+            {model.note}
+          </MathText>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TablesBlock({
   value,
   className = "",
@@ -2257,12 +4530,19 @@ function TablesBlock({
 
   return (
     <div className={cn("space-y-4", className)}>
-      {tables.map((table, index) => (
-        <DataTable
-          key={table?.id ?? index}
-          table={table}
-        />
-      ))}
+      {tables.map((table, index) =>
+        isVariationTableData(table) ? (
+          <VariationTable
+            key={table?.id ?? index}
+            table={table}
+          />
+        ) : (
+          <DataTable
+            key={table?.id ?? index}
+            table={table}
+          />
+        ),
+      )}
     </div>
   );
 }
@@ -2270,15 +4550,13 @@ function TablesBlock({
 function GraphBlock({
   graph,
 }) {
+  const reactId = useId().replace(/:/g, "");
   const data = asObject(graph);
+  const graphKey = String(data?.id || "graph")
+    .replace(/[^a-zA-Z0-9_-]/g, "-");
+  const clipId = `graph-clip-${graphKey}-${reactId}`;
+  const axisArrowId = `graph-axis-arrow-${graphKey}-${reactId}`;
 
-  /*
-   * تنظيف السلاسل أولاً:
-   * - تحويل x/y إلى أرقام.
-   * - حذف القيم غير الصالحة.
-   * - ترتيب النقاط تصاعدياً حسب x.
-   * - حذف النقاط المكررة في نفس x مع الاحتفاظ بآخر قيمة.
-   */
   const series = asArray(data?.series)
     .map((item) => {
       const points = asArray(item?.data)
@@ -2292,12 +4570,9 @@ function GraphBlock({
             Number.isFinite(point.x) &&
             Number.isFinite(point.y),
         )
-        .sort(
-          (a, b) => a.x - b.x,
-        );
+        .sort((a, b) => a.x - b.x);
 
       const byX = new Map();
-
       points.forEach((point) => {
         byX.set(point.x, point);
       });
@@ -2309,384 +4584,277 @@ function GraphBlock({
         ),
       };
     })
-    .filter(
-      (item) => item.data.length > 0,
-    );
+    .filter((item) => item.data.length > 0);
 
   if (series.length === 0) {
     return null;
   }
 
-  const allPoints = series.flatMap(
-    (item) => item.data,
-  );
-
-  const xValues = allPoints.map(
-    (point) => point.x,
-  );
-  const yValues = allPoints.map(
-    (point) => point.y,
-  );
+  const allPoints = series.flatMap((item) => item.data);
+  const xValues = allPoints.map((point) => point.x);
+  const yValues = allPoints.map((point) => point.y);
 
   const dataMinX = Math.min(...xValues);
   const dataMaxX = Math.max(...xValues);
   const dataMinY = Math.min(...yValues);
   const dataMaxY = Math.max(...yValues);
 
-  /*
-   * قراءة domain القادم من AI، لكن لا نثق به مباشرة.
-   *
-   * بعض الردود ترجع مثلاً:
-   * y_domain: [12, 9.6]
-   *
-   * وهذا كان يجعل المحور مقلوباً.
-   */
-  const parseDomain = (
-    value,
-    dataMin,
-    dataMax,
-  ) => {
-    const domain = asArray(value);
+  const quantile = (values, q) => {
+    const sorted = values
+      .filter(Number.isFinite)
+      .slice()
+      .sort((a, b) => a - b);
 
+    if (sorted.length === 0) {
+      return 0;
+    }
+
+    const pos = (sorted.length - 1) * q;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    const left = sorted[base];
+    const right = sorted[Math.min(base + 1, sorted.length - 1)];
+    return left + (right - left) * rest;
+  };
+
+  const parseDomain = (value) => {
+    const domain = asArray(value);
     if (domain.length < 2) {
       return null;
     }
-
     const first = Number(domain[0]);
     const second = Number(domain[1]);
-
-    if (
-      !Number.isFinite(first) ||
-      !Number.isFinite(second)
-    ) {
+    if (!Number.isFinite(first) || !Number.isFinite(second) || first === second) {
       return null;
     }
-
-    const low = Math.min(first, second);
-    const high = Math.max(first, second);
-
-    if (low === high) {
-      return null;
-    }
-
-    /*
-     * لا نستعمل domain إذا كان يستبعد نقاطاً حقيقية.
-     * هذه كانت أيضاً سبب انضغاط المنحنى في زاوية البطاقة.
-     */
-    const epsilon =
-      Math.max(
-        1e-9,
-        Math.abs(dataMax - dataMin) * 1e-6,
-      );
-
-    const containsAllData =
-      low <= dataMin + epsilon &&
-      high >= dataMax - epsilon;
-
-    if (!containsAllData) {
-      return null;
-    }
-
-    /*
-     * إذا كان المجال أوسع بشكل مبالغ فيه من البيانات،
-     * نفضّل المجال المستخرج من النقاط.
-     */
-    const dataRange = Math.max(
-      Math.abs(dataMax - dataMin),
-      1e-9,
-    );
-
-    const domainRange = high - low;
-
-    if (domainRange > dataRange * 20) {
-      return null;
-    }
-
-    return [low, high];
+    return [Math.min(first, second), Math.max(first, second)];
   };
 
-  const providedXDomain = parseDomain(
-    data?.x_domain,
-    dataMinX,
-    dataMaxX,
-  );
-
-  const providedYDomain = parseDomain(
-    data?.y_domain,
-    dataMinY,
-    dataMaxY,
-  );
-
-  /*
-   * نبني مجالاً تلقائياً من البيانات عند غياب/خطأ domain.
-   * نضيف padding صغير حتى لا تلتصق النقاط بالحواف.
-   */
   const createAutoDomain = (
     dataMin,
     dataMax,
-    {
-      includeZero = false,
-      paddingRatio = 0.08,
-    } = {},
+    { paddingRatio = 0.08 } = {},
   ) => {
-    let low = dataMin;
-    let high = dataMax;
-
-    if (includeZero) {
-      low = Math.min(low, 0);
-      high = Math.max(high, 0);
-    }
-
-    if (low === high) {
-      const base = Math.max(
-        Math.abs(low),
-        1,
-      );
-
+    if (dataMin === dataMax) {
+      const base = Math.max(Math.abs(dataMin), 1);
       const delta = base * 0.12;
-
-      return [
-        low - delta,
-        high + delta,
-      ];
+      return [dataMin - delta, dataMax + delta];
     }
 
-    const range = high - low;
+    const range = dataMax - dataMin;
     const padding = range * paddingRatio;
-
-    return [
-      low - padding,
-      high + padding,
-    ];
+    return [dataMin - padding, dataMax + padding];
   };
 
-  const autoXDomain = createAutoDomain(
-    dataMinX,
-    dataMaxX,
-    {
-      includeZero: false,
-      paddingRatio: 0.04,
-    },
-  );
+  const providedXDomain = parseDomain(data?.x_domain);
+  const providedYDomain = parseDomain(data?.y_domain);
 
-  /*
-   * لا نفرض الصفر على محور y دائماً.
-   * في منحنى مثل u_R(t) قرب 10 V، فرض الصفر يجعل
-   * التغير الحقيقي شبه غير مرئي.
-   *
-   * إذا كانت البيانات قريبة من الصفر أصلاً،
-   * المجال التلقائي سيظهره بصورة طبيعية.
-   */
-  const autoYDomain = createAutoDomain(
-    dataMinY,
-    dataMaxY,
-    {
-      includeZero: false,
-      paddingRatio: 0.08,
-    },
-  );
+  const autoXDomain = createAutoDomain(dataMinX, dataMaxX, {
+    paddingRatio: 0.04,
+  });
 
-  const [
-    minX,
-    maxX,
-  ] = providedXDomain || autoXDomain;
+  const q10 = quantile(yValues, 0.1);
+  const q90 = quantile(yValues, 0.9);
+  const trimmedRange = Math.max(Math.abs(q90 - q10), 1e-9);
+  const fullRange = Math.max(Math.abs(dataMaxY - dataMinY), 1e-9);
+  const useRobustY = fullRange > trimmedRange * 6;
 
-  const [
-    minY,
-    maxY,
-  ] = providedYDomain || autoYDomain;
+  const autoYDomain = useRobustY
+    ? createAutoDomain(q10, q90, { paddingRatio: 0.12 })
+    : createAutoDomain(dataMinY, dataMaxY, { paddingRatio: 0.08 });
 
-  const width = 780;
-  const height = 410;
+  const [minX, maxX] = providedXDomain || autoXDomain;
+  const [minY, maxY] = providedYDomain || autoYDomain;
 
-  const padding = {
-    top: 30,
-    right: 38,
-    bottom: 62,
-    left: 78,
-  };
-
-  const plotWidth =
-    width -
-    padding.left -
-    padding.right;
-
-  const plotHeight =
-    height -
-    padding.top -
-    padding.bottom;
-
-  const safeXRange = Math.max(
-    maxX - minX,
-    1e-9,
-  );
-
-  const safeYRange = Math.max(
-    maxY - minY,
-    1e-9,
-  );
+  const width = 820;
+  const height = 430;
+  const padding = { top: 26, right: 34, bottom: 68, left: 84 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const safeXRange = Math.max(maxX - minX, 1e-9);
+  const safeYRange = Math.max(maxY - minY, 1e-9);
 
   const toX = (value) =>
-    padding.left +
-    (
-      (Number(value) - minX) /
-      safeXRange
-    ) *
-      plotWidth;
-
-  /*
-   * SVG يبدأ من الأعلى، لذلك نعكس y هنا فقط.
-   * المجال نفسه يبقى دائماً:
-   * minY < maxY
-   */
+    padding.left + ((Number(value) - minX) / safeXRange) * plotWidth;
   const toY = (value) =>
-    padding.top +
-    plotHeight -
-    (
-      (Number(value) - minY) /
-      safeYRange
-    ) *
-      plotHeight;
+    padding.top + plotHeight - ((Number(value) - minY) / safeYRange) * plotHeight;
 
-  const palette = [
-    "#2563eb",
-    "#059669",
-    "#dc2626",
-    "#7c3aed",
-    "#ea580c",
-  ];
+  const palette = ["#2563eb", "#059669", "#dc2626", "#7c3aed", "#ea580c"];
 
-  const tickCount = 5;
+  const niceStep = (range, targetTickCount = 5) => {
+    const raw = Math.max(range, 1e-9) / Math.max(targetTickCount, 1);
+    const power = Math.floor(Math.log10(raw));
+    const magnitude = 10 ** power;
+    const residual = raw / magnitude;
+    let niceResidual = 10;
 
-  const formatTick = (
-    value,
-    range,
-  ) => {
-    const absRange = Math.abs(range);
-
-    let digits = 2;
-
-    if (absRange >= 100) {
-      digits = 0;
-    } else if (absRange >= 10) {
-      digits = 1;
-    } else if (absRange >= 1) {
-      digits = 2;
-    } else if (absRange >= 0.1) {
-      digits = 3;
-    } else {
-      digits = 4;
+    if (residual <= 1) {
+      niceResidual = 1;
+    } else if (residual <= 2) {
+      niceResidual = 2;
+    } else if (residual <= 2.5) {
+      niceResidual = 2.5;
+    } else if (residual <= 5) {
+      niceResidual = 5;
     }
 
-    const rounded = Number(
-      Number(value).toFixed(digits),
-    );
-
-    return Object.is(rounded, -0)
-      ? "0"
-      : String(rounded);
+    return niceResidual * magnitude;
   };
 
-  const xTicks = Array.from(
-    {
-      length: tickCount + 1,
-    },
-    (_, index) => {
-      const ratio =
-        index / tickCount;
+  const parsePositiveStep = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : null;
+  };
 
-      return {
-        ratio,
-        value:
-          minX +
-          ratio * safeXRange,
-      };
-    },
+  const buildTicks = (
+    min,
+    max,
+    count = 5,
+    forcedStep = null,
+  ) => {
+    const step =
+      parsePositiveStep(forcedStep) ||
+      niceStep(max - min, count);
+    const start = Math.ceil(min / step) * step;
+    const end = Math.floor(max / step) * step;
+    const ticks = [];
+
+    // حماية من إنشاء آلاف العلامات إذا وصل domain غير منطقي.
+    let guard = 0;
+    for (
+      let value = start;
+      value <= end + step * 0.5 && guard < 220;
+      value += step
+    ) {
+      ticks.push(Number(value.toFixed(8)));
+      guard += 1;
+    }
+
+    if (ticks.length < 2) {
+      return [min, (min + max) / 2, max].map(
+        (value) => Number(value.toFixed(8)),
+      );
+    }
+
+    return ticks;
+  };
+
+  const formatTick = (value, step) => {
+    const absStep = Math.abs(step);
+    let digits = 0;
+    if (absStep < 1) digits = 2;
+    if (absStep < 0.1) digits = 3;
+    if (absStep < 0.01) digits = 4;
+    const rounded = Number(Number(value).toFixed(digits));
+    return Object.is(rounded, -0) ? "0" : String(rounded);
+  };
+
+  const graphScale = parsePositiveStep(data?.scale) || 1;
+  const forcedXStep =
+    parsePositiveStep(data?.x_step) ||
+    (graphScale === 1 ? 1 : null);
+  const forcedYStep =
+    parsePositiveStep(data?.y_step) ||
+    (graphScale === 1 ? 1 : null);
+
+  const xTicks = buildTicks(
+    minX,
+    maxX,
+    5,
+    forcedXStep,
   );
-
-  const yTicks = Array.from(
-    {
-      length: tickCount + 1,
-    },
-    (_, index) => {
-      const ratio =
-        index / tickCount;
-
-      /*
-       * أعلى الرسم = maxY
-       * أسفل الرسم = minY
-       */
-      return {
-        ratio,
-        value:
-          maxY -
-          ratio * safeYRange,
-      };
-    },
+  const yTicks = buildTicks(
+    minY,
+    maxY,
+    5,
+    forcedYStep,
   );
+  const xStep =
+    forcedXStep ||
+    (xTicks.length > 1
+      ? xTicks[1] - xTicks[0]
+      : safeXRange / 5);
+  const yStep =
+    forcedYStep ||
+    (yTicks.length > 1
+      ? yTicks[1] - yTicks[0]
+      : safeYRange / 5);
+
+  const buildSegments = (points) => {
+    if (points.length <= 1) {
+      return [points];
+    }
+
+    const xGaps = [];
+    for (let index = 1; index < points.length; index += 1) {
+      xGaps.push(points[index].x - points[index - 1].x);
+    }
+    const medianGap = quantile(xGaps, 0.5) || 0;
+
+    const segments = [];
+    let current = [points[0]];
+
+    for (let index = 1; index < points.length; index += 1) {
+      const prev = points[index - 1];
+      const point = points[index];
+      const xGap = point.x - prev.x;
+      const yGap = Math.abs(point.y - prev.y);
+      const shouldBreak =
+        Boolean(point?.break_before) ||
+        !Number.isFinite(point.y) ||
+        !Number.isFinite(prev.y) ||
+        (medianGap > 0 && xGap > medianGap * 3.5) ||
+        yGap > safeYRange * 0.75;
+
+      if (shouldBreak) {
+        if (current.length > 0) {
+          segments.push(current);
+        }
+        current = [point];
+      } else {
+        current.push(point);
+      }
+    }
+
+    if (current.length > 0) {
+      segments.push(current);
+    }
+
+    return segments.filter((segment) => segment.length > 0);
+  };
 
   return (
-    <div
-      className="
-        overflow-hidden rounded-2xl
-        border border-slate-200
-        bg-white shadow-sm
-      "
-    >
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div
-        className="
-          flex flex-col gap-3
-          border-b border-slate-200
-          bg-slate-50 px-4 py-3
-          sm:flex-row sm:items-center
-          sm:justify-between
-        "
+        className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
       >
-        <MathText
-          className="
-            text-sm font-black
-            text-slate-800
-          "
-        >
-          {data?.title || "التمثيل البياني"}
-        </MathText>
+        <div className="flex flex-wrap items-center gap-2">
+          <MathText className="text-sm font-black text-slate-800">
+            {data?.title || "التمثيل البياني"}
+          </MathText>
+          {graphScale === 1 && (
+            <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-black text-slate-600">
+              السلم: 1
+            </span>
+          )}
+        </div>
 
         {series.length > 1 && (
           <div className="flex flex-wrap gap-3">
-            {series.map(
-              (item, index) => (
+            {series.map((item, index) => (
+              <span
+                key={item?.id ?? index}
+                className="inline-flex items-center gap-2 text-xs font-black text-slate-600"
+              >
                 <span
-                  key={
-                    item?.id ?? index
-                  }
-                  className="
-                    inline-flex
-                    items-center gap-2
-                    text-xs font-black
-                    text-slate-600
-                  "
-                >
-                  <span
-                    className="
-                      h-2.5 w-2.5
-                      rounded-full
-                    "
-                    style={{
-                      backgroundColor:
-                        palette[
-                          index %
-                            palette.length
-                        ],
-                    }}
-                  />
-
-                  {item?.label ||
-                    `السلسلة ${
-                      index + 1
-                    }`}
-                </span>
-              ),
-            )}
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: palette[index % palette.length] }}
+                />
+                {item?.label || `السلسلة ${index + 1}`}
+              </span>
+            ))}
           </div>
         )}
       </div>
@@ -2695,18 +4863,12 @@ function GraphBlock({
         <svg
           viewBox={`0 0 ${width} ${height}`}
           preserveAspectRatio="xMidYMid meet"
-          className="
-            mx-auto block h-auto w-full
-            max-w-[900px]
-          "
+          className="mx-auto block h-auto w-full max-w-[920px]"
           role="img"
-          aria-label={
-            data?.title ||
-            "التمثيل البياني"
-          }
+          aria-label={data?.title || "التمثيل البياني"}
         >
           <defs>
-            <clipPath id="graph-plot-clip">
+            <clipPath id={clipId}>
               <rect
                 x={padding.left}
                 y={padding.top}
@@ -2714,6 +4876,16 @@ function GraphBlock({
                 height={plotHeight}
               />
             </clipPath>
+            <marker
+              id={axisArrowId}
+              markerWidth="10"
+              markerHeight="10"
+              refX="8"
+              refY="5"
+              orient="auto"
+            >
+              <path d="M0,0 L9,5 L0,10 Z" fill="#0f172a" />
+            </marker>
           </defs>
 
           <rect
@@ -2726,198 +4898,161 @@ function GraphBlock({
             strokeWidth="1"
           />
 
-          {/* خطوط ومحارف محور x */}
-          {xTicks.map(
-            (tick, index) => {
-              const x =
-                padding.left +
-                tick.ratio *
-                  plotWidth;
-
-              return (
-                <g
-                  key={`x-${index}`}
+          {xTicks.map((tick, index) => {
+            const x = toX(tick);
+            return (
+              <g key={`x-${index}`}>
+                <line
+                  x1={x}
+                  y1={padding.top}
+                  x2={x}
+                  y2={padding.top + plotHeight}
+                  stroke="#e2e8f0"
+                  strokeWidth="1"
+                />
+                <text
+                  x={x}
+                  y={padding.top + plotHeight + 26}
+                  textAnchor="middle"
+                  fontSize="12"
+                  fill="#475569"
+                  direction="ltr"
+                  unicodeBidi="plaintext"
                 >
-                  <line
-                    x1={x}
-                    y1={padding.top}
-                    x2={x}
-                    y2={
-                      padding.top +
-                      plotHeight
-                    }
-                    stroke="#e2e8f0"
-                    strokeWidth="1"
-                  />
+                  {formatTick(tick, xStep)}
+                </text>
+              </g>
+            );
+          })}
 
-                  <text
-                    x={x}
-                    y={
-                      padding.top +
-                      plotHeight +
-                      24
-                    }
-                    textAnchor="middle"
-                    fontSize="12"
-                    fill="#475569"
-                  >
-                    {formatTick(
-                      tick.value,
-                      safeXRange,
-                    )}
-                  </text>
-                </g>
-              );
-            },
+          {yTicks.map((tick, index) => {
+            const y = toY(tick);
+            return (
+              <g key={`y-${index}`}>
+                <line
+                  x1={padding.left}
+                  y1={y}
+                  x2={padding.left + plotWidth}
+                  y2={y}
+                  stroke="#e2e8f0"
+                  strokeWidth="1"
+                />
+                <text
+                  x={padding.left - 14}
+                  y={y + 4}
+                  textAnchor="end"
+                  fontSize="12"
+                  fill="#475569"
+                  direction="ltr"
+                  unicodeBidi="plaintext"
+                >
+                  {formatTick(tick, yStep)}
+                </text>
+              </g>
+            );
+          })}
+
+          {minX <= 0 && maxX >= 0 && (
+            <line
+              x1={toX(0)}
+              x2={toX(0)}
+              y1={padding.top + plotHeight}
+              y2={padding.top + 2}
+              stroke="#0f172a"
+              strokeWidth="1.7"
+              markerEnd={`url(#${axisArrowId})`}
+            />
           )}
 
-          {/* خطوط ومحارف محور y */}
-          {yTicks.map(
-            (tick, index) => {
-              const y =
-                padding.top +
-                tick.ratio *
-                  plotHeight;
-
-              return (
-                <g
-                  key={`y-${index}`}
-                >
-                  <line
-                    x1={padding.left}
-                    y1={y}
-                    x2={
-                      padding.left +
-                      plotWidth
-                    }
-                    y2={y}
-                    stroke="#e2e8f0"
-                    strokeWidth="1"
-                  />
-
-                  <text
-                    x={
-                      padding.left -
-                      12
-                    }
-                    y={y + 4}
-                    textAnchor="end"
-                    fontSize="12"
-                    fill="#475569"
-                  >
-                    {formatTick(
-                      tick.value,
-                      safeYRange,
-                    )}
-                  </text>
-                </g>
-              );
-            },
+          {minY <= 0 && maxY >= 0 && (
+            <line
+              x1={padding.left}
+              y1={toY(0)}
+              x2={padding.left + plotWidth}
+              y2={toY(0)}
+              stroke="#0f172a"
+              strokeWidth="1.7"
+              markerEnd={`url(#${axisArrowId})`}
+            />
           )}
 
-          <g
-            clipPath="url(#graph-plot-clip)"
-          >
-            {series.map(
-              (item, index) => {
-                const color =
-                  palette[
-                    index %
-                      palette.length
-                  ];
+          <g clipPath={`url(#${clipId})`}>
+            {series.map((item, index) => {
+              const color = palette[index % palette.length];
+              const segments = buildSegments(item.data);
+              const showMarkers = item.data.length <= 24;
 
-                const points =
-                  item.data
-                    .map(
-                      (point) =>
-                        `${toX(
-                          point.x,
-                        )},${toY(
-                          point.y,
-                        )}`,
-                    )
-                    .join(" ");
+              return (
+                <g key={item?.id ?? index}>
+                  {segments.map((segment, segmentIndex) => {
+                    const points = segment
+                      .map((point) => `${toX(point.x)},${toY(point.y)}`)
+                      .join(" ");
 
-                return (
-                  <g
-                    key={
-                      item?.id ??
-                      index
+                    if (segment.length === 1) {
+                      const point = segment[0];
+                      return (
+                        <circle
+                          key={`single-${segmentIndex}`}
+                          cx={toX(point.x)}
+                          cy={toY(point.y)}
+                          r="3.5"
+                          fill={color}
+                          stroke="#ffffff"
+                          strokeWidth="1.5"
+                        />
+                      );
                     }
-                  >
-                    {item.data.length >
-                      1 && (
+
+                    return (
                       <polyline
-                        points={
-                          points
-                        }
+                        key={`segment-${segmentIndex}`}
+                        points={points}
                         fill="none"
-                        stroke={
-                          color
-                        }
-                        strokeWidth="3"
+                        stroke={color}
+                        strokeWidth="3.2"
                         strokeLinejoin="round"
                         strokeLinecap="round"
                       />
-                    )}
+                    );
+                  })}
 
-                    {item.data.map(
-                      (
-                        point,
-                        pointIndex,
-                      ) => (
-                        <circle
-                          key={
-                            pointIndex
-                          }
-                          cx={toX(
-                            point.x,
-                          )}
-                          cy={toY(
-                            point.y,
-                          )}
-                          r="4"
-                          fill={
-                            color
-                          }
-                          stroke="#ffffff"
-                          strokeWidth="2"
-                        />
-                      ),
-                    )}
-                  </g>
-                );
-              },
-            )}
+                  {showMarkers &&
+                    item.data.map((point, pointIndex) => (
+                      <circle
+                        key={pointIndex}
+                        cx={toX(point.x)}
+                        cy={toY(point.y)}
+                        r="3.5"
+                        fill={color}
+                        stroke="#ffffff"
+                        strokeWidth="1.5"
+                      />
+                    ))}
+                </g>
+              );
+            })}
           </g>
 
           <text
-            x={
-              padding.left +
-              plotWidth / 2
-            }
-            y={height - 12}
+            x={padding.left + plotWidth / 2}
+            y={height - 14}
             textAnchor="middle"
             fontSize="14"
             fontWeight="700"
             fill="#0f172a"
           >
-            {data?.x_label ||
-              "x"}
+            {data?.x_label || "x"}
           </text>
 
           <text
-            transform={`translate(20 ${
-              padding.top +
-              plotHeight / 2
-            }) rotate(-90)`}
+            transform={`translate(22 ${padding.top + plotHeight / 2}) rotate(-90)`}
             textAnchor="middle"
             fontSize="14"
             fontWeight="700"
             fill="#0f172a"
           >
-            {data?.y_label ||
-              "y"}
+            {data?.y_label || "y"}
           </text>
         </svg>
       </div>
@@ -3000,7 +5135,7 @@ function getConnectionPoint(fromElement, toElement) {
   };
 }
 
-function DiagramElement({ element }) {
+function DiagramElement({ element, arrowMarkerId = "visual-arrow" }) {
   const box = getElementBox(element);
   const kind = String(element?.kind || "rectangle").toLowerCase();
   const label = String(
@@ -3257,7 +5392,7 @@ function DiagramElement({ element }) {
           y2={y2}
           stroke={stroke}
           strokeWidth="3"
-          markerEnd="url(#visual-arrow)"
+          markerEnd={`url(#${arrowMarkerId})`}
         />
         {label && (
           <text
@@ -3295,7 +5430,7 @@ function DiagramElement({ element }) {
             y2={y2}
             stroke={stroke}
             strokeWidth="3"
-            markerEnd="url(#visual-arrow)"
+            markerEnd={`url(#${arrowMarkerId})`}
           />
           <text
             x={cx + 16}
@@ -3447,7 +5582,10 @@ function getVisualBounds(
 }
 
 function DiagramVisual({ visual }) {
+  const reactId = useId().replace(/:/g, "");
   const data = asObject(visual);
+  const arrowMarkerId = `visual-arrow-${String(data?.id || "diagram")}-${reactId}`
+    .replace(/[^a-zA-Z0-9_-]/g, "-");
   const originalWidth = Math.max(
     320,
     safeNumber(data?.width, 760),
@@ -3524,7 +5662,7 @@ function DiagramVisual({ visual }) {
           }
         >
           <defs>
-            <marker id="visual-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <marker id={arrowMarkerId} markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
               <path d="M0,0 L0,6 L9,3 z" fill="#0f172a" />
             </marker>
           </defs>
@@ -3544,7 +5682,7 @@ function DiagramVisual({ visual }) {
                   x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
                   stroke="#0f172a" strokeWidth="2.5"
                   strokeDasharray={style === "dashed" ? "8 6" : undefined}
-                  markerEnd={style === "arrow" ? "url(#visual-arrow)" : undefined}
+                  markerEnd={style === "arrow" ? `url(#${arrowMarkerId})` : undefined}
                 />
                 {hasText(connection?.label) && (
                   <text x={midX} y={midY-8} textAnchor="middle" fontSize="13" fontWeight="700" fill="#334155">
@@ -3556,7 +5694,11 @@ function DiagramVisual({ visual }) {
           })}
 
           {elements.map((element, index) => (
-            <DiagramElement key={element?.id ?? index} element={element} />
+            <DiagramElement
+              key={element?.id ?? index}
+              element={element}
+              arrowMarkerId={arrowMarkerId}
+            />
           ))}
 
           {annotations.map((annotation, index) => (
@@ -3585,12 +5727,31 @@ function VisualsBlock({ value, className = "" }) {
   return (
     <div className={cn("space-y-4", className)}>
       {visuals.map((visual, index) => {
+        if (visual?.renderer === "server-math-v1" && typeof visual?.svg === "string") {
+          return <ServerMathVisual key={visual.id ?? index} visual={visual} />;
+        }
         const type = String(visual?.type || "").toLowerCase();
+        if (
+          type === "variation_table" ||
+          type === "variations" ||
+          type === "sign_variation_table" ||
+          isVariationTableData(visual)
+        ) {
+          return (
+            <VariationTable
+              key={visual?.id ?? index}
+              table={visual}
+            />
+          );
+        }
         if (type === "graph") {
           return <GraphBlock key={visual?.id ?? index} graph={visual} />;
         }
         if (type === "table") {
           return <DataTable key={visual?.id ?? index} table={visual} />;
+        }
+        if (visual?.coordinate_system === "complex_plane") {
+          return <ComplexPlaneVisual key={visual?.id ?? index} visual={visual} />;
         }
         if (type === "circuit" || type === "diagram") {
           return <DiagramVisual key={visual?.id ?? index} visual={visual} />;
@@ -3601,12 +5762,232 @@ function VisualsBlock({ value, className = "" }) {
   );
 }
 
+
+function DocumentAssetCard({ document, number }) {
+  if (!document || typeof document !== "object") {
+    return null;
+  }
+
+  const type = String(
+    document?.type || "document",
+  ).toLowerCase();
+
+  const title =
+    document?.title ||
+    `الوثيقة ${number}`;
+
+  const caption =
+    document?.caption ||
+    document?.description ||
+    "";
+
+  const path =
+    document?.path ||
+    document?.url ||
+    document?.src ||
+    "";
+
+  const assetUrl =
+    resolveDocumentAssetUrl(path);
+
+  const table = asObject(document?.table);
+  const graph = asObject(document?.graph);
+
+  return (
+    <article
+      className="
+        overflow-hidden rounded-2xl
+        border border-slate-200
+        bg-white shadow-sm
+      "
+    >
+      <div
+        className="
+          flex items-center justify-between
+          gap-3 border-b border-slate-200
+          bg-slate-50 px-4 py-3
+        "
+      >
+        <div>
+          <p className="text-xs font-black text-blue-700">
+            {document?.reuse_unchanged ? "وثيقة أصلية" : `الوثيقة ${number}`}
+          </p>
+          <h4 className="mt-1 font-black text-slate-950">
+            {title}
+          </h4>
+        </div>
+
+        {hasText(document?.ref_id) && (
+          <span
+            className="
+              rounded-full bg-blue-100
+              px-3 py-1 text-[11px]
+              font-black text-blue-700
+            "
+          >
+            مرجع أصلي
+          </span>
+        )}
+      </div>
+
+      <div className="p-3 sm:p-4">
+        {type === "image" && assetUrl && (
+          <a
+            href={assetUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="block overflow-hidden rounded-xl border border-slate-200 bg-white"
+            title="فتح الوثيقة بالحجم الكامل"
+          >
+            <img
+              src={assetUrl}
+              alt={title}
+              loading="lazy"
+              className="
+                mx-auto max-h-[560px]
+                w-full object-contain
+                p-2 sm:p-3
+              "
+            />
+          </a>
+        )}
+
+        {type === "table" && Object.keys(table).length > 0 && (
+          <DataTable
+            table={{
+              title,
+              ...table,
+            }}
+          />
+        )}
+
+        {type === "graph" && Object.keys(graph).length > 0 && (
+          <GraphBlock
+            graph={{
+              title,
+              ...graph,
+            }}
+          />
+        )}
+
+        {type !== "image" &&
+          type !== "table" &&
+          type !== "graph" &&
+          assetUrl && (
+            <a
+              href={assetUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="
+                inline-flex min-h-10
+                items-center rounded-xl
+                border border-blue-200
+                bg-blue-50 px-4 py-2
+                text-sm font-black
+                text-blue-800
+                transition hover:bg-blue-100
+              "
+            >
+              فتح الوثيقة
+            </a>
+          )}
+
+        {hasText(caption) && (
+          <MathText
+            className="
+              mt-3 text-sm font-semibold
+              leading-7 text-slate-600
+            "
+          >
+            {caption}
+          </MathText>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function DocumentAssetsBlock({ documents, className = "" }) {
+  const items = asArray(documents).filter(
+    (item) => item && typeof item === "object",
+  );
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className={cn("space-y-3", className)}>
+      <div className="flex items-center gap-2">
+        <BookOpen size={18} className="text-blue-700" />
+        <h4 className="font-black text-slate-950">
+          الوثائق المستعملة في التمرين
+        </h4>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {items.map((document, index) => (
+          <DocumentAssetCard
+            key={document?.ref_id ?? index}
+            document={document}
+            number={index + 1}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DocumentReferenceChips({
+  refs,
+  documents,
+  className = "",
+}) {
+  const items = asArray(refs)
+    .map((ref) => ({
+      ref,
+      document: getDocumentByRef(documents, ref),
+    }))
+    .filter((item) => item.document);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={cn("flex flex-wrap gap-2", className)}>
+      {items.map(({ ref, document }) => (
+        <span
+          key={String(ref)}
+          className="
+            rounded-full border border-blue-200
+            bg-blue-50 px-3 py-1
+            text-xs font-black text-blue-800
+          "
+        >
+          {document?.title || "وثيقة"}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function GeneratedBacExercisesPage({
   chapterId,
   branchCode,
+  subjectCode = "",
+  onTutorExerciseChange,
+  onTutorQuestionChange,
+  onTutorStepChange,
+  onTutorViewStateChange,
 }) {
   const { token } = useContext(UserContext);
 
+  const solutionInFlight = useRef(false);
+  const pendingGeneration = useRef(null);
+  const generationInFlight = useRef(false);
+  const currentScope = useRef("");
+  currentScope.current = `${chapterId}:${branchCode}:${subjectCode}:${token}`;
   const [records, setRecords] = useState([]);
   const [activeIndex, setActiveIndex] =
     useState(0);
@@ -3623,6 +6004,34 @@ export default function GeneratedBacExercisesPage({
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] =
     useState("");
+  const [aiCooldownSeconds, setAiCooldownSeconds] =
+    useState(0);
+
+  useEffect(() => {
+    if (aiCooldownSeconds <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setAiCooldownSeconds((previous) =>
+        Math.max(0, previous - 1),
+      );
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [aiCooldownSeconds]);
+
+  const registerRateLimit = useCallback(
+    (requestError) => {
+      const seconds = getRetryAfterSeconds(requestError);
+      if (seconds > 0) {
+        setAiCooldownSeconds((previous) =>
+          Math.max(previous, seconds),
+        );
+      }
+    },
+    [],
+  );
 
   // حالة إعادة شرح حل السؤال. التاريخ نفسه يأتي من قاعدة البيانات
   // داخل currentRecord.re_explanations.
@@ -3633,6 +6042,64 @@ export default function GeneratedBacExercisesPage({
 
   const currentRecord =
     records[activeIndex] || null;
+
+  useEffect(() => {
+    if (!currentRecord) {
+      onTutorExerciseChange?.(null);
+      onTutorQuestionChange?.(null);
+      onTutorStepChange?.(null);
+      return;
+    }
+
+    const payload = getExercisePayload(currentRecord);
+
+    onTutorExerciseChange?.({
+      kind: "generated_bac_exercise",
+      id: currentRecord.id,
+      title:
+        currentRecord.title ||
+        payload.title ||
+        `تمرين شبيه بالبكالوريا ${activeIndex + 1}`,
+      text:
+        payload.statement ||
+        payload.text ||
+        "",
+      branch:
+        currentRecord?.branch?.code ||
+        payload?.branch_code ||
+        branchCode ||
+        "",
+      reference_exercise_ids:
+        currentRecord.reference_exercise_ids || [],
+      subject_key:
+        payload?.meta?.subject_key ||
+        currentRecord?.subject_key ||
+        subjectCode ||
+        "generic",
+      document_refs:
+        asArray(payload?.document_refs),
+    });
+
+    onTutorQuestionChange?.(null);
+    onTutorStepChange?.(null);
+  }, [
+    currentRecord,
+    activeIndex,
+    branchCode,
+    subjectCode,
+    onTutorExerciseChange,
+    onTutorQuestionChange,
+    onTutorStepChange,
+  ]);
+
+  useEffect(() => {
+    onTutorViewStateChange?.({
+      solution_visible: showSolution,
+      alternative_solution_visible: false,
+      visible_hints: 0,
+      showing_reexplanation: false,
+    });
+  }, [showSolution, onTutorViewStateChange]);
 
   const authHeaders = useMemo(
     () =>
@@ -3647,11 +6114,13 @@ export default function GeneratedBacExercisesPage({
   const canGenerate = Boolean(
     token &&
     Number(chapterId) > 0 &&
-    hasText(branchCode),
+    hasText(branchCode) &&
+    aiCooldownSeconds <= 0,
   );
 
   const fetchGeneratedExercises =
     useCallback(async () => {
+      const listScope = currentScope.current;
       if (!token) {
         setLoadingList(false);
         setError(
@@ -3692,6 +6161,7 @@ export default function GeneratedBacExercisesPage({
             response.data,
         );
 
+        if (currentScope.current !== listScope) return;
         setRecords(items);
         setActiveIndex(0);
         setShowSolution(false);
@@ -3708,7 +6178,7 @@ export default function GeneratedBacExercisesPage({
           ),
         );
       } finally {
-        setLoadingList(false);
+        if (currentScope.current === listScope) setLoadingList(false);
       }
     }, [
       token,
@@ -3718,11 +6188,24 @@ export default function GeneratedBacExercisesPage({
     ]);
 
   useEffect(() => {
+    setRecords([]);
+    setShowSolution(false);
     fetchGeneratedExercises();
   }, [fetchGeneratedExercises]);
 
   const handleGenerateExercise =
     async () => {
+      if (generationInFlight.current || creatingExercise) {
+        return;
+      }
+
+      if (aiCooldownSeconds > 0) {
+        setError(
+          `تم الوصول مؤقتًا إلى حد التوليد. أعد المحاولة بعد ${aiCooldownSeconds} ثانية.`,
+        );
+        return;
+      }
+
       if (!canGenerate) {
         setError(
           "يجب تسجيل الدخول وتحديد الوحدة والشعبة.",
@@ -3730,6 +6213,15 @@ export default function GeneratedBacExercisesPage({
         return;
       }
 
+      const scope = `${chapterId}:${branchCode}:${subjectCode}:${token}`;
+      if (!pendingGeneration.current || pendingGeneration.current.scope !== scope) {
+        pendingGeneration.current = {
+          scope,
+          key: globalThis.crypto?.randomUUID?.() ||
+            `bac-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        };
+      }
+      generationInFlight.current = true;
       try {
         setCreatingExercise(true);
         setError("");
@@ -3741,9 +6233,14 @@ export default function GeneratedBacExercisesPage({
           {
             chapter_id: Number(chapterId),
             branch_code: branchCode,
+            subject_code: hasText(subjectCode)
+              ? subjectCode
+              : "auto",
+            // قالب بكالوريا واحد فقط حتى يبقى نفس نوع الأسئلة ولا تختلط
+            // بنيات مواضيع مختلفة داخل تمرين واحد.
             references_count: 1,
             selection_strategy:
-              "latest_random",
+              "random",
           },
           {
             headers: {
@@ -3751,11 +6248,13 @@ export default function GeneratedBacExercisesPage({
               "Content-Type":
                 "application/json",
             },
-            timeout: 150000,
+            timeout: 300000,
           },
         );
 
         const created = response.data;
+        if (currentScope.current !== scope) return;
+        pendingGeneration.current = null;
 
         setRecords((previous) => [
           created,
@@ -3768,7 +6267,7 @@ export default function GeneratedBacExercisesPage({
 
         setActiveIndex(0);
         setSuccessMessage(
-          "تم إنشاء تمرين جديد بنجاح.",
+          "التمرين وحله جاهزان. يمكنك البدء ثم فتح الحل عند الحاجة.",
         );
 
         window.scrollTo({
@@ -3781,6 +6280,10 @@ export default function GeneratedBacExercisesPage({
           requestError,
         );
 
+        if (requestError?.response?.status === 429) {
+          registerRateLimit(requestError);
+        }
+
         setError(
           getErrorMessage(
             requestError,
@@ -3788,12 +6291,13 @@ export default function GeneratedBacExercisesPage({
           ),
         );
       } finally {
+        generationInFlight.current = false;
         setCreatingExercise(false);
       }
     };
 
   const handleGenerateSolution = async () => {
-    if (!currentRecord?.id || creatingSolution) {
+    if (!currentRecord?.id || creatingSolution || solutionInFlight.current) {
       return;
     }
 
@@ -3807,45 +6311,55 @@ export default function GeneratedBacExercisesPage({
       return;
     }
 
+    if (aiCooldownSeconds > 0) {
+      setError(
+        `مزود الذكاء الاصطناعي في فترة تهدئة. أعد المحاولة بعد ${aiCooldownSeconds} ثانية.`,
+      );
+      return;
+    }
+
     try {
       setCreatingSolution(true);
       setError("");
       setSuccessMessage("");
       setShowSolution(false);
 
-      const response = await axios.post(
-        `${GENERATED_BAC_BASE_URL}/${currentRecord.id}/generate-solution/`,
-        {
-          regenerate: false,
-        },
-        {
-          headers: {
-            ...authHeaders,
-            "Content-Type": "application/json",
-          },
-          timeout: 150000,
-        },
-      );
-
-      const updated = response.data;
-
-      setRecords((previous) =>
-        previous.map((item) =>
-          Number(item?.id) === Number(updated?.id)
-            ? updated
-            : item,
-        ),
-      );
-
-      setShowSolution(true);
-      setSuccessMessage(
-        "تم إنشاء الحل بنجاح.",
-      );
+      solutionInFlight.current = true;
+      const solutionScope = currentScope.current;
+      const targetId = currentRecord.id;
+      const total = getExerciseQuestions(currentRecord).length;
+      let done = false;
+      for (let attempt = 0; attempt < total + 2; attempt += 1) {
+        if (currentScope.current !== solutionScope) break;
+        const response = await axios.post(
+          `${GENERATED_BAC_BASE_URL}/${targetId}/generate-solution/`,
+          {regenerate: false},
+          {headers: {...authHeaders, "Content-Type": "application/json"}, timeout: 150000},
+        );
+        if (currentScope.current !== solutionScope) break;
+        const updated = response.data;
+        setRecords(previous => previous.map(item => Number(item?.id) === Number(updated?.id) ? updated : item));
+        const progress = updated.solution_progress;
+        done = progress ? progress.complete : updated.has_solution;
+        if (done) {
+          setShowSolution(true);
+          setSuccessMessage("تم إنشاء الحل كاملًا وحفظه.");
+          break;
+        }
+        setSuccessMessage(`تم حفظ حل ${progress?.completed || 0} من ${progress?.total || total} أسئلة. جارٍ الاستكمال…`);
+      }
+      if (!done && currentScope.current === solutionScope) {
+        setSuccessMessage("حُفظ التقدم. اضغط إنشاء الحل للاستكمال.");
+      }
     } catch (requestError) {
       console.error(
         "Generate bac solution error:",
         requestError,
       );
+
+      if (requestError?.response?.status === 429) {
+        registerRateLimit(requestError);
+      }
 
       setError(
         getErrorMessage(
@@ -3854,6 +6368,7 @@ export default function GeneratedBacExercisesPage({
         ),
       );
     } finally {
+      solutionInFlight.current = false;
       setCreatingSolution(false);
     }
   };
@@ -3861,6 +6376,25 @@ export default function GeneratedBacExercisesPage({
   const handleReExplainSolution = async (
     question,
   ) => {
+    if (question) {
+      onTutorQuestionChange?.({
+        id: question.id,
+        code: question.code || "",
+        number:
+          question.number ??
+          question.display_order ??
+          "",
+        title: question.title || "",
+        text:
+          question.text ||
+          question.statement ||
+          "",
+      });
+      onTutorStepChange?.(null);
+      onTutorViewStateChange?.({
+        showing_reexplanation: true,
+      });
+    }
     if (
       !currentRecord?.id ||
       !question?.id
@@ -3872,6 +6406,14 @@ export default function GeneratedBacExercisesPage({
       `${currentRecord.id}:${question.id}`;
 
     if (reExplainLoading[key]) {
+      return;
+    }
+
+    if (aiCooldownSeconds > 0) {
+      setReExplainErrors((previous) => ({
+        ...previous,
+        [key]: `أعد المحاولة بعد ${aiCooldownSeconds} ثانية.`,
+      }));
       return;
     }
 
@@ -3914,6 +6456,10 @@ export default function GeneratedBacExercisesPage({
         "Re-explain question solution error:",
         requestError,
       );
+
+      if (requestError?.response?.status === 429) {
+        registerRateLimit(requestError);
+      }
 
       setReExplainErrors((previous) => ({
         ...previous,
@@ -3982,6 +6528,13 @@ export default function GeneratedBacExercisesPage({
         .math-content mjx-container {
           direction: ltr;
           text-align: center;
+          unicode-bidi: isolate;
+        }
+
+        .math-content mjx-container:not([display="true"]) {
+          display: inline-block !important;
+          margin-inline: 0.18rem !important;
+          vertical-align: middle;
         }
 
         img,
@@ -4020,6 +6573,7 @@ export default function GeneratedBacExercisesPage({
             count={records.length}
             creating={creatingExercise}
             disabled={!canGenerate}
+            cooldownSeconds={aiCooldownSeconds}
             onGenerate={handleGenerateExercise}
           />
 
@@ -4036,6 +6590,7 @@ export default function GeneratedBacExercisesPage({
               records={records}
               activeIndex={activeIndex}
               creating={creatingExercise}
+              cooldownSeconds={aiCooldownSeconds}
               onSelect={selectRecord}
               onGenerate={handleGenerateExercise}
             />
@@ -4063,6 +6618,7 @@ export default function GeneratedBacExercisesPage({
                 <FirstExerciseState
                   creating={creatingExercise}
                   disabled={!canGenerate}
+                  cooldownSeconds={aiCooldownSeconds}
                   onGenerate={
                     handleGenerateExercise
                   }
@@ -4083,6 +6639,7 @@ export default function GeneratedBacExercisesPage({
                   <SolutionAction
                     record={currentRecord}
                     loading={creatingSolution}
+                    cooldownSeconds={aiCooldownSeconds}
                     showSolution={showSolution}
                     onClick={
                       handleGenerateSolution
@@ -4126,6 +6683,7 @@ function GeneratedPageHeader({
   count,
   creating,
   disabled,
+  cooldownSeconds = 0,
   onGenerate,
 }) {
   return (
@@ -4225,6 +6783,11 @@ function GeneratedPageHeader({
                 />
                 جارٍ إنشاء التمرين...
               </>
+            ) : cooldownSeconds > 0 ? (
+              <>
+                <Clock3 size={20} />
+                أعد المحاولة بعد {cooldownSeconds} ث
+              </>
             ) : (
               <>
                 <FilePlus2 size={20} />
@@ -4294,6 +6857,7 @@ function GeneratedHistorySidebar({
   records,
   activeIndex,
   creating,
+  cooldownSeconds = 0,
   onSelect,
   onGenerate,
 }) {
@@ -4461,7 +7025,7 @@ function GeneratedHistorySidebar({
         <button
           type="button"
           onClick={onGenerate}
-          disabled={creating}
+          disabled={creating || cooldownSeconds > 0}
           className="
             inline-flex w-full
             items-center justify-center
@@ -4481,7 +7045,9 @@ function GeneratedHistorySidebar({
           ) : (
             <Sparkles size={18} />
           )}
-          تمرين جديد
+          {cooldownSeconds > 0
+            ? `انتظر ${cooldownSeconds} ث`
+            : "تمرين جديد"}
         </button>
       </div>
     </aside>
@@ -4559,6 +7125,7 @@ function GeneratedExamPaper({
 }) {
   const exercise = getExercisePayload(record);
   const questions = getExerciseQuestions(record);
+  const documents = getExerciseDocuments(record);
 
   const parsedStatement =
     extractInlineStatementTable(
@@ -4569,6 +7136,21 @@ function GeneratedExamPaper({
     normalizeMathText(
       parsedStatement.text,
     ).trim();
+
+  const fallbackStatementGraph =
+    buildFallbackStatementGraph(exercise);
+
+  const statementEquationSignatures =
+    new Set(
+      extractEquationSignatures(
+        exercise?.statement,
+      ),
+    );
+
+  const normalizedStatementForDedupe =
+    normalizeForContentDedupe(
+      exercise?.statement,
+    );
 
   const sections = asArray(
     exercise?.statement_sections,
@@ -4586,24 +7168,49 @@ function GeneratedExamPaper({
       return false;
     }
 
+    const sectionForDedupe =
+      normalizeForContentDedupe(
+        sectionText,
+      );
+
+    if (!sectionForDedupe) {
+      return false;
+    }
+
+    const sectionSignatures =
+      extractEquationSignatures(
+        section?.text,
+      );
+
+    if (
+      sectionSignatures.length > 0 &&
+      sectionSignatures.every((signature) =>
+        statementEquationSignatures.has(signature),
+      )
+    ) {
+      return false;
+    }
+
     /*
      * منع تكرار نص التمرين نفسه داخل
-     * statement_sections.
+     * statement_sections حتى لو اختلفت
+     * delimiters أو الفراغات أو شكل الصيغة.
      */
     return (
-      sectionText !==
-        normalizeMathText(
-          exercise?.statement,
-        ).trim() &&
-      sectionText !== normalizedStatement &&
-      !normalizedStatement.includes(
-        sectionText,
+      sectionForDedupe !==
+        normalizedStatementForDedupe &&
+      !normalizedStatementForDedupe.includes(
+        sectionForDedupe,
       )
     );
   });
 
   return (
     <article
+      data-tutor-context
+      data-tutor-exercise-kind="generated_bac_exercise"
+      data-tutor-exercise-id={record?.id ?? ""}
+      data-tutor-title={record?.title || exercise?.title || "تمرين شبيه بالبكالوريا"}
       className="
         overflow-hidden rounded-2xl
         border border-slate-300
@@ -4737,6 +7344,12 @@ function GeneratedExamPaper({
               />
             )}
 
+            {fallbackStatementGraph && (
+              <GraphBlock
+                graph={fallbackStatementGraph}
+              />
+            )}
+
             {sections.map(
               (section, index) => (
                 <div
@@ -4766,6 +7379,11 @@ function GeneratedExamPaper({
                 </div>
               ),
             )}
+
+            <DocumentAssetsBlock
+              documents={documents}
+              className="pt-2"
+            />
 
             <GraphsBlock
               value={
@@ -4808,6 +7426,12 @@ function GeneratedExamPaper({
             {questions.map((item, index) => (
               <article
                 key={item?.id ?? index}
+                data-tutor-context
+                data-tutor-exercise-kind="generated_bac_exercise"
+                data-tutor-exercise-id={record?.id ?? ""}
+                data-tutor-question-id={item?.id ?? item?.question_id ?? index + 1}
+                data-tutor-question-number={item?.number ?? item?.display_order ?? index + 1}
+                data-tutor-question-title={item?.title || `السؤال ${index + 1}`}
                 className="
                   bg-white px-4 py-5
                   sm:px-6
@@ -4838,6 +7462,12 @@ function GeneratedExamPaper({
                       {item?.text}
                     </MathText>
 
+                    <DocumentReferenceChips
+                      refs={item?.document_refs}
+                      documents={documents}
+                      className="mt-3"
+                    />
+
                     <VisualsBlock
                       value={item?.visuals}
                       className="mt-4"
@@ -4866,6 +7496,7 @@ function GeneratedExamPaper({
 function SolutionAction({
   record,
   loading = false,
+  cooldownSeconds = 0,
   showSolution,
   onClick,
 }) {
@@ -4908,7 +7539,7 @@ function SolutionAction({
       <button
         type="button"
         onClick={onClick}
-        disabled={loading}
+        disabled={loading || (!hasSolution && cooldownSeconds > 0)}
         className={cn(
           `
             inline-flex min-h-12
@@ -4945,7 +7576,9 @@ function SolutionAction({
             ? showSolution
               ? "إخفاء الحل"
               : "إظهار الحل"
-            : "إنشاء الحل"}
+            : cooldownSeconds > 0
+              ? `أعد المحاولة بعد ${cooldownSeconds} ث`
+              : "إنشاء الحل"}
       </button>
     </div>
   );
@@ -4961,6 +7594,8 @@ function GeneratedSolutionDocument({
     getSolutionPayload(record);
   const questions =
     getExerciseQuestions(record);
+  const documents =
+    getExerciseDocuments(record);
 
   const hasAnySolution =
     Object.keys(solution).length > 0 ||
@@ -5056,12 +7691,14 @@ function GeneratedSolutionDocument({
             (item, index) => (
               <QuestionSolution
                 key={item?.id ?? index}
+                recordId={record?.id}
                 number={index + 1}
                 question={item}
                 solution={getQuestionSolution(
                   record,
                   item,
                 )}
+                documents={documents}
                 reExplanations={
                   asArray(
                     record?.re_explanations,
@@ -5100,9 +7737,11 @@ function GeneratedSolutionDocument({
 }
 
 function QuestionSolution({
+  recordId,
   number,
   question,
   solution,
+  documents = [],
   reExplanations = [],
   reExplainLoading = false,
   reExplainError = "",
@@ -5146,6 +7785,12 @@ function QuestionSolution({
 
   return (
     <section
+      data-tutor-context
+      data-tutor-exercise-kind="generated_bac_exercise"
+      data-tutor-exercise-id={recordId ?? ""}
+      data-tutor-question-id={question?.id ?? question?.question_id ?? number}
+      data-tutor-question-number={question?.number ?? question?.display_order ?? number}
+      data-tutor-question-title={question?.title || `السؤال ${number}`}
       className="
         border-b border-slate-200
         pb-8 last:border-b-0
@@ -5207,10 +7852,25 @@ function QuestionSolution({
         </div>
       )}
 
+      <DocumentReferenceChips
+        refs={solution?.document_refs}
+        documents={documents}
+        className="mt-5"
+      />
+
+      <DocumentAssetsBlock documents={solution?.documents} />
       <VisualsBlock
         value={solution?.visuals}
         className="mt-5"
       />
+
+      {solution?.visual_required && solution?.visual_missing && (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-bold leading-7 text-amber-900">
+            هذا السؤال يحتاج تمثيلًا بصريًا، لكن النموذج لم يرجع بيانات الرسم. أعد توليد الحل إذا أردت الرسم الكامل.
+          </p>
+        </div>
+      )}
 
       {steps.length > 0 && (
         <div className="mt-6 space-y-5">
@@ -5219,6 +7879,15 @@ function QuestionSolution({
               key={
                 step?.step_number ?? index
               }
+              data-tutor-context
+              data-tutor-exercise-kind="generated_bac_exercise"
+              data-tutor-exercise-id={recordId ?? ""}
+              data-tutor-question-id={question?.id ?? question?.question_id ?? number}
+              data-tutor-question-number={question?.number ?? question?.display_order ?? number}
+              data-tutor-step-id={step?.id ?? step?.step_id ?? step?.step_number ?? index + 1}
+              data-tutor-step-number={step?.step_number ?? step?.number ?? index + 1}
+              data-tutor-step-title={step?.title || `الخطوة ${index + 1}`}
+              data-tutor-step-type="generated_bac_solution_step"
               className="
                 rounded-xl border
                 border-slate-200
@@ -5282,6 +7951,12 @@ function QuestionSolution({
                     value={
                       step?.graph_data
                     }
+                    className="mt-4"
+                  />
+
+                  <DocumentReferenceChips
+                    refs={step?.document_refs}
+                    documents={documents}
                     className="mt-4"
                   />
 
@@ -5580,6 +8255,7 @@ function SolutionReExplanationCard({
           </div>
         )}
 
+        <DocumentAssetsBlock documents={data?.documents} />
         <VisualsBlock value={data?.visuals} />
 
         {steps.length > 0 && (
@@ -5868,6 +8544,7 @@ function VerificationItem({
 function FirstExerciseState({
   creating,
   disabled,
+  cooldownSeconds = 0,
   onGenerate,
 }) {
   return (
@@ -5935,6 +8612,11 @@ function FirstExerciseState({
               className="animate-spin"
             />
             جارٍ الإنشاء...
+          </>
+        ) : cooldownSeconds > 0 ? (
+          <>
+            <Clock3 size={20} />
+            أعد المحاولة بعد {cooldownSeconds} ث
           </>
         ) : (
           <>
@@ -6044,5 +8726,66 @@ function GeneratedLoadingState() {
         </p>
       </div>
     </div>
+  );
+}
+
+
+
+function ComplexPlaneVisual({ visual }) {
+  const points = asArray(visual?.points);
+  const circles = asArray(visual?.circles);
+  const segments = asArray(visual?.segments);
+  const byId = new Map(points.map(p => [p.id, p]));
+  const xs = [0, ...points.map(p => Number(p.x)), ...circles.flatMap(c => [c.x-c.radius,c.x+c.radius])];
+  const ys = [0, ...points.map(p => Number(p.y)), ...circles.flatMap(c => [c.y-c.radius,c.y+c.radius])];
+  const xmin = Math.min(...xs), xmax = Math.max(...xs);
+  const ymin = Math.min(...ys), ymax = Math.max(...ys);
+  const span = Math.max(xmax-xmin, ymax-ymin, 2)*1.3;
+  const cx = (xmin+xmax)/2, cy = (ymin+ymax)/2;
+  const scale = 440/span;
+  const X = x => 260+(x-cx)*scale, Y = y => 260-(y-cy)*scale;
+  const step = Math.max(1, Math.ceil(span/16));
+  const ticks = [];
+  for(let n=Math.floor(Math.min(cx,cy)-span/2);n<=Math.max(cx,cy)+span/2;n++) {
+    if(n%step===0) ticks.push(n);
+  }
+  return <figure className="rounded-2xl border bg-white p-3" dir="ltr">
+    <figcaption className="text-center font-bold" dir="rtl">{visual.title || "المستوى المركب"}</figcaption>
+    <svg viewBox="0 0 520 520" role="img" aria-label={visual.title || "المستوى المركب"}
+      style={{width:"100%",maxWidth:620,display:"block",margin:"auto"}}>
+      {ticks.map(n=><g key={n} stroke="#e2e8f0">
+        {X(n)>=20 && X(n)<=500 && <line x1={X(n)} y1={20} x2={X(n)} y2={500}/>}
+        {Y(n)>=20 && Y(n)<=500 && <line x1={20} y1={Y(n)} x2={500} y2={Y(n)}/>}</g>)}
+      <path d={`M20 ${Y(0)} H500 M${X(0)} 20 V500`} stroke="#334155" fill="none"/>
+      <text x={492} y={Y(0)-8} fontSize={13}>Re</text><text x={X(0)+8} y={25} fontSize={13}>Im</text>
+      {ticks.filter(n=>n!==0).map(n=><g key={n} fontSize={11} fill="#64748b">
+        {X(n)>25 && X(n)<490 && <text x={X(n)} y={Y(0)+15}>{n}</text>}
+        {Y(n)>30 && Y(n)<490 && <text x={X(0)+5} y={Y(n)-3}>{n}</text>}</g>)}
+      {circles.map((c,i)=><circle key={i} cx={X(c.x)} cy={Y(c.y)} r={c.radius*scale} fill="none" stroke="#2563eb" strokeWidth={2}/>)}
+      {segments.map((s,i)=> {const a=byId.get(s.from), b=byId.get(s.to);return a&&b?<line key={i} x1={X(a.x)} y1={Y(a.y)} x2={X(b.x)} y2={Y(b.y)} stroke="#2563eb" strokeWidth={2}/>:null;})}
+      {points.map(p=><g key={p.id}><circle cx={X(p.x)} cy={Y(p.y)} r={4} fill="#dc2626"/>
+        <text x={X(p.x)+7} y={Y(p.y)-8} fontSize={15} fill="#0f172a">{p.label || p.id}</text></g>)}
+    </svg>
+  </figure>;
+}
+
+
+
+function ServerMathVisual({ visual }) {
+  const source = useMemo(() => {
+    if (typeof visual.svg !== "string" || !visual.svg.startsWith("<svg ")) return "";
+    // SVG is an image resource, not injected HTML. Browser image context disables scripts.
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(visual.svg);
+  }, [visual.svg]);
+  if (!source) return <p role="alert">تعذر عرض الرسم.</p>;
+  const isTable = visual.type === "variation_table";
+  return (
+    <figure dir="ltr" className="my-4 rounded-xl border border-slate-200 bg-white p-3">
+      {visual.title && <figcaption dir="rtl" className="mb-3 text-center font-semibold">{visual.title}</figcaption>}
+      <div style={{overflowX: "auto", WebkitOverflowScrolling: "touch"}}>
+        <img src={source} alt={visual.title || "رسم رياضي"}
+          style={{display: "block", margin: "0 auto", width: "100%", minWidth: isTable ? 720 : 520, height: "auto"}} />
+      </div>
+    </figure>
   );
 }

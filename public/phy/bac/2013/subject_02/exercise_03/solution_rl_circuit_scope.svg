@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 540" role="img" aria-label="دارة RL وكيفية ربط راسم الاهتزاز لقياس uR">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrRL13" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+  </marker>
+</defs>
+<!-- source -->
+<circle cx="175" cy="260" r="55" fill="white" stroke="#111827" stroke-width="4"/>
+<line x1="175" y1="110" x2="175" y2="205" stroke="#111827" stroke-width="4"/>
+<line x1="175" y1="315" x2="175" y2="420" stroke="#111827" stroke-width="4"/>
+<text x="105" y="270" font-size="30" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">E</text>
+<line x1="105" y1="325" x2="105" y2="205" stroke="#2563eb" stroke-width="3" marker-end="url(#arrRL13)"/>
+
+<!-- switch top -->
+<path d="M175 110 H340" stroke="#111827" stroke-width="4"/>
+<circle cx="340" cy="110" r="7" fill="#111827"/>
+<circle cx="395" cy="110" r="7" fill="#111827"/>
+<line x1="340" y1="110" x2="388" y2="78" stroke="#111827" stroke-width="4"/>
+<text x="356" y="62" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">K</text>
+<path d="M395 110 H650 V180" stroke="#111827" stroke-width="4" fill="none"/>
+
+<!-- real inductor vertical -->
+<path d="M650 180
+ c-38 18 -38 36 0 54
+ c38 18 38 36 0 54
+ c-38 18 -38 36 0 54" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="700" y="265" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">(L,r)</text>
+
+<!-- node Y and resistor -->
+<circle cx="650" cy="342" r="7" fill="#111827"/>
+<line x1="650" y1="342" x2="790" y2="342" stroke="#2563eb" stroke-width="2.5"/>
+<text x="805" y="350" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">Y</text>
+<rect x="617" y="360" width="66" height="100" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="710" y="418" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">R</text>
+<path d="M650 460 H175 V420" stroke="#111827" stroke-width="4" fill="none"/>
+
+<!-- scope ground at bottom -->
+<circle cx="650" cy="460" r="6" fill="#2563eb"/>
+<line x1="650" y1="460" x2="650" y2="495" stroke="#2563eb" stroke-width="2.5"/>
+<line x1="620" y1="495" x2="680" y2="495" stroke="#2563eb" stroke-width="3"/>
+<line x1="630" y1="508" x2="670" y2="508" stroke="#2563eb" stroke-width="3"/>
+<line x1="640" y1="521" x2="660" y2="521" stroke="#2563eb" stroke-width="3"/>
+
+<!-- voltage arrows -->
+<line x1="760" y1="335" x2="760" y2="180" stroke="#2563eb" stroke-width="3" marker-end="url(#arrRL13)"/>
+<text x="790" y="270" font-size="22" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">ub</text>
+<line x1="760" y1="460" x2="760" y2="360" stroke="#2563eb" stroke-width="3" marker-end="url(#arrRL13)"/>
+<text x="790" y="415" font-size="22" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">uR</text>
+
+</svg>

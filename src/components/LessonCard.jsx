@@ -4,19 +4,25 @@ import axios from "axios";
 import StepTabs from "./StepTabs";
 
 import IntroStep from "./IntroStep";
+// import IntroStep from "./module/CivilEngineeringLesson";
+// import IntroStep from "./module/ScienceLesson";
 import ScienceLesson from "./module/ScienceLesson";
+
 import HistoryStoryLesson from "./module/HistoryStoryLesson";
 import IslamicLesson from "./module/IslamicLesson";
 
 import QuestionBac from "./QuestionBac";
 import GeneratedAIExercises from "./Questions/Generate_question";
 import BacChapterExercises from "./Questions/BacChapterExercises";
+
+import BacIslamic from "./Questions/BacIslamic";
 import GeneratedBacExercisesPage from "./Questions/GeneratedBacExercisesPage";
 
-import AxisRevisionPage from "./Course/AxisRevisionPage";
+import AxisRevisionPage from "./module/AdaptiveAssessment";
 
 import { lessonSteps } from "../data/lessonData";
 import { UserContext } from "../Utils/UserContext";
+import { useTutorPageContext } from "../Utils/TutorPageContext";
 
 import {
   useLocation,
@@ -160,6 +166,17 @@ export default function LessonCard() {
 
   const location = useLocation();
 
+  const {
+    setAxisContext,
+    setSectionContext,
+    setExerciseContext,
+    setQuestionContext,
+    setStepContext,
+    setViewState,
+    capturePointerContext,
+    captureSelectionContext,
+  } = useTutorPageContext();
+
 
   // =====================================================
   // Nom matière envoyé avec navigate()
@@ -168,9 +185,18 @@ export default function LessonCard() {
   const courseName =
     location.state?.courseName || "";
 
+  // اسم المادة قد يضيع عند تحديث الصفحة لأن location.state غير دائم.
+  // لذلك نحاول أيضا قراءته من بيانات المحور/الدرس إن كانت موجودة.
+  const resolvedCourseName =
+    courseName ||
+    current_axis?.course_name ||
+    current_axis?.course?.name ||
+    current_axis?.chapter?.course?.name ||
+    "";
+
   console.log(
     "Course name :",
-    courseName
+    resolvedCourseName
   );
 
 
@@ -235,6 +261,44 @@ export default function LessonCard() {
   )
     ? questionBac.questions
     : [];
+
+
+  // =====================================================
+  // Synchroniser le contexte du tuteur
+  // =====================================================
+
+  useEffect(() => {
+    setAxisContext(
+      current_axis
+        ? {
+            id: current_axis.id,
+            tag: current_axis.tag || "",
+            title: current_axis.title || "",
+          }
+        : null
+    );
+  }, [
+    axisId,
+    axisTag,
+    current_axis?.title,
+    setAxisContext,
+  ]);
+
+  useEffect(() => {
+    const sectionTitles = {
+      intro: "الشرح",
+      resume: "مراجعة المحور",
+      question_bac: "تمارين البكالوريا",
+      question_generate: "تمارين مولدة بالذكاء الاصطناعي",
+      bac: "تمارين بكالوريا الفصل",
+      "generete-bac": "تمارين شبيهة بالبكالوريا",
+    };
+
+    setSectionContext({
+      id: activeId || "",
+      title: sectionTitles[activeId] || "",
+    });
+  }, [activeId, setSectionContext]);
 
 
   // =====================================================
@@ -709,7 +773,7 @@ export default function LessonCard() {
 
     if (
       isScienceCourse(
-        courseName
+        resolvedCourseName
       )
     ) {
       return (
@@ -730,7 +794,7 @@ export default function LessonCard() {
 
     if (
       isIslamicCourse(
-        courseName
+        resolvedCourseName
       )
     ) {
       return (
@@ -751,7 +815,7 @@ export default function LessonCard() {
 
     if (
       isHistoryCourse(
-        courseName
+        resolvedCourseName
       )
     ) {
       return (
@@ -849,6 +913,18 @@ export default function LessonCard() {
       return (
         <AxisRevisionPage
           axisId={axisId}
+          onTutorExerciseChange={
+            setExerciseContext
+          }
+          onTutorQuestionChange={
+            setQuestionContext
+          }
+          onTutorStepChange={
+            setStepContext
+          }
+          onTutorViewStateChange={
+            setViewState
+          }
         />
       );
     }
@@ -900,6 +976,18 @@ export default function LessonCard() {
           data={
             questionBac
           }
+          onTutorExerciseChange={
+            setExerciseContext
+          }
+          onTutorQuestionChange={
+            setQuestionContext
+          }
+          onTutorStepChange={
+            setStepContext
+          }
+          onTutorViewStateChange={
+            setViewState
+          }
         />
       );
     }
@@ -917,6 +1005,18 @@ export default function LessonCard() {
         <GeneratedAIExercises
           axisId={axisId}
           data={cour}
+          onTutorExerciseChange={
+            setExerciseContext
+          }
+          onTutorQuestionChange={
+            setQuestionContext
+          }
+          onTutorStepChange={
+            setStepContext
+          }
+          onTutorViewStateChange={
+            setViewState
+          }
         />
       );
     }
@@ -929,10 +1029,56 @@ export default function LessonCard() {
     if (
       activeId === "bac"
     ) {
+      // =================================================
+      // العلوم الإسلامية + التاريخ:
+      // عرض نصي مخصص للبكالوريا.
+      // باقي المواد:
+      // نبقي BacChapterExercises كما هو.
+      // =================================================
+
+      const useTextualBac =
+        isIslamicCourse(resolvedCourseName) ||
+        isHistoryCourse(resolvedCourseName);
+
+      if (useTextualBac) {
+        return (
+          <BacIslamic
+            key={`textual-bac-${id_chapter}-${resolvedCourseName}`}
+            chapterId={id_chapter}
+            courseName={resolvedCourseName}
+            onTutorExerciseChange={
+              setExerciseContext
+            }
+            onTutorQuestionChange={
+              setQuestionContext
+            }
+            onTutorStepChange={
+              setStepContext
+            }
+            onTutorViewStateChange={
+              setViewState
+            }
+          />
+        );
+      }
+
       return (
         <BacChapterExercises
+          key={`bac-chapter-${id_chapter}`}
           chapterId={
             id_chapter
+          }
+          onTutorExerciseChange={
+            setExerciseContext
+          }
+          onTutorQuestionChange={
+            setQuestionContext
+          }
+          onTutorStepChange={
+            setStepContext
+          }
+          onTutorViewStateChange={
+            setViewState
           }
         />
       );
@@ -955,6 +1101,18 @@ export default function LessonCard() {
           branchCode={
             user?.branch?.code
           }
+          onTutorExerciseChange={
+            setExerciseContext
+          }
+          onTutorQuestionChange={
+            setQuestionContext
+          }
+          onTutorStepChange={
+            setStepContext
+          }
+          onTutorViewStateChange={
+            setViewState
+          }
         />
       );
     }
@@ -971,6 +1129,9 @@ export default function LessonCard() {
   return (
     <div
       dir="rtl"
+      onPointerDownCapture={capturePointerContext}
+      onMouseUpCapture={captureSelectionContext}
+      onKeyUpCapture={captureSelectionContext}
       className="
         overflow-hidden
         rounded-3xl
@@ -980,7 +1141,7 @@ export default function LessonCard() {
         shadow-card
       "
     >
-      {activeId !== "bac" ? (
+      {activeId !== "bac" && activeId !== "generete-bac" && !(isIslamicCourse(resolvedCourseName) || isHistoryCourse(resolvedCourseName))  ? (
         <StepTabs
           steps={
             lessonSteps

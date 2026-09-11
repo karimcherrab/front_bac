@@ -271,7 +271,7 @@ function SectionHeader({
         </h2>
 
         {description && (
-          <p className="mt-1 max-w-3xl text-sm font-semibold leading-7 text-slate-500">
+          <p className="mt-2 max-w-5xl whitespace-normal break-words text-sm font-semibold leading-8 text-slate-600">
             {description}
           </p>
         )}
@@ -1634,12 +1634,22 @@ function DiscoveryQuestionStep({
   content = {},
   onNext,
 }) {
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    setRevealed(false);
+  }, [content]);
+
   const question =
     content.question ||
     content.central_question ||
     content.problem ||
-    content.teacher ||
     "ما الظاهرة التي سنحاول تفسيرها؟";
+
+  const teacher =
+    content.teacher ||
+    content.hint ||
+    "فكر في المعطيات التي تعرفها، ثم اكشف الفكرة عندما تكون جاهزًا.";
 
   return (
     <div className="space-y-5">
@@ -1647,49 +1657,67 @@ function DiscoveryQuestionStep({
         <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-emerald-100 blur-3xl" />
         <div className="absolute -bottom-20 -left-16 h-52 w-52 rounded-full bg-cyan-100 blur-3xl" />
 
-        <div className="relative">
-          <SectionHeader
-            eyebrow="ابدأ بالسؤال"
-            title="لاحظ قبل أن تحفظ"
-            description="في العلوم نبدأ بالمشكلة أو الظاهرة، ثم نبني التفسير."
-            icon={CircleHelp}
-            tone="emerald"
-          />
+        <div className="relative mx-auto max-w-4xl">
+          <div className="mb-5 flex items-center justify-between gap-3">
+            <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-800 ring-1 ring-emerald-100">
+              <Eye size={15} />
+              فكر أولًا
+            </span>
+            <span className="text-[11px] font-bold text-slate-400">
+              لا تحتاج إلى الحفظ الآن
+            </span>
+          </div>
 
-          <div className="mx-auto max-w-3xl rounded-[26px] bg-gradient-to-l from-slate-950 via-emerald-950 to-teal-950 px-5 py-7 text-center text-white shadow-xl sm:px-8">
-            <CircleHelp
-              className="mx-auto mb-4 text-emerald-300"
-              size={36}
-            />
-
+          <div className="rounded-[28px] bg-gradient-to-l from-slate-950 via-emerald-950 to-teal-950 px-5 py-7 text-center text-white shadow-xl sm:px-8 sm:py-9">
+            <CircleHelp className="mx-auto mb-4 text-emerald-300" size={38} />
             <p className="text-lg font-black leading-9 sm:text-2xl sm:leading-10">
               {question}
             </p>
           </div>
 
-          {content.teacher && content.teacher !== question && (
-            <p className="mx-auto mt-5 max-w-3xl text-center text-sm font-semibold leading-8 text-slate-600">
-              {content.teacher}
-            </p>
-          )}
-
-          {content.visual_hint && (
-            <div className="mt-6">
-              <CellScene
-                highlighted={["nucleus"]}
-                compact
-              />
+          {!revealed ? (
+            <div className="mt-5 rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/60 p-4 text-center">
+              <p className="text-sm font-bold leading-7 text-slate-600">
+                حاول أن تعطي تفسيرًا في ذهنك، حتى لو لم تكن متأكدًا.
+              </p>
+              <button
+                type="button"
+                onClick={() => setRevealed(true)}
+                className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-2xl bg-white px-5 text-sm font-black text-emerald-800 shadow-sm ring-1 ring-emerald-200 transition hover:-translate-y-0.5"
+              >
+                <Lightbulb size={17} />
+                اكشف الفكرة
+              </button>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-[24px] border border-cyan-100 bg-gradient-to-l from-cyan-50 to-white p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-cyan-600 text-white">
+                  <Brain size={19} />
+                </span>
+                <div>
+                  <p className="text-xs font-black text-cyan-700">الفكرة التي نبحث عنها</p>
+                  <p className="mt-1 text-sm font-bold leading-8 text-slate-700 sm:text-base">
+                    {teacher}
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
-          {content.action?.label && onNext && (
+          {content.visual_hint && revealed && (
+            <div className="mt-6">
+              <CellScene highlighted={["nucleus"]} compact />
+            </div>
+          )}
+
+          {revealed && content.action?.label && onNext && (
             <div className="mt-6 flex justify-center">
               <button
                 type="button"
                 onClick={onNext}
                 className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-gradient-to-l from-emerald-600 to-teal-600 px-6 font-black text-white shadow-lg shadow-emerald-500/20 transition hover:-translate-y-0.5"
               >
-                <Sparkles size={18} />
                 {content.action.label}
                 <ArrowLeft size={18} />
               </button>
@@ -1916,8 +1944,20 @@ function ScientificAnimationStep({
               level={Number(currentFrame.level ?? 1)}
               badge={currentFrame.badge || ""}
             />
-          ) : (
+          ) : content.scene === "cell" ? (
             <CellScene highlighted={highlighted} />
+          ) : (
+            <div className="flex min-h-[390px] items-center justify-center rounded-[30px] border border-amber-200 bg-amber-50 p-6 text-center" dir="rtl">
+              <div className="max-w-lg">
+                <AlertTriangle className="mx-auto text-amber-600" size={30} />
+                <h3 className="mt-3 text-base font-black text-slate-950">
+                  لا يوجد مشهد علمي مخصص لهذا النوع
+                </h3>
+                <p className="mt-2 text-sm font-bold leading-7 text-slate-600">
+                  لن نعرض رسما عاما للخلية لأنه قد يكون غير مرتبط بالظاهرة. استخدم وثيقة علمية أو scene مخصصا.
+                </p>
+              </div>
+            </div>
           )}
 
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
@@ -2019,7 +2059,7 @@ function ScientificAnimationStep({
                     {index + 1}
                   </span>
 
-                  <span className="truncate text-sm font-black">
+                  <span className="min-w-0 whitespace-normal break-words text-sm font-black leading-6">
                     {frame.title || `المرحلة ${index + 1}`}
                   </span>
                 </button>
@@ -2041,6 +2081,358 @@ function ScientificAnimationStep({
     </div>
   );
 }
+
+
+/* =========================================================
+   Scientific storyboard — transcription-aware
+   Renders structured JSON instead of falling back to GenericScienceStep.
+========================================================= */
+
+function TranscriptionMiniScene({ state = "", focus = [] }) {
+  const focusSet = new Set(Array.isArray(focus) ? focus : []);
+  const is = (value) => focusSet.has(value);
+
+  const states = {
+    polymerase_binding_and_local_opening: 1,
+    template_identification: 2,
+    rna_nucleotide_pairing: 3,
+    elongation: 4,
+    directionality: 5,
+    termination: 6,
+  };
+
+  const stage = states[state] || 1;
+  const showBubble = stage >= 1 && stage < 6;
+  const showRna = stage >= 3;
+  const longRna = stage >= 4;
+  const terminated = stage >= 6;
+
+  return (
+    <div
+      className="relative min-h-[390px] overflow-hidden rounded-[30px] border border-sky-100 bg-gradient-to-br from-white via-sky-50/70 to-emerald-50/60 p-4 shadow-inner sm:min-h-[440px] sm:p-6"
+      dir="ltr"
+    >
+      <div className="absolute inset-x-5 top-5 flex items-center justify-between gap-3" dir="rtl">
+        <span className="rounded-full border border-sky-200 bg-white/95 px-4 py-2 text-xs font-black text-sky-800 shadow-sm">
+          تمثيل مبسّط لمنطقة الاستنساخ
+        </span>
+        <span className="rounded-full bg-slate-950 px-3 py-1.5 text-[11px] font-black text-white">
+          المرحلة {stage}
+        </span>
+      </div>
+
+      <div className="relative mx-auto mt-20 h-[285px] max-w-4xl">
+        <div className="absolute left-[6%] right-[6%] top-[38%] h-1 rounded-full bg-sky-700" />
+        <div className="absolute left-[6%] right-[6%] top-[62%] h-1 rounded-full bg-indigo-700" />
+
+        {showBubble && (
+          <div className="absolute left-1/2 top-1/2 h-[190px] w-[46%] min-w-[300px] -translate-x-1/2 -translate-y-1/2 rounded-[48%] border-2 border-dashed border-sky-300 bg-white/75 shadow-sm" />
+        )}
+
+        {showBubble && (
+          <>
+            <div className="absolute left-[28%] top-[38%] h-1 w-[18%] origin-left -rotate-[18deg] rounded-full bg-sky-700" />
+            <div className="absolute right-[28%] top-[38%] h-1 w-[18%] origin-right rotate-[18deg] rounded-full bg-sky-700" />
+            <div className="absolute left-[28%] top-[62%] h-1 w-[18%] origin-left rotate-[18deg] rounded-full bg-indigo-700" />
+            <div className="absolute right-[28%] top-[62%] h-1 w-[18%] origin-right -rotate-[18deg] rounded-full bg-indigo-700" />
+          </>
+        )}
+
+        {!terminated && (
+          <div
+            className={cn(
+              "absolute left-1/2 top-1/2 flex h-28 w-36 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-[42%] border-4 border-white bg-amber-500 text-center text-sm font-black text-white shadow-xl transition-all duration-500",
+              (is("ARN بوليميراز") || is("ARN بوليميراز")) && "ring-8 ring-amber-100",
+            )}
+            dir="rtl"
+          >
+            ARN
+            <br />
+            بوليميراز
+          </div>
+        )}
+
+        <div className="absolute left-[8%] top-[25%] text-xs font-black text-sky-700">5′</div>
+        <div className="absolute right-[8%] top-[25%] text-xs font-black text-sky-700">3′</div>
+        <div className="absolute left-[8%] top-[69%] text-xs font-black text-indigo-700">3′</div>
+        <div className="absolute right-[8%] top-[69%] text-xs font-black text-indigo-700">5′</div>
+
+        <div
+          className={cn(
+            "absolute left-[7%] top-[73%] rounded-xl bg-white px-3 py-1.5 text-xs font-black text-indigo-800 shadow-sm ring-1 ring-indigo-100",
+            is("السلسلة المستنسخة") && "ring-4 ring-indigo-200",
+          )}
+          dir="rtl"
+        >
+          السلسلة المستنسخة
+        </div>
+
+        <div
+          className={cn(
+            "absolute left-[7%] top-[13%] rounded-xl bg-white px-3 py-1.5 text-xs font-black text-sky-800 shadow-sm ring-1 ring-sky-100",
+            is("السلسلة غير المستنسخة") && "ring-4 ring-sky-200",
+          )}
+          dir="rtl"
+        >
+          السلسلة غير المستنسخة
+        </div>
+
+        {showRna && (
+          <div
+            className={cn(
+              "absolute left-1/2 top-[55%] h-2 -translate-x-1/2 rounded-full bg-rose-500 shadow transition-all duration-700",
+              longRna ? "w-[42%]" : "w-[22%]",
+              is("ARNm") || is("ARNm النامي") ? "ring-8 ring-rose-100" : "",
+            )}
+          >
+            <span className="absolute -left-1 -top-8 rounded-lg bg-rose-50 px-2 py-1 text-xs font-black text-rose-700" dir="rtl">
+              ARNm 5′
+            </span>
+            <span className="absolute -right-1 -top-8 rounded-lg bg-rose-50 px-2 py-1 text-xs font-black text-rose-700">
+              3′
+            </span>
+          </div>
+        )}
+
+        {stage === 3 && (
+          <div className="absolute left-1/2 top-[78%] flex -translate-x-1/2 gap-2">
+            {["A", "U", "C", "G"].map((base) => (
+              <span key={base} className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-200 bg-white text-sm font-black text-violet-700 shadow-sm">
+                {base}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {stage === 5 && (
+          <>
+            <div className="absolute left-[29%] top-[82%] rounded-xl bg-indigo-50 px-3 py-2 text-xs font-black text-indigo-800" dir="rtl">
+              قراءة القالب: 3′ → 5′
+            </div>
+            <div className="absolute right-[27%] top-[82%] rounded-xl bg-rose-50 px-3 py-2 text-xs font-black text-rose-800" dir="rtl">
+              تركيب ARNm: 5′ → 3′
+            </div>
+          </>
+        )}
+
+        {terminated && (
+          <>
+            <div className="absolute left-1/2 top-[30%] -translate-x-1/2 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-black text-emerald-900 shadow-sm" dir="rtl">
+              عاد ADN إلى الازدواج
+            </div>
+            <div className="absolute left-1/2 top-[72%] h-2 w-[48%] -translate-x-1/2 rounded-full bg-rose-500 shadow">
+              <span className="absolute left-1/2 top-5 -translate-x-1/2 whitespace-nowrap rounded-xl bg-white px-3 py-2 text-xs font-black text-rose-700 shadow-sm" dir="rtl">
+                تحررت جزيئة ARNm
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScientificStoryboardStep({ content = {} }) {
+  const frames = Array.isArray(content.frames) ? content.frames.filter(Boolean) : [];
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    setFrameIndex(0);
+    setPlaying(false);
+  }, [content]);
+
+  useEffect(() => {
+    if (!playing || frames.length <= 1) return undefined;
+
+    const timer = window.setInterval(() => {
+      setFrameIndex((current) => {
+        if (current >= frames.length - 1) {
+          setPlaying(false);
+          return current;
+        }
+        return current + 1;
+      });
+    }, 2200);
+
+    return () => window.clearInterval(timer);
+  }, [playing, frames.length]);
+
+  const currentFrame = frames[frameIndex] || {};
+  const visual = currentFrame.visual || {};
+  const focus = Array.isArray(visual.focus) ? visual.focus : [];
+
+  const goPrevious = () => {
+    setPlaying(false);
+    setFrameIndex((value) => Math.max(0, value - 1));
+  };
+
+  const goNext = () => {
+    setPlaying(false);
+    setFrameIndex((value) => Math.min(frames.length - 1, value + 1));
+  };
+
+  const restart = () => {
+    setPlaying(false);
+    setFrameIndex(0);
+  };
+
+  if (frames.length === 0) {
+    return (
+      <InfoCard title="لا توجد مراحل للعرض" tone="amber" icon={AlertTriangle}>
+        أضف مصفوفة frames إلى محتوى ScientificStoryboard.
+      </InfoCard>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow="مشاهدة جزيئية"
+        title={content.title || "شاهد الاستنساخ خطوة بخطوة"}
+        description={
+          content.instruction ||
+          "تابع ما يحدث على مستوى المورثة نفسها، ثم انتقل بين المراحل."
+        }
+        icon={Play}
+        tone="sky"
+      />
+
+      <div className="overflow-hidden rounded-[32px] border border-sky-100 bg-white shadow-sm">
+        <div className="border-b border-sky-100 bg-gradient-to-l from-sky-50 via-white to-emerald-50 px-4 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-600 font-black text-white shadow-lg shadow-sky-500/20">
+                {frameIndex + 1}
+              </span>
+              <div>
+                <p className="text-[11px] font-black text-sky-700">
+                  المرحلة {frameIndex + 1} من {frames.length}
+                </p>
+                <h3 className="mt-0.5 text-lg font-black text-slate-950 sm:text-xl">
+                  {currentFrame.title || `المرحلة ${frameIndex + 1}`}
+                </h3>
+              </div>
+            </div>
+
+            <div className="flex gap-1.5">
+              {frames.map((_, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() => {
+                    setPlaying(false);
+                    setFrameIndex(index);
+                  }}
+                  className={cn(
+                    "h-2.5 rounded-full transition-all",
+                    index === frameIndex
+                      ? "w-9 bg-sky-600"
+                      : index < frameIndex
+                        ? "w-4 bg-emerald-400"
+                        : "w-4 bg-slate-200",
+                  )}
+                  aria-label={`المرحلة ${index + 1}`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-0 lg:grid-cols-[1.45fr_.55fr]">
+          <div className="p-4 sm:p-6">
+            <TranscriptionMiniScene
+              state={visual.state}
+              focus={focus}
+            />
+          </div>
+
+          <aside className="border-t border-slate-100 bg-slate-50/70 p-5 lg:border-r lg:border-t-0 sm:p-6" dir="rtl">
+            <p className="text-[11px] font-black text-sky-700">
+              ماذا يحدث الآن؟
+            </p>
+
+            <p className="mt-2 text-base font-bold leading-9 text-slate-800">
+              {currentFrame.description}
+            </p>
+
+            {focus.length > 0 && (
+              <div className="mt-6">
+                <p className="mb-3 text-xs font-black text-slate-500">
+                  ركّز على
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {focus.map((item, index) => (
+                    <span
+                      key={`${item}-${index}`}
+                      className="rounded-full border border-sky-100 bg-white px-3 py-1.5 text-xs font-black text-sky-800 shadow-sm"
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-7 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+              <p className="text-xs font-black text-emerald-700">فكرة المرحلة</p>
+              <p className="mt-1 text-sm font-bold leading-7 text-slate-700">
+                لا تحفظ الرسم؛ لاحظ العنصر الذي يتغير من مرحلة إلى أخرى.
+              </p>
+            </div>
+          </aside>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-100 bg-white px-4 py-4">
+          <button
+            type="button"
+            onClick={goPrevious}
+            disabled={frameIndex === 0}
+            className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <ArrowRight size={17} />
+            السابق
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPlaying((value) => !value)}
+            className="inline-flex h-11 min-w-[125px] items-center justify-center gap-2 rounded-xl bg-sky-600 px-5 text-sm font-black text-white shadow-lg shadow-sky-500/20 transition hover:bg-sky-700"
+          >
+            {playing ? <Pause size={17} /> : <Play size={17} />}
+            {playing ? "إيقاف" : "تشغيل"}
+          </button>
+
+          <button
+            type="button"
+            onClick={goNext}
+            disabled={frameIndex >= frames.length - 1}
+            className="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            التالي
+            <ArrowLeft size={17} />
+          </button>
+
+          <button
+            type="button"
+            onClick={restart}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 transition hover:bg-slate-100"
+            title="إعادة من البداية"
+          >
+            <RotateCcw size={17} />
+          </button>
+        </div>
+      </div>
+
+      {content.takeaway && (
+        <InfoCard title="ما يجب أن تتذكره" tone="emerald" icon={CheckCircle2}>
+          {content.takeaway}
+        </InfoCard>
+      )}
+    </div>
+  );
+}
+
 
 /* =========================================================
    3. Short explanation
@@ -2132,22 +2524,169 @@ function ShortExplanationStep({
    4. Interactive diagram
 ========================================================= */
 
+
+function CodonProbabilityScene({
+  cards = [],
+  activeIndex = 0,
+  onSelect,
+}) {
+  const current = cards[activeIndex] || cards[0] || {};
+
+  return (
+    <div className="space-y-5" dir="rtl">
+      <div className="overflow-hidden rounded-[30px] border border-emerald-100 bg-gradient-to-br from-white via-emerald-50/60 to-cyan-50/60 p-5 shadow-inner sm:p-7">
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="text-xs font-black tracking-wide text-emerald-700">
+            لدينا 4 قواعد فقط
+          </p>
+
+          <div
+            className="mt-4 flex flex-wrap items-center justify-center gap-3"
+            dir="ltr"
+          >
+            {["A", "U", "C", "G"].map((base) => (
+              <span
+                key={base}
+                className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-white bg-emerald-600 text-xl font-black text-white shadow-lg sm:h-16 sm:w-16"
+              >
+                {base}
+              </span>
+            ))}
+          </div>
+
+          <p className="mt-5 text-sm font-bold leading-7 text-slate-600">
+            كم كلمة مختلفة نستطيع تكوينها إذا كانت الكلمة من قاعدة واحدة،
+            قاعدتين، أو ثلاث قواعد؟
+          </p>
+        </div>
+
+        <div className="mt-7 grid gap-4 md:grid-cols-3">
+          {cards.map((card, index) => {
+            const selected = index === activeIndex;
+            const success = String(card.formula || "").includes("4³");
+
+            return (
+              <button
+                key={`${card.label || "card"}-${index}`}
+                type="button"
+                onClick={() => onSelect?.(index)}
+                className={cn(
+                  "group relative rounded-[24px] border p-5 text-right transition-all duration-300",
+                  selected
+                    ? "scale-[1.02] border-emerald-300 bg-white shadow-xl ring-4 ring-emerald-50"
+                    : "border-slate-200 bg-white/80 hover:-translate-y-1 hover:border-emerald-200 hover:shadow-lg",
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span
+                    className={cn(
+                      "flex h-10 w-10 items-center justify-center rounded-xl text-sm font-black",
+                      selected
+                        ? "bg-emerald-600 text-white"
+                        : "bg-slate-100 text-slate-500",
+                    )}
+                  >
+                    {index + 1}
+                  </span>
+
+                  {success && (
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-black text-emerald-800">
+                      يكفي ✅
+                    </span>
+                  )}
+                </div>
+
+                <h3 className="mt-4 text-lg font-black text-slate-950">
+                  {card.label || `الاحتمال ${index + 1}`}
+                </h3>
+
+                <div
+                  className={cn(
+                    "mt-4 rounded-2xl px-4 py-5 text-center font-mono text-3xl font-black",
+                    selected
+                      ? "bg-emerald-50 text-emerald-800"
+                      : "bg-slate-50 text-slate-700",
+                  )}
+                  dir="ltr"
+                >
+                  {card.formula || ""}
+                </div>
+
+                <p className="mt-4 text-sm font-black text-slate-800">
+                  {card.result || ""}
+                </p>
+
+                <p className="mt-2 text-xs font-semibold leading-6 text-slate-500">
+                  {card.explanation || ""}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+
+        {current && (
+          <div className="mt-6 rounded-[24px] border border-emerald-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-lg">
+                <Eye size={19} />
+              </span>
+              <div>
+                <p className="text-xs font-black text-emerald-700">
+                  ماذا نستنتج؟
+                </p>
+                <h3 className="mt-1 text-lg font-black text-slate-950">
+                  {current.formula} ← {current.result}
+                </h3>
+                <p className="mt-2 text-sm font-semibold leading-7 text-slate-600">
+                  {current.explanation}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white">
+          <span>4¹ = 4</span>
+          <span className="opacity-40">→</span>
+          <span>4² = 16</span>
+          <span className="opacity-40">→</span>
+          <span className="text-emerald-300">4³ = 64</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function InteractiveDiagramStep({
   content = {},
 }) {
   const diagram = content.diagram || content;
+
+  // IMPORTANT:
+  // scene موجودة داخل content.diagram في ملفات JSON.
+  // النسخة القديمة كانت تبحث فقط عن content.scene، لذلك كانت ترجع CellScene
+  // لأي رسم غير amino_acid.
+  const scene = diagram.scene || content.scene || "";
+
   const hotspots = Array.isArray(diagram.hotspots)
     ? diagram.hotspots.filter(Boolean)
     : Array.isArray(diagram.nodes)
       ? diagram.nodes.filter(Boolean)
       : [];
 
+  const cards = Array.isArray(diagram.cards)
+    ? diagram.cards.filter(Boolean)
+    : [];
+
   const [activeId, setActiveId] = useState(
     hotspots[0]?.id || "",
   );
+  const [activeCardIndex, setActiveCardIndex] = useState(0);
 
   useEffect(() => {
     setActiveId(hotspots[0]?.id || "");
+    setActiveCardIndex(0);
   }, [content]);
 
   const active =
@@ -2184,6 +2723,52 @@ function InteractiveDiagramStep({
     return result;
   }
 
+  // رسم خاص بالشفرة الثلاثية.
+  // لا نعرض CellScene إطلاقا هنا.
+  if (scene === "codon_probability_simple") {
+    return (
+      <div className="space-y-5">
+        <SectionHeader
+          eyebrow="اكتشاف تفاعلي"
+          title={content.title || diagram.title || "جرّب طول الكلمة"}
+          description={
+            content.instruction ||
+            diagram.instruction ||
+            "اضغط على كل احتمال وقارن عدد الكلمات الممكنة."
+          }
+          icon={ZoomIn}
+          tone="emerald"
+        />
+
+        <CodonProbabilityScene
+          cards={cards}
+          activeIndex={activeCardIndex}
+          onSelect={setActiveCardIndex}
+        />
+
+        {content.takeaway && (
+          <InfoCard
+            title="النتيجة"
+            tone="emerald"
+            icon={CheckCircle2}
+          >
+            {content.takeaway}
+          </InfoCard>
+        )}
+
+        {content.memory_tip && (
+          <InfoCard
+            title="احفظ الفكرة لا الحساب"
+            tone="amber"
+            icon={Lightbulb}
+          >
+            {content.memory_tip}
+          </InfoCard>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <SectionHeader
@@ -2200,7 +2785,7 @@ function InteractiveDiagramStep({
 
       <div className="grid gap-5 lg:grid-cols-[1.3fr_.7fr]">
         <section className="rounded-[28px] border border-emerald-100 bg-white p-4 shadow-sm sm:p-5">
-          {content.scene === "amino_acid" ? (
+          {scene === "amino_acid" ? (
             <AminoAcidScene
               highlighted={active?.id ? [active.id] : []}
               rootValue={active?.root_value || "R"}
@@ -2529,6 +3114,249 @@ function QuickCheckStep({
   );
 }
 
+
+/* =========================================================
+   Real source evidence / images
+========================================================= */
+
+function SourceFigure({ figure = {} }) {
+  const [open, setOpen] = useState(false);
+  const src = figure.src || figure.url || figure.image || "";
+
+  if (!src) return null;
+
+  return (
+    <>
+      <figure className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="group relative block w-full overflow-hidden bg-slate-50 text-right"
+          aria-label="تكبير الصورة"
+        >
+          <img
+            src={src}
+            alt={figure.alt || figure.caption || "وثيقة علمية"}
+            loading="lazy"
+            className="max-h-[520px] w-full object-contain transition duration-300 group-hover:scale-[1.015]"
+          />
+          <span className="absolute bottom-3 left-3 inline-flex items-center gap-2 rounded-full bg-slate-950/80 px-3 py-1.5 text-[11px] font-black text-white backdrop-blur">
+            <ZoomIn size={14} />
+            تكبير
+          </span>
+        </button>
+
+        <figcaption className="space-y-2 border-t border-slate-100 p-4">
+          {figure.source_label && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black text-slate-600">
+              <BookOpen size={12} />
+              {figure.source_label}
+            </span>
+          )}
+          {figure.caption && (
+            <p className="text-sm font-bold leading-7 text-slate-700">
+              {figure.caption}
+            </p>
+          )}
+        </figcaption>
+      </figure>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm"
+          onClick={() => setOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="relative max-h-[92vh] w-full max-w-6xl overflow-auto rounded-[26px] bg-white p-3 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+            role="presentation"
+          >
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="absolute left-5 top-5 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/80 text-white"
+              aria-label="إغلاق الصورة"
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={src}
+              alt={figure.alt || figure.caption || "وثيقة علمية مكبرة"}
+              className="mx-auto max-h-[86vh] w-auto max-w-full object-contain"
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function RealEvidenceGalleryStep({ content = {} }) {
+  const figures = Array.isArray(content.figures)
+    ? content.figures.filter(Boolean)
+    : Array.isArray(content.media)
+      ? content.media.filter(Boolean)
+      : [];
+
+  const observe = toArray(content.observe);
+  const guided = Array.isArray(content.guided_reading)
+    ? content.guided_reading.filter(Boolean)
+    : [];
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader
+        eyebrow="وثيقة حقيقية"
+        title={content.title || "شاهد الدليل كما هو"}
+        description={
+          content.intro ||
+          "اقرأ الصورة بهدوء: لاحظ أولا، ثم فسّر، وبعدها استنتج."
+        }
+        icon={Microscope}
+        tone="sky"
+      />
+
+      {figures.length > 0 && (
+        <div className={cn("grid gap-5", figures.length > 1 && "lg:grid-cols-2")}>
+          {figures.map((figure, index) => (
+            <SourceFigure key={figure.id || figure.src || index} figure={figure} />
+          ))}
+        </div>
+      )}
+
+      {observe.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {observe.map((item, index) => (
+            <div
+              key={index}
+              className="rounded-[22px] border border-sky-100 bg-gradient-to-b from-sky-50 to-white p-4 shadow-sm"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-600 text-xs font-black text-white">
+                {index + 1}
+              </span>
+              <p className="mt-3 text-sm font-bold leading-7 text-slate-700">
+                {getText(item)}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {guided.length > 0 && (
+        <div className="rounded-[28px] border border-indigo-100 bg-white p-4 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-center gap-2 text-indigo-800">
+            <Eye size={18} />
+            <h3 className="text-sm font-black">كيف أقرأ الوثيقة؟</h3>
+          </div>
+          <div className="space-y-3">
+            {guided.map((item, index) => {
+              /*
+               * guided_reading يأتي في ملفات الدروس بعدة صيغ:
+               *
+               * { label, text }
+               * { title, description }
+               * { question, answer }
+               *
+               * الكود القديم كان لا يقرأ question في العنوان، لذلك كان
+               * يعرض "الخطوة 1 / الخطوة 2..." بدل السؤال الحقيقي.
+               * كما أن getText(item) قد يلتقط answer وحده ويخفي بقية البيانات.
+               *
+               * هنا نعرض البيانات الحقيقية كما هي دون فقدان أي حقل تعليمي.
+               */
+              const revealTitle =
+                item?.question ||
+                item?.label ||
+                item?.title ||
+                item?.prompt ||
+                `الخطوة ${index + 1}`;
+
+              const primaryAnswer =
+                item?.answer ||
+                item?.text ||
+                item?.description ||
+                item?.explanation ||
+                item?.expected_answer ||
+                "";
+
+              const extraLines = [
+                item?.observation,
+                item?.interpretation,
+                item?.inference,
+                item?.result,
+                item?.why,
+                item?.note,
+              ].filter(
+                (value) =>
+                  value !== null &&
+                  value !== undefined &&
+                  String(value).trim() &&
+                  String(value).trim() !== String(primaryAnswer).trim(),
+              );
+
+              return (
+                <Reveal
+                  key={item.id || `${revealTitle}-${index}`}
+                  title={revealTitle}
+                  tone="sky"
+                  defaultOpen={index === 0}
+                >
+                  <div className="space-y-3">
+                    {primaryAnswer && (
+                      <p className="text-sm font-bold leading-8 text-slate-700">
+                        {primaryAnswer}
+                      </p>
+                    )}
+
+                    {extraLines.map((line, lineIndex) => (
+                      <div
+                        key={`${index}-extra-${lineIndex}`}
+                        className="rounded-2xl border border-sky-100 bg-white px-4 py-3"
+                      >
+                        <p className="text-sm font-semibold leading-7 text-slate-700">
+                          {getText(line) || String(line)}
+                        </p>
+                      </div>
+                    ))}
+
+                    {!primaryAnswer && extraLines.length === 0 && (
+                      <p className="text-sm font-bold leading-8 text-slate-700">
+                        {getText(item)}
+                      </p>
+                    )}
+                  </div>
+                </Reveal>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {content.question && (
+        <div className="rounded-[26px] border border-violet-100 bg-gradient-to-l from-violet-50 to-white p-5">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-white">
+              <CircleHelp size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-black text-violet-700">السؤال الذي يفتح الدرس التالي</p>
+              <p className="mt-1 text-base font-black leading-8 text-slate-900">
+                {content.question}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {content.takeaway && (
+        <InfoCard title="ما الذي يجب أن يبقى؟" tone="emerald" icon={CheckCircle2}>
+          {content.takeaway}
+        </InfoCard>
+      )}
+    </div>
+  );
+}
+
 /* =========================================================
    6. Experiment simulator
 ========================================================= */
@@ -2706,6 +3534,20 @@ function ExperimentSimulatorStep({
           )}
         </aside>
       </div>
+
+      {Array.isArray(content.media) && content.media.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+            <Microscope size={17} className="text-amber-600" />
+            الوثيقة الأصلية للتجربة
+          </div>
+          <div className={cn("grid gap-4", content.media.length > 1 && "lg:grid-cols-2")}>
+            {content.media.map((figure, index) => (
+              <SourceFigure key={figure.id || figure.src || index} figure={figure} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {Array.isArray(content.interactive_questions) &&
         content.interactive_questions.length > 0 && (
@@ -4734,6 +5576,852 @@ function ScienceReExplainPanel({
   );
 }
 
+
+/* =========================================================
+   Document evaluation
+========================================================= */
+
+function DocumentEvaluationStep({ content = {} }) {
+  const figures = Array.isArray(content.figures)
+    ? content.figures.filter(Boolean)
+    : Array.isArray(content.media)
+      ? content.media.filter(Boolean)
+      : [];
+
+  const instructions = Array.isArray(content.instructions)
+    ? content.instructions.filter(Boolean)
+    : [];
+
+  const correction = content.correction || {};
+  const answers = Array.isArray(correction.answers)
+    ? correction.answers.filter(Boolean)
+    : [];
+
+  const given = content.given && typeof content.given === "object"
+    ? content.given
+    : null;
+
+  const [showCorrection, setShowCorrection] = useState(false);
+
+  useEffect(() => {
+    setShowCorrection(false);
+  }, [content]);
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <SectionHeader
+        eyebrow="تقويم"
+        title={content.title || "اختبر فهمك"}
+        description={
+          content.intro ||
+          "أجب عن الأسئلة أولا، ثم افتح التصحيح وقارن خطواتك."
+        }
+        icon={GraduationCap}
+        tone="amber"
+      />
+
+      {figures.length > 0 && (
+        <div className={cn("grid gap-5", figures.length > 1 && "lg:grid-cols-2")}>
+          {figures.map((figure, index) => (
+            <SourceFigure
+              key={figure.id || figure.src || index}
+              figure={figure}
+            />
+          ))}
+        </div>
+      )}
+
+      {given && (
+        <section className="overflow-hidden rounded-[28px] border border-violet-100 bg-white shadow-sm">
+          <div className="border-b border-violet-100 bg-gradient-to-l from-violet-50 to-white px-5 py-4">
+            <p className="text-xs font-black text-violet-700">
+              {given.title || "المعطى"}
+            </p>
+            {given.text && (
+              <p className="mt-2 text-sm font-bold leading-7 text-slate-700">
+                {given.text}
+              </p>
+            )}
+          </div>
+
+          {given.sequence && (
+            <div className="p-5 text-center sm:p-6">
+              <div
+                dir="ltr"
+                className="mx-auto w-fit max-w-full overflow-x-auto rounded-2xl border border-slate-200 bg-slate-950 px-5 py-4 font-mono text-lg font-black tracking-[0.12em] text-white shadow-lg sm:text-2xl"
+              >
+                {given.sequence}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {instructions.length > 0 && (
+        <section className="rounded-[28px] border border-amber-100 bg-gradient-to-b from-amber-50/70 to-white p-4 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-center gap-2 text-amber-800">
+            <ListChecks size={18} />
+            <h3 className="text-sm font-black">أسئلة التقويم</h3>
+          </div>
+
+          <div className="space-y-3">
+            {instructions.map((item, index) => (
+              <div
+                key={item.id || index}
+                className="flex items-start gap-3 rounded-[20px] border border-amber-100 bg-white p-4 shadow-sm"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-sm font-black text-white">
+                  {index + 1}
+                </span>
+                <p className="text-sm font-bold leading-8 text-slate-800 sm:text-base">
+                  {item.question || item.text || getText(item)}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {!showCorrection && (
+            <div className="mt-5 rounded-[20px] border border-dashed border-amber-200 bg-white/80 p-4 text-center">
+              <p className="text-xs font-bold leading-6 text-slate-500">
+                حاول الحل على ورقة قبل فتح التصحيح، خصوصا كتابة الاتجاهات وتقسيم ARNm إلى رامزات.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {answers.length > 0 && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => setShowCorrection((value) => !value)}
+            className={cn(
+              "inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-6 text-sm font-black shadow-lg transition",
+              showCorrection
+                ? "border border-amber-200 bg-white text-amber-800 shadow-amber-100"
+                : "bg-amber-500 text-white shadow-amber-500/20 hover:bg-amber-600",
+            )}
+          >
+            {showCorrection ? <ChevronUp size={18} /> : <Eye size={18} />}
+            {showCorrection
+              ? "إخفاء حل التقويم"
+              : correction.reveal_label || "إظهار حل التقويم"}
+          </button>
+        </div>
+      )}
+
+      {showCorrection && answers.length > 0 && (
+        <section className="space-y-5 rounded-[30px] border border-emerald-200 bg-gradient-to-b from-emerald-50/70 to-white p-4 shadow-sm sm:p-5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-lg shadow-emerald-500/20">
+              <CheckCircle2 size={19} />
+            </span>
+            <div>
+              <p className="text-xs font-black text-emerald-700">التصحيح النموذجي</p>
+              <h3 className="text-base font-black text-slate-950">
+                الحل كامل خطوة بخطوة
+              </h3>
+            </div>
+          </div>
+
+          {answers.map((answer, answerIndex) => {
+            const numberedLabels =
+              answer?.numbered_labels &&
+              typeof answer.numbered_labels === "object" &&
+              !Array.isArray(answer.numbered_labels)
+                ? Object.entries(answer.numbered_labels)
+                : [];
+
+            const answerSteps = Array.isArray(answer?.steps)
+              ? answer.steps.filter(Boolean)
+              : [];
+
+            return (
+              <article
+                key={answer.id || answerIndex}
+                className="overflow-hidden rounded-[26px] border border-emerald-100 bg-white shadow-sm"
+              >
+                <div className="border-b border-emerald-100 bg-emerald-50/60 px-4 py-4 sm:px-5">
+                  <h4 className="text-sm font-black leading-7 text-emerald-950 sm:text-base">
+                    {answer.title || `الإجابة ${answerIndex + 1}`}
+                  </h4>
+                </div>
+
+                <div className="space-y-4 p-4 sm:p-5">
+                  {numberedLabels.length > 0 && (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {numberedLabels.map(([number, label]) => (
+                        <div
+                          key={number}
+                          className="flex items-center gap-3 rounded-[18px] border border-slate-200 bg-slate-50/70 p-3"
+                        >
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-sm font-black text-white">
+                            {number}
+                          </span>
+                          <span className="text-sm font-black text-slate-800">
+                            {label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {answerSteps.length > 0 && (
+                    <div className="space-y-3">
+                      {answerSteps.map((step, index) => (
+                        <div
+                          key={`${answer.id || answerIndex}-step-${index}`}
+                          className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4"
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-xs font-black text-white">
+                              {index + 1}
+                            </span>
+
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-black text-slate-500">
+                                {step.label || `الخطوة ${index + 1}`}
+                              </p>
+
+                              <p
+                                dir={
+                                  /[AUGCT]{2,}|5′|3′|Met|Pro|Cys|Ala|Ile|Lys|Ser|Stop/.test(
+                                    String(step.value || "")
+                                  )
+                                    ? "ltr"
+                                    : "rtl"
+                                }
+                                className="mt-2 break-words font-mono text-sm font-black leading-7 text-slate-900 sm:text-base"
+                              >
+                                {step.value || step.text || step.answer || getText(step)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {answer.phenomenon && (
+                    <div className="rounded-[18px] border border-violet-100 bg-violet-50 p-4">
+                      <p className="text-xs font-black text-violet-700">
+                        الظاهرة المدروسة
+                      </p>
+                      <p className="mt-1 text-sm font-black text-slate-900">
+                        {answer.phenomenon}
+                      </p>
+                    </div>
+                  )}
+
+                  {answer.final_answer && (
+                    <div className="rounded-[20px] border border-emerald-200 bg-emerald-50 p-4">
+                      <p className="text-xs font-black text-emerald-700">
+                        النتيجة النهائية
+                      </p>
+                      <p className="mt-2 text-base font-black leading-8 text-emerald-950">
+                        {answer.final_answer}
+                      </p>
+                    </div>
+                  )}
+
+                  {(answer.answer || answer.text || answer.explanation) && (
+                    <div className="rounded-[18px] border border-sky-100 bg-sky-50/60 p-4">
+                      <p className="text-xs font-black text-sky-700">
+                        التفسير
+                      </p>
+                      <p className="mt-2 text-sm font-bold leading-8 text-slate-800">
+                        {answer.answer || answer.text || answer.explanation}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+
+          {correction.method_tip && (
+            <InfoCard title="طريقة الإجابة" tone="sky" icon={Lightbulb}>
+              {correction.method_tip}
+            </InfoCard>
+          )}
+        </section>
+      )}
+
+      {content.takeaway && (
+        <InfoCard title="ما الذي يجب أن يبقى؟" tone="emerald" icon={CheckCircle2}>
+          {content.takeaway}
+        </InfoCard>
+      )}
+
+      {content.next_axis_bridge?.question && (
+        <div className="rounded-[26px] border border-violet-100 bg-gradient-to-l from-violet-50 to-white p-5">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-white">
+              <CircleHelp size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-black text-violet-700">
+                سؤال يمهد للمحور التالي
+              </p>
+              <p className="mt-1 text-base font-black leading-8 text-slate-900">
+                {content.next_axis_bridge.question}
+              </p>
+              {content.next_axis_bridge.next_concept && (
+                <p className="mt-2 text-xs font-bold leading-6 text-slate-500">
+                  {content.next_axis_bridge.next_concept}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* =========================================================
+   Genetic code exercise — ARNm -> amino acids
+========================================================= */
+
+function GeneticCodeExerciseStep({ content = {} }) {
+  const rawMrna = String(content.mrna || "").trim();
+  const cleanedMrna = rawMrna
+    .replace(/[5′3′\-\s|]/g, "")
+    .toUpperCase();
+
+  const codons = cleanedMrna.match(/.{1,3}/g) || [];
+  const studentSteps = Array.isArray(content.student_steps)
+    ? content.student_steps.filter(Boolean)
+    : [];
+
+  const [showSolution, setShowSolution] = useState(false);
+
+  useEffect(() => {
+    setShowSolution(false);
+  }, [content]);
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <SectionHeader
+        eyebrow="تطبيق على الشفرة"
+        title="اقرأ رامزات ARNm"
+        description={
+          content.instruction ||
+          "قسّم ARNm إلى رامزات ثلاثية ثم استعمل جدول الشفرة."
+        }
+        icon={Dna}
+        tone="violet"
+      />
+
+      <section className="rounded-[30px] border border-violet-100 bg-white p-4 shadow-sm sm:p-6">
+        <div className="text-center">
+          <p className="text-xs font-black text-violet-700">ARNm المعطى</p>
+          <div
+            dir="ltr"
+            className="mx-auto mt-3 w-fit max-w-full overflow-x-auto rounded-2xl bg-slate-950 px-5 py-4 font-mono text-lg font-black tracking-[0.12em] text-white shadow-lg sm:text-2xl"
+          >
+            {rawMrna || "—"}
+          </div>
+        </div>
+
+        {codons.length > 0 && (
+          <div className="mt-6">
+            <p className="mb-3 text-center text-xs font-black text-slate-500">
+              التقسيم إلى رامزات
+            </p>
+            <div className="flex flex-wrap justify-center gap-2" dir="ltr">
+              {codons.map((codon, index) => (
+                <div
+                  key={`${codon}-${index}`}
+                  className="rounded-2xl border-2 border-violet-200 bg-violet-50 px-4 py-3 font-mono text-lg font-black text-violet-900 shadow-sm"
+                >
+                  {codon}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-6 rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+          <p className="text-sm font-bold leading-8 text-slate-700">
+            استعمل جدول الشفرة على كل رامزة بالترتيب، وتوقف عندما تصل إلى UAA أو UAG أو UGA.
+          </p>
+        </div>
+
+        <div className="mt-5 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setShowSolution((value) => !value)}
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-violet-600 px-6 text-sm font-black text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-700"
+          >
+            {showSolution ? <ChevronUp size={18} /> : <Eye size={18} />}
+            {showSolution ? "إخفاء الحل" : "عرض الحل خطوة بخطوة"}
+          </button>
+        </div>
+      </section>
+
+      {showSolution && (
+        <section className="space-y-3 rounded-[28px] border border-emerald-200 bg-emerald-50/60 p-4 sm:p-5">
+          {studentSteps.map((step, index) => (
+            <div
+              key={`${step.label || "step"}-${index}`}
+              className="rounded-[20px] border border-emerald-100 bg-white p-4 shadow-sm"
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-xs font-black text-white">
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-slate-500">
+                    {step.label || `الخطوة ${index + 1}`}
+                  </p>
+                  <p className="mt-2 text-sm font-black leading-8 text-slate-900">
+                    {step.expected || step.answer || step.text || getText(step)}
+                  </p>
+                  {step.hint && (
+                    <p className="mt-1 text-xs font-bold leading-6 text-slate-500">
+                      {step.hint}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {content.final_answer && (
+            <div className="rounded-[20px] border border-emerald-200 bg-emerald-100/70 p-4 text-center">
+              <p className="text-xs font-black text-emerald-700">
+                المتتالية النهائية
+              </p>
+              <p className="mt-2 text-lg font-black text-emerald-950" dir="ltr">
+                {content.final_answer}
+              </p>
+            </div>
+          )}
+
+          {content.explanation && (
+            <InfoCard title="لماذا؟" tone="sky" icon={Lightbulb}>
+              {content.explanation}
+            </InfoCard>
+          )}
+        </section>
+      )}
+
+      {content.takeaway && (
+        <InfoCard title="ما يجب أن تتذكره" tone="emerald" icon={CheckCircle2}>
+          {content.takeaway}
+        </InfoCard>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   Sequence exercise — بناء ARNm
+========================================================= */
+
+function SequenceExerciseStep({ content = {} }) {
+  const dnaTemplate = toArray(content.dna_template).map((base) =>
+    String(base || "").trim().toUpperCase()
+  );
+  const correctMrna = toArray(content.correct_mrna).map((base) =>
+    String(base || "").trim().toUpperCase()
+  );
+  const availableBases = toArray(content.available_bases).map((base) =>
+    String(base || "").trim().toUpperCase()
+  );
+
+  const slotCount = Math.max(
+    dnaTemplate.length,
+    correctMrna.length,
+    toArray(content.student_slots).length,
+  );
+
+  const [answers, setAnswers] = useState(() =>
+    Array.from({ length: slotCount }, () => "")
+  );
+  const [activeSlot, setActiveSlot] = useState(0);
+  const [checked, setChecked] = useState(false);
+  const [showCorrection, setShowCorrection] = useState(false);
+
+  useEffect(() => {
+    setAnswers(Array.from({ length: slotCount }, () => ""));
+    setActiveSlot(0);
+    setChecked(false);
+    setShowCorrection(false);
+  }, [content, slotCount]);
+
+  const chooseBase = (base) => {
+    if (!slotCount) return;
+
+    setAnswers((previous) => {
+      const next = [...previous];
+      next[activeSlot] = base;
+      return next;
+    });
+
+    setChecked(false);
+    setShowCorrection(false);
+
+    setActiveSlot((previous) =>
+      Math.min(previous + 1, Math.max(slotCount - 1, 0))
+    );
+  };
+
+  const clearSlot = (index) => {
+    setAnswers((previous) => {
+      const next = [...previous];
+      next[index] = "";
+      return next;
+    });
+    setActiveSlot(index);
+    setChecked(false);
+    setShowCorrection(false);
+  };
+
+  const reset = () => {
+    setAnswers(Array.from({ length: slotCount }, () => ""));
+    setActiveSlot(0);
+    setChecked(false);
+    setShowCorrection(false);
+  };
+
+  const allFilled =
+    slotCount > 0 && answers.every((answer) => String(answer).trim());
+
+  const correctCount = answers.reduce((total, answer, index) => {
+    return total + (
+      correctMrna[index] &&
+      normalizeComparable(answer) === normalizeComparable(correctMrna[index])
+        ? 1
+        : 0
+    );
+  }, 0);
+
+  const allCorrect =
+    correctMrna.length > 0 &&
+    correctCount === correctMrna.length &&
+    answers.length >= correctMrna.length;
+
+  const baseTone = {
+    A: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    U: "border-violet-200 bg-violet-50 text-violet-800",
+    C: "border-sky-200 bg-sky-50 text-sky-800",
+    G: "border-amber-200 bg-amber-50 text-amber-800",
+    T: "border-rose-200 bg-rose-50 text-rose-800",
+  };
+
+  const templateDirection = content.template_direction || "3′→5′";
+  const mrnaDirection = content.mrna_direction || "5′→3′";
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      <SectionHeader
+        eyebrow="تطبيق تفاعلي"
+        title="ابنِ ARNm بنفسك"
+        description={
+          content.instruction ||
+          "طبّق مبدأ التكامل قاعدة بقاعدة مع احترام اتجاه السلاسل."
+        }
+        icon={Dna}
+        tone="violet"
+      />
+
+      {/* بطاقة القاعدة الأساسية */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <InfoCard title="السلسلة القالب" tone="sky" icon={Dna}>
+          تُقرأ في اتجاه <span dir="ltr" className="font-black">{templateDirection}</span>
+        </InfoCard>
+
+        <InfoCard title="قاعدة التكامل" tone="violet" icon={Route}>
+          A ↔ U &nbsp; • &nbsp; T ↔ A &nbsp; • &nbsp; C ↔ G &nbsp; • &nbsp; G ↔ C
+        </InfoCard>
+
+        <InfoCard title="ARNm الناتج" tone="emerald" icon={CheckCircle2}>
+          يُبنى في اتجاه <span dir="ltr" className="font-black">{mrnaDirection}</span>
+        </InfoCard>
+      </div>
+
+      {/* منطقة العمل */}
+      <section className="overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 bg-gradient-to-l from-slate-50 to-white px-4 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black text-violet-700">المعطيات</p>
+              <h3 className="mt-1 text-base font-black text-slate-950">
+                السلسلة المستنسخة من ADN
+              </h3>
+            </div>
+
+            <span
+              dir="ltr"
+              className="rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-black text-sky-800"
+            >
+              {templateDirection}
+            </span>
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-6">
+          {/* DNA row */}
+          <div className="overflow-x-auto pb-2">
+            <div className="mx-auto flex min-w-max items-center justify-center gap-2" dir="ltr">
+              <span className="mr-1 text-sm font-black text-slate-500">3′</span>
+
+              {dnaTemplate.map((base, index) => (
+                <div
+                  key={`dna-${index}`}
+                  className={cn(
+                    "flex h-14 w-14 items-center justify-center rounded-2xl border-2 text-xl font-black shadow-sm sm:h-16 sm:w-16",
+                    baseTone[base] || "border-slate-200 bg-slate-50 text-slate-800",
+                  )}
+                >
+                  {base}
+                </div>
+              ))}
+
+              <span className="ml-1 text-sm font-black text-slate-500">5′</span>
+            </div>
+          </div>
+
+          {/* complementary guide */}
+          <div className="my-4 flex items-center justify-center">
+            <div className="flex items-center gap-2 rounded-full bg-slate-50 px-4 py-2 text-xs font-black text-slate-500">
+              <ArrowLeft size={15} />
+              أكمل القواعد المكملة في الأسفل
+              <ArrowRight size={15} />
+            </div>
+          </div>
+
+          {/* mRNA slots */}
+          <div className="overflow-x-auto pb-2">
+            <div className="mx-auto flex min-w-max items-center justify-center gap-2" dir="ltr">
+              <span className="mr-1 text-sm font-black text-emerald-700">5′</span>
+
+              {Array.from({ length: slotCount }).map((_, index) => {
+                const answer = answers[index];
+                const isCorrect =
+                  checked &&
+                  correctMrna[index] &&
+                  normalizeComparable(answer) === normalizeComparable(correctMrna[index]);
+                const isWrong =
+                  checked &&
+                  answer &&
+                  correctMrna[index] &&
+                  !isCorrect;
+
+                return (
+                  <button
+                    key={`mrna-slot-${index}`}
+                    type="button"
+                    onClick={() => {
+                      setActiveSlot(index);
+                      if (answer) clearSlot(index);
+                    }}
+                    className={cn(
+                      "relative flex h-14 w-14 items-center justify-center rounded-2xl border-2 text-xl font-black shadow-sm transition sm:h-16 sm:w-16",
+                      activeSlot === index && !checked
+                        ? "scale-105 border-violet-400 bg-violet-50 ring-4 ring-violet-100"
+                        : "border-slate-200 bg-white",
+                      isCorrect && "border-emerald-300 bg-emerald-50 text-emerald-800",
+                      isWrong && "border-rose-300 bg-rose-50 text-rose-800",
+                      !answer && "text-slate-300",
+                    )}
+                    aria-label={`موضع ARNm ${index + 1}`}
+                  >
+                    {answer || "؟"}
+
+                    {isCorrect && (
+                      <span className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white shadow">
+                        <Check size={13} strokeWidth={3} />
+                      </span>
+                    )}
+
+                    {isWrong && (
+                      <span className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-white shadow">
+                        <X size={13} strokeWidth={3} />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+
+              <span className="ml-1 text-sm font-black text-emerald-700">3′</span>
+            </div>
+          </div>
+
+          {/* base picker */}
+          <div className="mt-6 rounded-[24px] border border-slate-200 bg-slate-50/70 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black text-slate-500">اختر القاعدة</p>
+                <p className="mt-0.5 text-sm font-black text-slate-900">
+                  الموضع {Math.min(activeSlot + 1, Math.max(slotCount, 1))}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={reset}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 transition hover:bg-slate-100"
+              >
+                <RotateCcw size={15} />
+                إعادة
+              </button>
+            </div>
+
+            <div className="grid grid-cols-4 gap-2 sm:gap-3" dir="ltr">
+              {availableBases.map((base) => (
+                <button
+                  key={base}
+                  type="button"
+                  onClick={() => chooseBase(base)}
+                  className={cn(
+                    "min-h-12 rounded-2xl border-2 text-lg font-black shadow-sm transition hover:-translate-y-0.5 hover:shadow-md active:translate-y-0",
+                    baseTone[base] || "border-slate-200 bg-white text-slate-800",
+                  )}
+                >
+                  {base}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* actions */}
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              disabled={!allFilled}
+              onClick={() => {
+                setChecked(true);
+                setShowCorrection(false);
+              }}
+              className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-black text-white shadow-lg transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <CheckCircle2 size={18} />
+              تحقق من إجابتي
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowCorrection((value) => !value)}
+              className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 shadow-sm transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-800"
+            >
+              <Eye size={18} />
+              {showCorrection ? "إخفاء التصحيح" : "عرض التصحيح"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* feedback */}
+      {checked && (
+        <div
+          className={cn(
+            "rounded-[24px] border p-5 shadow-sm",
+            allCorrect
+              ? "border-emerald-200 bg-emerald-50"
+              : "border-amber-200 bg-amber-50",
+          )}
+        >
+          <div className="flex items-start gap-3">
+            <span
+              className={cn(
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white",
+                allCorrect ? "bg-emerald-600" : "bg-amber-500",
+              )}
+            >
+              {allCorrect ? <CheckCircle2 size={20} /> : <CircleHelp size={20} />}
+            </span>
+
+            <div>
+              <h3 className="font-black text-slate-950">
+                {allCorrect
+                  ? "إجابة صحيحة بالكامل"
+                  : `${correctCount} من ${correctMrna.length} قواعد صحيحة`}
+              </h3>
+              <p className="mt-1 text-sm font-semibold leading-7 text-slate-600">
+                {allCorrect
+                  ? "أحسنت. طبقت التكامل واحترمت اتجاه السلاسل."
+                  : "راجع المواضع المعلّمة ثم حاول من جديد. لا تنسَ أن A في القالب تقابل U في ARN."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* correction, hidden by default */}
+      {showCorrection && (
+        <section className="overflow-hidden rounded-[28px] border border-emerald-200 bg-white shadow-sm">
+          <div className="border-b border-emerald-100 bg-emerald-50/70 px-5 py-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-600 text-white">
+                <CheckCircle2 size={19} />
+              </span>
+              <div>
+                <p className="text-xs font-black text-emerald-700">التصحيح</p>
+                <h3 className="font-black text-slate-950">
+                  نبني ARNm قاعدة بقاعدة
+                </h3>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-5 p-5">
+            <div className="overflow-x-auto">
+              <div className="mx-auto flex min-w-max items-center justify-center gap-2" dir="ltr">
+                <span className="mr-1 text-sm font-black text-emerald-700">5′</span>
+                {correctMrna.map((base, index) => (
+                  <div
+                    key={`correct-${index}`}
+                    className={cn(
+                      "flex h-12 w-12 items-center justify-center rounded-2xl border-2 text-lg font-black sm:h-14 sm:w-14",
+                      baseTone[base] || "border-emerald-200 bg-emerald-50 text-emerald-800",
+                    )}
+                  >
+                    {base}
+                  </div>
+                ))}
+                <span className="ml-1 text-sm font-black text-emerald-700">3′</span>
+              </div>
+            </div>
+
+            {toArray(content.correction_steps).length > 0 && (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {toArray(content.correction_steps).map((step, index) => (
+                  <div
+                    key={`correction-step-${index}`}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-center font-black text-slate-700"
+                    dir="ltr"
+                  >
+                    {step}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {content.result && (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+                <p className="text-xs font-black text-emerald-700">النتيجة النهائية</p>
+                <p dir="ltr" className="mt-1 text-lg font-black text-slate-950">
+                  {content.result}
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {content.takeaway && (
+        <InfoCard title="ما يجب أن تتذكره" tone="emerald" icon={Lightbulb}>
+          {content.takeaway}
+        </InfoCard>
+      )}
+    </div>
+  );
+}
+
 /* =========================================================
    Step router
 ========================================================= */
@@ -4752,11 +6440,27 @@ function resolveRenderer(step) {
   }
 
   if (
+    component === "ScientificStoryboard" ||
+    type === "scientific_storyboard"
+  ) {
+    return "scientific_storyboard";
+  }
+
+  if (
     component === "ScientificAnimation" ||
     type === "scientific_animation" ||
     type === "animation"
   ) {
     return "scientific_animation";
+  }
+
+  if (
+    component === "RealEvidenceGallery" ||
+    type === "real_evidence" ||
+    type === "evidence_gallery" ||
+    type === "source_media"
+  ) {
+    return "real_evidence";
   }
 
   if (
@@ -4789,6 +6493,20 @@ function resolveRenderer(step) {
     type === "quick_check"
   ) {
     return "quick_check";
+  }
+
+  if (
+    component === "GeneticCodeExercise" ||
+    type === "genetic_code_exercise"
+  ) {
+    return "genetic_code_exercise";
+  }
+
+  if (
+    component === "SequenceExercise" ||
+    type === "sequence_exercise"
+  ) {
+    return "sequence_exercise";
   }
 
   if (
@@ -4837,6 +6555,14 @@ function resolveRenderer(step) {
     return "final_quiz";
   }
 
+  if (
+    component === "DocumentEvaluation" ||
+    type === "evaluation" ||
+    type === "document_evaluation"
+  ) {
+    return "document_evaluation";
+  }
+
   if (type === "common_mistakes") {
     return "common_mistakes";
   }
@@ -4865,6 +6591,16 @@ function ScienceStepBody({
         <ScientificAnimationStep content={content} />
       );
 
+    case "scientific_storyboard":
+      return (
+        <ScientificStoryboardStep content={content} />
+      );
+
+    case "real_evidence":
+      return (
+        <RealEvidenceGalleryStep content={content} />
+      );
+
     case "short_explanation":
       return (
         <ShortExplanationStep content={content} />
@@ -4880,6 +6616,12 @@ function ScienceStepBody({
 
     case "quick_check":
       return <QuickCheckStep content={content} />;
+
+    case "genetic_code_exercise":
+      return <GeneticCodeExerciseStep content={content} />;
+
+    case "sequence_exercise":
+      return <SequenceExerciseStep content={content} />;
 
     case "experiment":
       return (
@@ -4910,6 +6652,11 @@ function ScienceStepBody({
           content={content}
           final
         />
+      );
+
+    case "document_evaluation":
+      return (
+        <DocumentEvaluationStep content={content} />
       );
 
     case "common_mistakes":
@@ -4948,6 +6695,11 @@ const SCIENCE_STEP_META = {
     label: "مشاهدة",
     icon: Play,
     accent: "from-sky-500 to-cyan-600",
+  },
+  scientific_storyboard: {
+    label: "مشاهدة جزيئية",
+    icon: Play,
+    accent: "from-sky-500 to-emerald-500",
   },
   animation: {
     label: "مشاهدة",
@@ -4993,6 +6745,11 @@ const SCIENCE_STEP_META = {
     label: "تحقق",
     icon: Target,
     accent: "from-sky-500 to-indigo-600",
+  },
+  genetic_code_exercise: {
+    label: "تطبيق الشفرة",
+    icon: Dna,
+    accent: "from-violet-500 to-indigo-600",
   },
   experiment: {
     label: "مختبر",
@@ -5049,6 +6806,16 @@ const SCIENCE_STEP_META = {
     icon: Trophy,
     accent: "from-amber-500 to-rose-600",
   },
+  evaluation: {
+    label: "تقويم",
+    icon: GraduationCap,
+    accent: "from-amber-500 to-orange-600",
+  },
+  document_evaluation: {
+    label: "تقويم",
+    icon: GraduationCap,
+    accent: "from-amber-500 to-orange-600",
+  },
 };
 
 /* =========================================================
@@ -5059,24 +6826,35 @@ function ScienceIntroCard({
   lesson,
   title,
 }) {
-  const outcomes = toArray(lesson?.learning_outcomes);
-  const prerequisites = toArray(lesson?.prerequisites);
+  const outcomes = toArray(lesson?.learning_outcomes).slice(0, 4);
+  const prerequisites = toArray(lesson?.prerequisites).slice(0, 3);
+  const presentation = lesson?.presentation || {};
+  const rhythm = toArray(presentation?.rhythm);
 
   return (
     <article className="overflow-hidden rounded-[34px] border border-white bg-white shadow-[0_30px_100px_-50px_rgba(15,23,42,0.45)] ring-1 ring-emerald-100/70">
-      <div className="relative overflow-hidden bg-gradient-to-l from-emerald-800 via-teal-800 to-cyan-800 px-5 py-8 text-white sm:px-8 sm:py-10">
-        <div className="absolute -right-16 -top-20 h-52 w-52 rounded-full bg-white/10 blur-3xl" />
+      <div className="relative overflow-hidden bg-gradient-to-l from-slate-950 via-emerald-950 to-teal-900 px-5 py-8 text-white sm:px-8 sm:py-10">
+        <div className="absolute -right-16 -top-20 h-52 w-52 rounded-full bg-emerald-300/15 blur-3xl" />
         <div className="absolute -bottom-24 left-1/3 h-56 w-56 rounded-full bg-cyan-300/15 blur-3xl" />
 
         <div className="relative">
           <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-black ring-1 ring-white/15">
-            <Microscope size={15} />
-            درس تفاعلي في العلوم الطبيعية
+            <Sparkles size={15} />
+            افهم القصة، لا تحفظ الفقرة
           </span>
 
           <h2 className="mt-4 max-w-4xl text-2xl font-black leading-[1.55] sm:text-4xl">
             {title}
           </h2>
+
+          {(presentation?.hook || lesson?.lesson_goal) && (
+            <div className="mt-5 max-w-3xl rounded-[24px] bg-white/10 p-5 ring-1 ring-white/15 backdrop-blur-sm">
+              <p className="text-[11px] font-black text-emerald-200">السؤال الذي سيقود الدرس</p>
+              <p className="mt-2 text-base font-black leading-8 sm:text-lg">
+                {presentation?.hook || lesson?.lesson_goal}
+              </p>
+            </div>
+          )}
 
           {lesson?.lesson_goal && (
             <p className="mt-4 max-w-3xl text-sm font-semibold leading-8 text-emerald-50/90 sm:text-base">
@@ -5090,74 +6868,59 @@ function ScienceIntroCard({
                 حوالي {lesson.estimated_minutes} دقيقة
               </span>
             )}
-
-            {lesson?.difficulty && (
-              <span className="rounded-full bg-white/10 px-3 py-1.5 ring-1 ring-white/15">
-                المستوى: {lesson.difficulty}
-              </span>
-            )}
+            <span className="rounded-full bg-white/10 px-3 py-1.5 ring-1 ring-white/15">
+              شرح قصير + تفاعل + تطبيق
+            </span>
           </div>
         </div>
       </div>
 
+      {rhythm.length > 0 && (
+        <div className="border-b border-emerald-100 bg-emerald-50/60 px-5 py-4 sm:px-7">
+          <p className="mb-3 text-xs font-black text-emerald-900">رحلتك في هذا المحور</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {rhythm.map((item, index) => (
+              <div key={`${item}-${index}`} className="flex shrink-0 items-center gap-2">
+                <span className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-slate-700 shadow-sm ring-1 ring-emerald-100">
+                  {index + 1}. {getText(item)}
+                </span>
+                {index < rhythm.length - 1 && <ArrowLeft size={13} className="text-emerald-400" />}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-5 p-5 sm:p-7 lg:grid-cols-2">
         {outcomes.length > 0 && (
-          <section>
+          <section className="rounded-[26px] border border-emerald-100 bg-emerald-50/45 p-5">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-black text-slate-950">
-              <Target
-                size={17}
-                className="text-emerald-600"
-              />
-              بعد هذا المحور ستستطيع
+              <Target size={17} className="text-emerald-600" />
+              في النهاية ستقدر على
             </h3>
-
-            <BulletCards
-              items={outcomes}
-              tone="emerald"
-            />
+            <BulletCards items={outcomes} tone="emerald" />
           </section>
         )}
 
-        {prerequisites.length > 0 && (
-          <section>
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-black text-slate-950">
-              <BookOpen
-                size={17}
-                className="text-violet-600"
-              />
-              قبل أن تبدأ
-            </h3>
-
-            <BulletCards
-              items={prerequisites}
-              tone="violet"
-            />
-          </section>
-        )}
+        <section className="rounded-[26px] border border-violet-100 bg-violet-50/35 p-5">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-black text-slate-950">
+            <BookOpen size={17} className="text-violet-600" />
+            ما تحتاجه فقط قبل البداية
+          </h3>
+          {prerequisites.length > 0 ? (
+            <BulletCards items={prerequisites} tone="violet" />
+          ) : (
+            <p className="text-sm font-bold leading-7 text-slate-600">لا تحتاج إلى حفظ مسبق؛ ابدأ بالسؤال الأول.</p>
+          )}
+        </section>
       </div>
 
-      <div className="border-t border-emerald-100 bg-emerald-50/60 px-5 py-4 sm:px-7">
-        <div className="flex flex-wrap items-center gap-2 text-xs font-black text-emerald-900">
-          <span>طريقة التعلم:</span>
-          <span className="rounded-full bg-white px-3 py-1 ring-1 ring-emerald-100">
-            مشكلة
-          </span>
-          <ArrowLeft size={13} />
-          <span className="rounded-full bg-white px-3 py-1 ring-1 ring-emerald-100">
-            مشاهدة
-          </span>
-          <ArrowLeft size={13} />
-          <span className="rounded-full bg-white px-3 py-1 ring-1 ring-emerald-100">
-            تفسير
-          </span>
-          <ArrowLeft size={13} />
-          <span className="rounded-full bg-white px-3 py-1 ring-1 ring-emerald-100">
-            تجربة
-          </span>
-          <ArrowLeft size={13} />
-          <span className="rounded-full bg-white px-3 py-1 ring-1 ring-emerald-100">
-            بكالوريا
-          </span>
+      <div className="border-t border-slate-100 bg-white px-5 py-4 sm:px-7">
+        <div className="flex items-center gap-3 rounded-2xl bg-slate-50 p-4">
+          <CheckCircle2 size={18} className="shrink-0 text-emerald-600" />
+          <p className="text-xs font-bold leading-6 text-slate-600">
+            لن نعرض لك معلومة مرتين دون سبب: كل بطاقة إما تضيف فكرة جديدة، أو تجعلك تطبق ما فهمته.
+          </p>
         </div>
       </div>
     </article>
@@ -5461,12 +7224,12 @@ export default function ScienceLesson({
                   تقدمك في المحور
                 </p>
 
-                <p className="mt-1 max-w-[220px] truncate text-sm font-black text-slate-950">
+                <p className="mt-1 max-w-[320px] whitespace-normal break-words text-sm font-black leading-6 text-slate-950">
                   {activePage?.title}
                 </p>
 
                 <p className="mt-1 text-[11px] font-semibold text-slate-500">
-                  شاهد ← افهم ← جرّب ← استنتج
+                  افهم ← تفاعل ← طبّق ← أتقن
                 </p>
               </div>
             </div>
@@ -5568,7 +7331,7 @@ export default function ScienceLesson({
                     المرحلة الحالية
                   </p>
 
-                  <p className="mx-auto mt-1 max-w-[300px] truncate text-sm font-black text-slate-950">
+                  <p className="mx-auto mt-1 max-w-[420px] whitespace-normal break-words text-sm font-black leading-6 text-slate-950">
                     {activePage?.title}
                   </p>
                 </div>

@@ -1,7 +1,14 @@
+// src/components/auth/SignUpBrandPanel.jsx
+
 import {
-  Brain,
   CheckCircle2,
 } from "lucide-react";
+
+import {
+  useNavigate,
+} from "react-router-dom";
+
+import Logo from "../Logo";
 
 import signupIllustration from "../../assets/signup-illustration.png";
 
@@ -12,6 +19,9 @@ const advantages = [
 ];
 
 export default function SignUpBrandPanel() {
+  const navigate =
+    useNavigate();
+
   return (
     <section
       className="
@@ -38,26 +48,31 @@ export default function SignUpBrandPanel() {
         "
       />
 
-      <div className="relative z-10 flex items-center gap-4">
-        <div
+      {/* Bacly logo */}
+      <div className="relative z-10">
+        <button
+          type="button"
+          onClick={() =>
+            navigate("/home")
+          }
+          aria-label="العودة إلى الصفحة الرئيسية"
+          title="الصفحة الرئيسية"
           className="
-            flex h-12 w-12 items-center
-            justify-center rounded-2xl
-            bg-brand-600
+            group inline-flex
+            items-center rounded-2xl
+            px-1.5 py-2
+            transition duration-200
+
+            hover:bg-white/[0.06]
+
+            active:scale-[0.98]
           "
         >
-          <Brain size={30} />
-        </div>
-
-        <div>
-          <h1 className="text-2xl font-bold">
-            MathMaster
-          </h1>
-
-          <p className="text-xs text-slate-300">
-            تعلم بذكاء، تفوق في البكالوريا
-          </p>
-        </div>
+          <Logo
+            variant="dark"
+            className="gap-3.5"
+          />
+        </button>
       </div>
 
       <div className="relative z-10 text-center">
@@ -83,7 +98,7 @@ export default function SignUpBrandPanel() {
 
         <img
           src={signupIllustration}
-          alt="إنشاء حساب في منصة MathMaster"
+          alt="إنشاء حساب في منصة Bacly"
           className="
             mx-auto mt-5 h-[250px]
             max-w-full object-contain

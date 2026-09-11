@@ -1,8 +1,8 @@
 // src/components/islamicCourse/IslamicLessonMastery10.jsx
-// Mastery Focus UI: 5 phases + micro recall + BAC practice.
-// React + TailwindCSS + lucide-react only.
+// واجهة احترافية لدروس العلوم الإسلامية
+// React + TailwindCSS + lucide-react فقط
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -16,13 +16,10 @@ import {
   Clock3,
   Eye,
   GraduationCap,
-  Heart,
   Lightbulb,
   ListChecks,
   Menu,
   RotateCcw,
-  Scale,
-  Search,
   ShieldCheck,
   Sparkles,
   Target,
@@ -39,93 +36,71 @@ function cn(...classes) {
 }
 
 function arr(value) {
-  if (Array.isArray(value)) return value;
-  if (value === null || value === undefined || value === "") return [];
-  return [value];
+  return Array.isArray(value) ? value : value ? [value] : [];
 }
 
 function normalizeLesson(data) {
-  return data?.axis?.content || data?.content || data?.lesson || data || null;
+  return data?.lesson || data?.axis?.content || data?.content || data || null;
 }
 
-function getTitle(data, lesson) {
-  return data?.axis?.title || data?.title || lesson?.title || "درس العلوم الإسلامية";
+function getLessonTitle(lesson) {
+  return lesson?.title || "درس العلوم الإسلامية";
 }
 
-function stepIndexById(lesson) {
-  const map = new Map();
-  arr(lesson?.learning_path).forEach((step) => map.set(step.id, step));
-  return map;
+function percent(value, total) {
+  if (!total) return 0;
+  return Math.round((value / total) * 100);
 }
 
-function textOf(value) {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string" || typeof value === "number") return String(value);
-  if (typeof value === "object") {
-    return (
-      value.text ||
-      value.title ||
-      value.label ||
-      value.term ||
-      value.definition ||
-      value.description ||
-      value.explanation ||
-      value.answer ||
-      value.case ||
-      value.group ||
-      ""
-    );
-  }
-  return String(value);
+function axisQuestionIds(axis) {
+  return arr(axis?.quick_check).map((q) => q.id).filter(Boolean);
 }
 
-const EXCLUDED_GENERIC_KEYS = new Set([
-  "teacher",
-  "central_question",
-  "simple_answer",
-  "memory_hook",
-  "takeaway",
-  "definitions",
-  "attention",
-  "points",
-  "groups",
-  "graph_data",
-  "simple_formula",
-  "example",
-  "examples",
-  "quran_evidence",
-  "how_to_recognize",
-  "memory_word",
-  "cases",
-  "memory_story",
-  "recall_sentence",
-  "practice",
-  "steps",
-  "recognition_keys",
-  "bac_answer_template",
-  "comparisons",
-  "definition",
-  "importance",
-  "means_8",
-  "golden_chain",
-  "exam_rule",
-  "instructions",
-  "questions",
-  "mastery_rule",
-]);
+function normalizeArabic(value = "") {
+  return String(value)
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670]/g, "")
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ي")
+    .replace(/[^\u0621-\u064A0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function keywordCoverage(answer, keywords) {
+  const list = arr(keywords);
+  if (!answer.trim() || !list.length) return null;
+  const haystack = normalizeArabic(answer);
+  const hits = list.filter((word) => haystack.includes(normalizeArabic(word))).length;
+  return {
+    hits,
+    total: list.length,
+    value: Math.round((hits / list.length) * 100),
+  };
+}
 
 /* =========================================================
-   Small UI primitives
+   UI primitives
 ========================================================= */
 
-function SoftButton({ children, onClick, disabled, active = false, className = "" }) {
+function SoftButton({
+  children,
+  onClick,
+  disabled = false,
+  active = false,
+  className = "",
+  type = "button",
+}) {
   return (
     <button
-      type="button"
+      type={type}
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-sm font-bold transition",
+        "inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-black transition",
         active
           ? "border-emerald-900 bg-emerald-900 text-white"
           : "border-stone-200 bg-white text-stone-700 hover:border-stone-300 hover:bg-stone-50",
@@ -138,54 +113,96 @@ function SoftButton({ children, onClick, disabled, active = false, className = "
   );
 }
 
-function SectionLabel({ children }) {
+function SectionLabel({ children, icon: Icon = null }) {
   return (
-    <div className="mb-3 flex items-center gap-2 text-[11px] font-black tracking-wide text-stone-400">
-      <span className="h-1.5 w-1.5 rounded-full bg-emerald-700" />
+    <div className="mb-3 flex items-center gap-2 text-[11px] font-black text-stone-400">
+      {Icon ? <Icon size={14} className="text-emerald-800" /> : <span className="h-1.5 w-1.5 rounded-full bg-emerald-700" />}
       {children}
     </div>
   );
 }
 
-function QuietPanel({ children, className = "" }) {
+function Panel({ children, className = "" }) {
   return (
-    <div className={cn("rounded-3xl border border-stone-200 bg-white p-5 sm:p-6", className)}>
+    <div className={cn("rounded-[28px] border border-stone-200 bg-white p-5 sm:p-6", className)}>
       {children}
     </div>
   );
 }
 
-function Emphasis({ children }) {
+function DarkPanel({ children, className = "" }) {
   return (
-    <div className="rounded-3xl bg-stone-950 px-5 py-5 text-white sm:px-6">
+    <div className={cn("rounded-[28px] bg-stone-950 p-5 text-white sm:p-6", className)}>
       {children}
     </div>
   );
 }
 
-function Divider() {
-  return <div className="h-px w-full bg-stone-200" />;
+function TinyBadge({ children, tone = "stone" }) {
+  const styles = {
+    stone: "bg-stone-100 text-stone-600",
+    emerald: "bg-emerald-50 text-emerald-900",
+    dark: "bg-stone-950 text-white",
+    amber: "bg-amber-50 text-amber-900",
+  };
+
+  return (
+    <span className={cn("inline-flex rounded-full px-2.5 py-1 text-[10px] font-black", styles[tone] || styles.stone)}>
+      {children}
+    </span>
+  );
+}
+
+function ProgressBar({ value }) {
+  const safe = Math.max(0, Math.min(100, Number(value) || 0));
+  return (
+    <div className="h-2 overflow-hidden rounded-full bg-stone-100">
+      <div
+        className="h-full rounded-full bg-emerald-800 transition-all duration-300"
+        style={{ width: `${safe}%` }}
+      />
+    </div>
+  );
 }
 
 /* =========================================================
-   Header + progress
+   Header + overview drawer
 ========================================================= */
 
-function CourseHeader({ title, lesson, onOpenOverview }) {
+function Header({ lesson, progress, onOpenInfo, onGoHome }) {
   return (
-    <header className="border-b border-stone-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-        <div className="min-w-0">
-          <p className="text-[11px] font-black text-emerald-800">
-            الوحدة {lesson?.unit_number || "—"} · {lesson?.chapter_title || "العلوم الإسلامية"}
-          </p>
-          <h1 className="mt-1 truncate text-sm font-black text-stone-950 sm:text-base">{title}</h1>
+    <header className="sticky top-0 z-40 border-b border-stone-200 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3 sm:px-6 lg:px-8">
+        <button
+          type="button"
+          onClick={onGoHome}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-950 text-white"
+          aria-label="العودة إلى بداية الدرس"
+        >
+          <BookOpen size={18} />
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black text-emerald-800">
+                العلوم الإسلامية · الدرس {lesson?.order || lesson?.unit_number || 1}
+              </p>
+              <h1 className="mt-0.5 truncate text-sm font-black text-stone-950 sm:text-base">
+                {getLessonTitle(lesson)}
+              </h1>
+            </div>
+            <span className="hidden text-xs font-black text-stone-500 sm:block">{progress}% إتقان</span>
+          </div>
+          <div className="mt-2 max-w-xl">
+            <ProgressBar value={progress} />
+          </div>
         </div>
 
         <button
           type="button"
-          onClick={onOpenOverview}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 transition hover:bg-stone-50"
+          onClick={onOpenInfo}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-stone-200 bg-white text-stone-700 transition hover:bg-stone-50"
           aria-label="معلومات الدرس"
         >
           <Menu size={18} />
@@ -195,1105 +212,1174 @@ function CourseHeader({ title, lesson, onOpenOverview }) {
   );
 }
 
-function ProgressRail({ screens, index, onSelect }) {
-  return (
-    <div className="sticky top-0 z-30 border-b border-stone-200 bg-[#f7f6f2]/95 backdrop-blur">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="scrollbar-none flex gap-1 overflow-x-auto py-3">
-          {screens.map((screen, i) => {
-            const done = i < index;
-            const active = i === index;
-            return (
-              <button
-                type="button"
-                key={screen.id}
-                onClick={() => onSelect(i)}
-                className={cn(
-                  "group flex shrink-0 items-center gap-2 rounded-full px-3 py-2 text-xs font-bold transition",
-                  active
-                    ? "bg-stone-950 text-white"
-                    : done
-                      ? "text-emerald-900 hover:bg-white"
-                      : "text-stone-400 hover:bg-white hover:text-stone-700",
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex h-5 w-5 items-center justify-center rounded-full border text-[10px]",
-                    active
-                      ? "border-white/30 bg-white/10"
-                      : done
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                        : "border-stone-300 bg-white",
-                  )}
-                >
-                  {done ? <Check size={11} /> : i + 1}
-                </span>
-                <span>{screen.nav_label || `مرحلة ${i + 1}`}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   Intro screen
-========================================================= */
-
-function IntroScreen({ experience, title, lesson, onStart, onOverview }) {
-  const intro = experience?.intro || {};
+function InfoDrawer({ open, onClose, lesson }) {
+  if (!open) return null;
 
   return (
-    <main className="min-h-[calc(100vh-73px)] bg-[#f7f6f2] px-4 py-10 sm:px-6 lg:px-8">
-      <div className="mx-auto grid min-h-[68vh] max-w-6xl items-center gap-10 lg:grid-cols-[1fr_380px]">
-        <div>
-          <p className="text-xs font-black text-emerald-800">
-            {intro.eyebrow || `الوحدة ${lesson?.unit_number || ""}`}
-          </p>
-          <h2 className="mt-5 max-w-4xl text-4xl font-black leading-[1.35] text-stone-950 sm:text-5xl lg:text-6xl">
-            {intro.title || title}
-          </h2>
-          <p className="mt-6 max-w-2xl text-base font-semibold leading-8 text-stone-600 sm:text-lg">
-            {intro.subtitle || lesson?.lesson_goal}
-          </p>
-
-          <div className="mt-8 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={onStart}
-              className="inline-flex items-center gap-2 rounded-full bg-stone-950 px-6 py-3.5 text-sm font-black text-white transition hover:bg-stone-800"
-            >
-              {intro.primary_action || "ابدأ الدرس"}
-              <ArrowLeft size={17} />
-            </button>
-            <SoftButton onClick={onOverview}>{intro.secondary_action || "ماذا سأتعلم؟"}</SoftButton>
+    <div className="fixed inset-0 z-50">
+      <button
+        type="button"
+        aria-label="إغلاق"
+        onClick={onClose}
+        className="absolute inset-0 bg-stone-950/30 backdrop-blur-sm"
+      />
+      <aside className="absolute inset-y-0 right-0 w-full max-w-md overflow-y-auto bg-white p-6 shadow-2xl sm:p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-black text-emerald-800">معلومات الدرس</p>
+            <h2 className="mt-1 text-xl font-black leading-8 text-stone-950">{getLessonTitle(lesson)}</h2>
           </div>
-        </div>
-
-        <div className="rounded-[32px] border border-stone-200 bg-white p-6 shadow-[0_18px_60px_rgba(28,25,23,.06)] sm:p-7">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[11px] font-black text-stone-400">خطة التعلم</p>
-              <p className="mt-1 text-lg font-black text-stone-950">فكرة واحدة في كل مرة</p>
-            </div>
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
-              <Target size={20} />
-            </div>
-          </div>
-
-          <div className="mt-6 space-y-4">
-            {(arr(intro.plan).length
-              ? intro.plan
-              : ["افهم الأساس", "تعلّم المحتوى", "ثبّت الحفظ", "طبّق في البكالوريا", "اختبر الإتقان"]
-            ).map((item, i) => (
-                <div key={item} className="flex items-center gap-3">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-stone-200 text-xs font-black text-stone-500">
-                    {i + 1}
-                  </span>
-                  <span className="text-sm font-bold text-stone-700">{item}</span>
-                </div>
-              ),
-            )}
-          </div>
-
-          <Divider />
-          <div className="mt-5 flex items-center justify-between text-xs font-bold text-stone-500">
-            <span className="inline-flex items-center gap-2"><Clock3 size={14} /> {lesson?.estimated_minutes || 45} دقيقة</span>
-            <span>{arr(experience?.phases).length} مراحل رئيسية</span>
-          </div>
-        </div>
-      </div>
-    </main>
-  );
-}
-
-/* =========================================================
-   Common lesson blocks
-========================================================= */
-
-function FocusHeading({ screen, step }) {
-  const raw = step?.title || screen?.title || "";
-  const cleanTitle = raw.replace(/^\d+\s*[—-]\s*/, "");
-
-  return (
-    <div className="mb-8">
-      <div className="flex items-center gap-3">
-        {screen?.number && (
-          <span className="text-xs font-black tracking-[0.22em] text-emerald-800">{screen.number}</span>
-        )}
-        <span className="h-px w-9 bg-stone-300" />
-        <span className="text-[11px] font-black text-stone-400">{screen?.label || screen?.nav_label || step?.type}</span>
-      </div>
-      <h2 className="mt-4 text-3xl font-black leading-[1.45] text-stone-950 sm:text-4xl">{cleanTitle}</h2>
-    </div>
-  );
-}
-
-function TeacherText({ value }) {
-  if (!value) return null;
-  return (
-    <div className="max-w-4xl text-[17px] font-semibold leading-9 text-stone-700 sm:text-lg sm:leading-10">
-      {value}
-    </div>
-  );
-}
-
-function FlowLine({ value }) {
-  if (!value) return null;
-  const pieces = String(value).split(/→|←|\|/).map((p) => p.trim()).filter(Boolean);
-  return (
-    <div className="mt-7">
-      <SectionLabel>المسار الذهني</SectionLabel>
-      <div className="flex flex-wrap items-center gap-2">
-        {pieces.map((part, index) => (
-          <div className="contents" key={`${part}-${index}`}>
-            <span className="rounded-full border border-stone-200 bg-white px-4 py-2.5 text-sm font-black text-stone-800">
-              {part}
-            </span>
-            {index < pieces.length - 1 && <ArrowLeft size={15} className="text-stone-300" />}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function QuranEvidence({ evidence }) {
-  if (!evidence) return null;
-  return (
-    <div className="mt-8 border-r-2 border-emerald-800 pr-5 sm:pr-6">
-      <SectionLabel>الدليل القرآني</SectionLabel>
-      <p className="max-w-4xl text-xl font-black leading-[2.15] text-stone-950 sm:text-2xl">{evidence.text}</p>
-      {evidence.reference && <p className="mt-2 text-xs font-black text-emerald-800">{evidence.reference}</p>}
-      {evidence.connection && (
-        <div className="mt-5 max-w-3xl text-sm font-semibold leading-8 text-stone-600">
-          <strong className="text-stone-900">وجه الاستدلال: </strong>{evidence.connection}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MemoryWord({ word }) {
-  if (!word) return null;
-  return (
-    <div className="mt-8 inline-flex items-baseline gap-3 rounded-full bg-emerald-950 px-5 py-3 text-white">
-      <span className="text-[10px] font-black text-emerald-200">كلمة الحفظ</span>
-      <span className="text-xl font-black">{word}</span>
-    </div>
-  );
-}
-
-function Takeaway({ value }) {
-  if (!value) return null;
-  return (
-    <Emphasis>
-      <p className="text-[11px] font-black text-emerald-300">ما الذي يجب أن يبقى في ذاكرتك؟</p>
-      <p className="mt-2 text-base font-black leading-8 sm:text-lg">{value}</p>
-    </Emphasis>
-  );
-}
-
-function BacRecognition({ value }) {
-  if (!value) return null;
-  return (
-    <div className="mt-8">
-      <SectionLabel>كيف أتعرف عليها في البكالوريا؟</SectionLabel>
-      <p className="max-w-4xl text-sm font-bold leading-8 text-stone-700">{value}</p>
-    </div>
-  );
-}
-
-/* =========================================================
-   Minimal visuals — not a global mind map
-========================================================= */
-
-const visualIcon = {
-  emotion: Heart,
-  reasoning: Brain,
-  distress: ShieldCheck,
-  correction: Search,
-  monitoring: Eye,
-  story: BookOpen,
-  contrast: Scale,
-  power: Sparkles,
-};
-
-function ConceptVisual({ type, content }) {
-  if (!type) return null;
-  const Icon = visualIcon[type] || Lightbulb;
-
-  if (type === "contrast" && arr(content?.cases).length) {
-    return (
-      <div className="mt-8 grid gap-3 md:grid-cols-2">
-        {content.cases.map((item, index) => (
-          <QuietPanel key={index} className="relative overflow-hidden">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-[11px] font-black text-stone-400">{index === 0 ? "اقترب" : "ابتعد"}</p>
-                <h3 className="mt-1 text-lg font-black text-stone-950">{item.case}</h3>
-              </div>
-              <Scale size={20} className="text-emerald-800" />
-            </div>
-            <p className="mt-4 text-sm font-semibold leading-8 text-stone-600">{item.description}</p>
-            {item.effect && <p className="mt-4 border-t border-stone-100 pt-4 text-sm font-black leading-7 text-stone-900">{item.effect}</p>}
-          </QuietPanel>
-        ))}
-      </div>
-    );
-  }
-
-  if (type === "story") {
-    const parts = ["قصة", "ابتلاء", "ثبات", "نصر", "عبرة"];
-    return (
-      <div className="mt-8">
-        <SectionLabel>كيف تعمل الفكرة؟</SectionLabel>
-        <div className="relative grid gap-3 sm:grid-cols-5">
-          {parts.map((part, index) => (
-            <div key={part} className="relative rounded-2xl border border-stone-200 bg-white px-3 py-4 text-center text-sm font-black text-stone-800">
-              <span className="mb-2 block text-[10px] font-bold text-stone-400">0{index + 1}</span>
-              {part}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (type === "distress") {
-    return (
-      <div className="mt-8 grid gap-3 sm:grid-cols-2">
-        <QuietPanel>
-          <p className="text-[11px] font-black text-stone-400">في الرخاء</p>
-          <p className="mt-2 text-lg font-black text-stone-950">قد يغفل الإنسان</p>
-          <p className="mt-2 text-sm font-semibold leading-7 text-stone-600">تضعف ملاحظة حاجته إلى الله.</p>
-        </QuietPanel>
-        <QuietPanel className="border-emerald-200">
-          <p className="text-[11px] font-black text-emerald-800">عند الشدة</p>
-          <p className="mt-2 text-lg font-black text-stone-950">يشعر بضعفه ويلجأ إلى الله</p>
-          <p className="mt-2 text-sm font-semibold leading-7 text-stone-600">فتظهر حقيقة العبودية والحاجة إلى الخالق.</p>
-        </QuietPanel>
-      </div>
-    );
-  }
-
-  if (type === "correction") {
-    return (
-      <div className="mt-8 grid items-center gap-3 sm:grid-cols-[1fr_auto_1fr_auto_1fr]">
-        {[
-          ["فكرة منحرفة", "تُعرض بوضوح"],
-          ["المناقشة", "دليل وعقل"],
-          ["ظهور الحق", "إبطال التناقض"],
-        ].map(([title, subtitle], index) => (
-          <div className="contents" key={title}>
-            <QuietPanel className="p-4 text-center">
-              <p className="text-sm font-black text-stone-900">{title}</p>
-              <p className="mt-1 text-xs font-bold text-stone-400">{subtitle}</p>
-            </QuietPanel>
-            {index < 2 && <ArrowLeft className="mx-auto text-stone-300" size={17} />}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (type === "monitoring") {
-    return (
-      <div className="mt-8 flex max-w-3xl items-center gap-5 rounded-3xl border border-stone-200 bg-white p-5 sm:p-6">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-900"><Eye size={24} /></span>
-        <div>
-          <p className="text-base font-black text-stone-950">الله يعلم → أنا مسؤول → أراقب سلوكي</p>
-          <p className="mt-2 text-sm font-semibold leading-7 text-stone-600">الإيمان هنا ينتقل من المعرفة إلى السلوك اليومي.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (type === "power") {
-    return (
-      <div className="mt-8 flex max-w-3xl flex-wrap items-center gap-3">
-        {["الخلق", "الرزق", "الإحياء", "الإماتة", "التدبير"].map((item) => (
-          <span key={item} className="rounded-full border border-stone-200 bg-white px-4 py-2.5 text-sm font-black text-stone-800">{item}</span>
-        ))}
-        <ArrowLeft size={16} className="text-stone-300" />
-        <span className="rounded-full bg-emerald-950 px-4 py-2.5 text-sm font-black text-white">تعظيم قدرة الله</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-8 flex max-w-3xl items-center gap-5 rounded-3xl border border-stone-200 bg-white p-5 sm:p-6">
-      <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-900"><Icon size={24} /></span>
-      <div>
-        <p className="text-xs font-black text-stone-400">الفكرة بصريًا</p>
-        <p className="mt-1 text-base font-black leading-7 text-stone-950">{content?.simple_formula || content?.takeaway}</p>
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   Step-specific renderers
-========================================================= */
-
-function OpeningRenderer({ content }) {
-  return (
-    <div className="space-y-8">
-      <TeacherText value={content.teacher} />
-      {content.central_question && (
-        <QuietPanel className="max-w-4xl">
-          <div className="flex items-start gap-4">
-            <CircleHelp className="mt-1 shrink-0 text-emerald-800" size={22} />
-            <div>
-              <p className="text-xs font-black text-stone-400">السؤال المركزي</p>
-              <p className="mt-2 text-xl font-black leading-9 text-stone-950">{content.central_question}</p>
-              {content.simple_answer && <p className="mt-4 text-sm font-semibold leading-8 text-stone-600">{content.simple_answer}</p>}
-            </div>
-          </div>
-        </QuietPanel>
-      )}
-      {content.memory_hook && <p className="max-w-4xl text-sm font-black leading-8 text-emerald-900">{content.memory_hook}</p>}
-      <Takeaway value={content.takeaway} />
-    </div>
-  );
-}
-
-function DefinitionRenderer({ content }) {
-  return (
-    <div className="space-y-7">
-      <TeacherText value={content.teacher} />
-      <div className="grid gap-4 md:grid-cols-2">
-        {arr(content.definitions).map((item, index) => (
-          <QuietPanel key={index}>
-            <p className="text-xs font-black text-emerald-800">{item.term}</p>
-            <p className="mt-3 text-lg font-black leading-9 text-stone-950">{item.definition}</p>
-            {item.memory_tip && <p className="mt-4 text-sm font-bold leading-7 text-stone-500">{item.memory_tip}</p>}
-          </QuietPanel>
-        ))}
-      </div>
-      {content.attention && <p className="text-sm font-black text-stone-900"><span className="text-emerald-800">انتبه: </span>{content.attention}</p>}
-      <Takeaway value={content.takeaway} />
-    </div>
-  );
-}
-
-function ImportanceRenderer({ content }) {
-  return (
-    <div className="space-y-8">
-      <TeacherText value={content.teacher} />
-      <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2">
-        {arr(content.points).map((item, index) => (
-          <div key={index} className="border-r border-stone-200 pr-4">
-            <span className="text-[11px] font-black text-stone-400">0{index + 1}</span>
-            <h3 className="mt-1 text-lg font-black text-stone-950">{item.title}</h3>
-            <p className="mt-2 text-sm font-semibold leading-7 text-stone-600">{item.explanation}</p>
-          </div>
-        ))}
-      </div>
-      {content.memory_hook && <p className="text-sm font-black text-emerald-900">مفتاح الحفظ: {content.memory_hook}</p>}
-      <Takeaway value={content.takeaway} />
-    </div>
-  );
-}
-
-function OverviewRenderer({ content }) {
-  return (
-    <div className="space-y-8">
-      <TeacherText value={content.teacher} />
-      <div className="divide-y divide-stone-200 rounded-3xl border border-stone-200 bg-white">
-        {arr(content.groups).map((group, index) => (
-          <div key={index} className="grid gap-4 p-5 sm:grid-cols-[190px_1fr] sm:p-6">
-            <div>
-              <span className="text-[11px] font-black text-stone-400">مجموعة {index + 1}</span>
-              <h3 className="mt-1 text-base font-black text-stone-950">{group.group?.replace(/^\d+\s*[—-]\s*/, "")}</h3>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {arr(group.items).map((item) => (
-                <span key={item} className="rounded-full bg-stone-100 px-3 py-2 text-xs font-black text-stone-700">{item}</span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      {content.memory_hook && <p className="text-sm font-black text-emerald-900">{content.memory_hook}</p>}
-      <Takeaway value={content.takeaway} />
-    </div>
-  );
-}
-
-function MeanRenderer({ screen, content }) {
-  return (
-    <div>
-      <TeacherText value={content.teacher} />
-      <ConceptVisual type={screen.visual} content={content} />
-      <FlowLine value={content.simple_formula} />
-
-      {content.example && (
-        <div className="mt-8 max-w-4xl">
-          <SectionLabel>مثال بسيط</SectionLabel>
-          <p className="text-sm font-semibold leading-8 text-stone-700">{content.example}</p>
-        </div>
-      )}
-
-      {arr(content.examples).length > 0 && (
-        <div className="mt-8 grid gap-3 md:grid-cols-2">
-          {content.examples.map((item, index) => (
-            <QuietPanel key={index} className="p-4 text-sm font-semibold leading-8 text-stone-700">{item}</QuietPanel>
-          ))}
-        </div>
-      )}
-
-      <QuranEvidence evidence={content.quran_evidence} />
-      <BacRecognition value={content.how_to_recognize} />
-      <MemoryWord word={content.memory_word} />
-      <div className="mt-8"><Takeaway value={content.takeaway} /></div>
-    </div>
-  );
-}
-
-function MemoryRenderer({ content }) {
-  const [hidden, setHidden] = useState(false);
-  return (
-    <div className="space-y-8">
-      <TeacherText value={content.teacher} />
-      <div className="flex justify-end">
-        <SoftButton onClick={() => setHidden((v) => !v)} active={hidden}>
-          <Eye size={15} /> {hidden ? "اكشف الكلمات" : "اختبر ذاكرتي"}
-        </SoftButton>
-      </div>
-      <div className="divide-y divide-stone-200 overflow-hidden rounded-3xl border border-stone-200 bg-white">
-        {arr(content.memory_story).map((item, index) => (
-          <div key={index} className="grid grid-cols-[52px_110px_1fr] items-center gap-3 px-4 py-4 sm:grid-cols-[64px_150px_1fr] sm:px-6">
-            <span className="text-xs font-black text-stone-300">0{index + 1}</span>
-            <span className="text-lg font-black text-emerald-900">{hidden ? "؟" : item.word}</span>
-            <span className="text-sm font-bold leading-7 text-stone-700">{hidden ? (content.recall_placeholder || "حاول استرجاع الفكرة") : item.means}</span>
-          </div>
-        ))}
-      </div>
-      {content.recall_sentence && <Emphasis><p className="text-sm font-black leading-8">{content.recall_sentence}</p></Emphasis>}
-      {content.practice && <p className="text-sm font-semibold leading-8 text-stone-600">{content.practice}</p>}
-      <Takeaway value={content.takeaway} />
-    </div>
-  );
-}
-
-function BacMethodRenderer({ content }) {
-  return (
-    <div className="space-y-8">
-      <TeacherText value={content.teacher} />
-      <div className="space-y-4">
-        {arr(content.steps).map((item, index) => (
-          <div key={index} className="flex gap-4">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-950 text-xs font-black text-white">{index + 1}</span>
-            <p className="pt-1 text-sm font-bold leading-7 text-stone-700">{item}</p>
-          </div>
-        ))}
-      </div>
-
-      {arr(content.recognition_keys).length > 0 && (
-        <QuietPanel>
-          <SectionLabel>مفاتيح سريعة</SectionLabel>
-          <div className="divide-y divide-stone-100">
-            {content.recognition_keys.map((row, index) => (
-              <div key={index} className="grid gap-2 py-3 sm:grid-cols-[1fr_220px]">
-                <span className="text-sm font-semibold text-stone-600">{row.clue}</span>
-                <span className="text-sm font-black text-emerald-900">{row.answer}</span>
-              </div>
-            ))}
-          </div>
-        </QuietPanel>
-      )}
-
-      {content.bac_answer_template && (
-        <Emphasis>
-          <p className="text-[11px] font-black text-emerald-300">قالب الإجابة</p>
-          <p className="mt-2 text-lg font-black leading-8">{content.bac_answer_template}</p>
-        </Emphasis>
-      )}
-      <Takeaway value={content.takeaway} />
-    </div>
-  );
-}
-
-function ComparisonRenderer({ content }) {
-  return (
-    <div className="space-y-8">
-      <TeacherText value={content.teacher} />
-      <div className="divide-y divide-stone-200 overflow-hidden rounded-3xl border border-stone-200 bg-white">
-        {arr(content.comparisons).map((item, index) => (
-          <div key={index} className="p-5 sm:p-6">
-            <div className="flex flex-wrap items-center gap-2 text-sm font-black">
-              <span className="text-emerald-900">{item.a}</span>
-              <span className="text-stone-300">≠</span>
-              <span className="text-stone-900">{item.b}</span>
-            </div>
-            <p className="mt-3 text-sm font-semibold leading-8 text-stone-600">{item.difference}</p>
-          </div>
-        ))}
-      </div>
-      <Takeaway value={content.takeaway} />
-    </div>
-  );
-}
-
-function ActiveRecallRenderer({ screen }) {
-  const [visible, setVisible] = useState({});
-  const revealAll = Object.keys(visible).length === arr(screen.items).length;
-
-  const toggle = (index) => setVisible((v) => ({ ...v, [index]: !v[index] }));
-  const toggleAll = () => {
-    if (revealAll) return setVisible({});
-    const next = {};
-    arr(screen.items).forEach((_, i) => { next[i] = true; });
-    setVisible(next);
-  };
-
-  return (
-    <div className="space-y-7">
-      <p className="max-w-3xl text-base font-semibold leading-8 text-stone-600">{screen.subtitle}</p>
-      <div className="flex justify-end"><SoftButton onClick={toggleAll}>{revealAll ? "أخفِ الإجابات" : "اكشف الجميع"}</SoftButton></div>
-      <div className="divide-y divide-stone-200 overflow-hidden rounded-3xl border border-stone-200 bg-white">
-        {arr(screen.items).map((item, index) => (
           <button
             type="button"
-            onClick={() => toggle(index)}
-            key={index}
-            className="grid w-full grid-cols-[44px_110px_1fr] items-center gap-3 px-4 py-4 text-right transition hover:bg-stone-50 sm:grid-cols-[60px_150px_1fr] sm:px-6"
+            onClick={onClose}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-stone-200"
           >
-            <span className="text-xs font-black text-stone-300">0{index + 1}</span>
-            <span className="text-lg font-black text-emerald-900">{item.word}</span>
-            <span className={cn("text-sm font-bold leading-7", visible[index] ? "text-stone-800" : "text-stone-300")}>
-              {visible[index] ? item.answer : "اضغط بعد أن تحاول التذكر"}
-            </span>
+            <X size={18} />
           </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TeachBackRenderer({ screen }) {
-  const [text, setText] = useState("");
-  const [checks, setChecks] = useState({});
-  return (
-    <div className="space-y-7">
-      <p className="max-w-3xl text-base font-semibold leading-8 text-stone-600">{screen.subtitle}</p>
-      <QuietPanel>
-        <p className="text-xs font-black text-emerald-800">اشرح الآن</p>
-        <p className="mt-2 text-lg font-black leading-8 text-stone-950">{screen.prompt}</p>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={7}
-          placeholder="اكتب شرحك هنا من ذاكرتك..."
-          className="mt-5 w-full resize-none rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm font-semibold leading-8 text-stone-800 outline-none transition focus:border-emerald-700 focus:bg-white"
-        />
-        <p className="mt-2 text-left text-[11px] font-bold text-stone-400">{text.trim().length} حرف</p>
-      </QuietPanel>
-
-      <div>
-        <SectionLabel>راجع شرحك بنفسك</SectionLabel>
-        <div className="space-y-2">
-          {arr(screen.checkpoints).map((item, index) => (
-            <button
-              type="button"
-              key={index}
-              onClick={() => setChecks((c) => ({ ...c, [index]: !c[index] }))}
-              className="flex w-full items-start gap-3 rounded-2xl px-3 py-3 text-right transition hover:bg-white"
-            >
-              <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border", checks[index] ? "border-emerald-800 bg-emerald-800 text-white" : "border-stone-300 bg-white")}>{checks[index] && <Check size={12} />}</span>
-              <span className="text-sm font-bold leading-7 text-stone-700">{item}</span>
-            </button>
-          ))}
         </div>
-      </div>
-    </div>
-  );
-}
 
-function SpacedReviewRenderer({ screen }) {
-  return (
-    <div className="space-y-7">
-      <p className="max-w-3xl text-base font-semibold leading-8 text-stone-600">{screen.subtitle}</p>
-      <div className="space-y-0">
-        {arr(screen.schedule).map((item, index) => (
-          <div key={index} className="grid grid-cols-[32px_1fr] gap-4">
-            <div className="flex flex-col items-center">
-              <span className="mt-1 h-3 w-3 rounded-full border-[3px] border-emerald-800 bg-[#f7f6f2]" />
-              {index < screen.schedule.length - 1 && <span className="h-full w-px bg-stone-200" />}
+        <div className="mt-8 space-y-8">
+          {lesson?.lesson_goal && (
+            <div>
+              <SectionLabel icon={Target}>هدف الدرس</SectionLabel>
+              <p className="text-sm font-semibold leading-8 text-stone-700">{lesson.lesson_goal}</p>
             </div>
-            <div className="pb-7">
-              <p className="text-xs font-black text-emerald-800">{item.when}</p>
-              <p className="mt-1 text-sm font-bold leading-7 text-stone-700">{item.task}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+          )}
 
-function SummaryRenderer({ content }) {
-  const sections = arr(content.sections);
-
-  if (sections.length > 0) {
-    return (
-      <div className="space-y-8">
-        <div className="grid gap-5 lg:grid-cols-2">
-          {sections.map((section, index) => (
-            <QuietPanel key={section.id || section.title || index}>
-              <SectionLabel>{section.title || `المحور ${index + 1}`}</SectionLabel>
-              <div className="space-y-2">
-                {arr(section.items).map((item, itemIndex) => (
-                  <p key={itemIndex} className="text-sm font-bold leading-7 text-stone-700">
-                    {itemIndex + 1}. {textOf(item)}
+          {arr(lesson?.learning_outcomes).length > 0 && (
+            <div>
+              <SectionLabel icon={CheckCircle2}>بعد الدرس تستطيع</SectionLabel>
+              <div className="space-y-2.5">
+                {lesson.learning_outcomes.map((item, index) => (
+                  <p key={index} className="flex gap-2 text-sm font-semibold leading-7 text-stone-700">
+                    <Check size={14} className="mt-1.5 shrink-0 text-emerald-800" />
+                    {item}
                   </p>
                 ))}
               </div>
-            </QuietPanel>
-          ))}
-        </div>
-
-        {content.golden_chain && (
-          <Emphasis>
-            <p className="text-[11px] font-black text-emerald-300">سلسلة الحفظ</p>
-            <p className="mt-2 text-base font-black leading-8">{content.golden_chain}</p>
-          </Emphasis>
-        )}
-
-        {content.exam_rule && (
-          <p className="text-sm font-black leading-8 text-emerald-900">
-            قاعدة الامتحان: {content.exam_rule}
-          </p>
-        )}
-
-        <Takeaway value={content.takeaway} />
-      </div>
-    );
-  }
-
-  // Backward compatibility with lesson 1 JSON.
-  return (
-    <div className="space-y-8">
-      {content.definition && (
-        <div>
-          <SectionLabel>التعريف</SectionLabel>
-          <p className="text-lg font-black leading-9 text-stone-950">{content.definition}</p>
-        </div>
-      )}
-      <Divider />
-      <div className="grid gap-8 lg:grid-cols-2">
-        <div>
-          <SectionLabel>أهمية العقيدة</SectionLabel>
-          <div className="space-y-2">
-            {arr(content.importance).map((item, index) => (
-              <p key={index} className="text-sm font-bold leading-7 text-stone-700">
-                {index + 1}. {item}
-              </p>
-            ))}
-          </div>
-        </div>
-        <div>
-          <SectionLabel>الوسائل الثماني</SectionLabel>
-          <div className="space-y-2">
-            {arr(content.means_8).map((item, index) => (
-              <p key={index} className="text-sm font-bold leading-7 text-stone-700">
-                {index + 1}. {item}
-              </p>
-            ))}
-          </div>
-        </div>
-      </div>
-      {content.golden_chain && (
-        <Emphasis>
-          <p className="text-[11px] font-black text-emerald-300">السلسلة الذهبية</p>
-          <p className="mt-2 text-base font-black leading-8">{content.golden_chain}</p>
-        </Emphasis>
-      )}
-      {content.exam_rule && (
-        <p className="text-sm font-black leading-8 text-emerald-900">
-          قاعدة الامتحان: {content.exam_rule}
-        </p>
-      )}
-      <Takeaway value={content.takeaway} />
-    </div>
-  );
-}
-
-function QuizRenderer({ content }) {
-  const [revealed, setRevealed] = useState({});
-  const [mastered, setMastered] = useState({});
-  const score = Object.values(mastered).filter(Boolean).length;
-  const total = arr(content.questions).length;
-
-  return (
-    <div className="space-y-7">
-      {content.instructions && <p className="text-base font-semibold leading-8 text-stone-600">{content.instructions}</p>}
-      <div className="space-y-3">
-        {arr(content.questions).map((q, index) => (
-          <QuietPanel key={q.id || index}>
-            <div className="flex items-start gap-4">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-xs font-black text-stone-500">{index + 1}</span>
-              <div className="min-w-0 flex-1">
-                <p className="text-base font-black leading-8 text-stone-950">{q.question}</p>
-                {!revealed[index] ? (
-                  <button type="button" onClick={() => setRevealed((r) => ({ ...r, [index]: true }))} className="mt-4 text-sm font-black text-emerald-800 hover:text-emerald-950">اكشف الإجابة</button>
-                ) : (
-                  <div className="mt-4 border-t border-stone-100 pt-4">
-                    <p className="text-sm font-semibold leading-8 text-stone-700">{q.answer}</p>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <SoftButton active={mastered[index] === true} onClick={() => setMastered((m) => ({ ...m, [index]: true }))}><CheckCircle2 size={15} /> عرفتها</SoftButton>
-                      <SoftButton active={mastered[index] === false} onClick={() => setMastered((m) => ({ ...m, [index]: false }))}><RotateCcw size={15} /> أراجعها</SoftButton>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
-          </QuietPanel>
-        ))}
-      </div>
-      <Emphasis>
-        <div className="flex items-center justify-between gap-4">
-          <div><p className="text-[11px] font-black text-emerald-300">إتقانك الحالي</p><p className="mt-1 text-2xl font-black">{score} / {total}</p></div>
-          <Trophy size={28} className="text-emerald-300" />
-        </div>
-        {content.mastery_rule && <p className="mt-4 text-sm font-semibold leading-7 text-stone-300">{content.mastery_rule}</p>}
-      </Emphasis>
-    </div>
-  );
-}
-
-/* =========================================================
-   Fallback renderer for any extra JSON fields
-========================================================= */
-
-function GenericValue({ value, depth = 0 }) {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return <p className="text-sm font-semibold leading-8 text-stone-700">{String(value)}</p>;
-  }
-  if (Array.isArray(value)) {
-    return (
-      <div className="space-y-2">
-        {value.map((item, index) => (
-          <div key={index} className={cn(depth === 0 && "rounded-2xl border border-stone-200 bg-white p-4")}>
-            <GenericValue value={item} depth={depth + 1} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-  if (typeof value === "object") {
-    return (
-      <div className="space-y-3">
-        {Object.entries(value).map(([key, val]) => (
-          <div key={key}>
-            <p className="mb-1 text-[11px] font-black text-stone-400">{key.replaceAll("_", " ")}</p>
-            <GenericValue value={val} depth={depth + 1} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return null;
-}
-
-function ExtraFields({ content }) {
-  const extras = Object.entries(content || {}).filter(([key]) => !EXCLUDED_GENERIC_KEYS.has(key));
-  if (!extras.length) return null;
-  return (
-    <details className="mt-10 rounded-3xl border border-stone-200 bg-white p-5">
-      <summary className="cursor-pointer text-sm font-black text-stone-700">معلومات إضافية من ملف الدرس</summary>
-      <div className="mt-5 space-y-5">
-        {extras.map(([key, value]) => (
-          <div key={key}>
-            <SectionLabel>{key.replaceAll("_", " ")}</SectionLabel>
-            <GenericValue value={value} />
-          </div>
-        ))}
-      </div>
-    </details>
-  );
-}
-
-
-/* =========================================================
-   Mastery interactions: micro recall + BAC challenge
-========================================================= */
-
-function MicroRecallRenderer({ screen }) {
-  const [revealed, setRevealed] = useState(false);
-  const [attempted, setAttempted] = useState(false);
-  const pairs = arr(screen?.pairs);
-  const answers = arr(screen?.answers);
-
-  return (
-    <div className="mx-auto max-w-3xl">
-      <div className="rounded-[32px] border border-stone-200 bg-white p-6 sm:p-9">
-        <div className="flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-stone-950 text-white">
-            <Brain size={19} />
-          </span>
-          <div>
-            <p className="text-[11px] font-black text-emerald-800">استرجاع نشط</p>
-            <h3 className="mt-1 text-xl font-black text-stone-950">{screen?.title || "بدون النظر"}</h3>
-          </div>
-        </div>
-
-        <p className="mt-6 text-lg font-black leading-9 text-stone-800">{screen?.prompt}</p>
-        <p className="mt-2 text-sm font-semibold leading-7 text-stone-500">
-          حاول قول الإجابة بصوتك أو كتابتها على ورقة، ثم اكشف الحل.
-        </p>
-
-        {pairs.length > 0 && (
-          <div className="mt-7 grid gap-3 sm:grid-cols-2">
-            {pairs.map((item, index) => (
-              <div key={`${item.cue}-${index}`} className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-                <p className="text-xs font-black text-stone-400">كلمة الذاكرة</p>
-                <p className="mt-2 text-2xl font-black text-stone-950">{item.cue}</p>
-                <div className="mt-4 min-h-14 border-t border-dashed border-stone-300 pt-4">
-                  {revealed ? (
-                    <p className="text-sm font-black leading-7 text-emerald-900">{item.answer}</p>
-                  ) : (
-                    <p className="text-sm font-bold text-stone-300">ما الوسيلة؟</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {answers.length > 0 && revealed && (
-          <div className="mt-7 space-y-2">
-            {answers.map((answer, index) => (
-              <p key={index} className="flex gap-2 text-sm font-semibold leading-8 text-stone-700">
-                <CheckCircle2 size={16} className="mt-1.5 shrink-0 text-emerald-800" />
-                {answer}
-              </p>
-            ))}
-          </div>
-        )}
-
-        <div className="mt-7 flex flex-wrap gap-3">
-          {!attempted && (
-            <button type="button" onClick={() => setAttempted(true)} className="rounded-full border border-stone-300 bg-white px-5 py-3 text-sm font-black text-stone-800 hover:bg-stone-50">
-              حاولت من ذاكرتي
-            </button>
           )}
-          <button
-            type="button"
-            disabled={!attempted}
-            onClick={() => setRevealed((v) => !v)}
-            className={cn(
-              "rounded-full px-5 py-3 text-sm font-black transition",
-              attempted ? "bg-stone-950 text-white hover:bg-stone-800" : "cursor-not-allowed bg-stone-100 text-stone-400",
-            )}
-          >
-            {revealed ? "أخفِ الإجابة" : "اكشف الإجابة"}
-          </button>
+
+          {arr(lesson?.source_basis).length > 0 && (
+            <div>
+              <SectionLabel icon={BookOpen}>المصادر المستعملة</SectionLabel>
+              <div className="space-y-3">
+                {lesson.source_basis.map((source) => (
+                  <div key={source.id || source.title} className="rounded-2xl bg-stone-50 p-4">
+                    <p className="text-sm font-black leading-7 text-stone-900">{source.title}</p>
+                    <p className="mt-1 text-xs font-bold text-emerald-800">الصفحة {source.page}</p>
+                    <p className="mt-2 text-xs font-semibold leading-6 text-stone-600">{source.role}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {lesson?.content_policy?.bac_ideas_note && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-bold leading-6 text-amber-950">
+              {lesson.content_policy.bac_ideas_note}
+            </div>
+          )}
         </div>
+      </aside>
+    </div>
+  );
+}
+
+/* =========================================================
+   Sidebar navigation
+========================================================= */
+
+function NavItem({ active, done, icon: Icon, title, subtitle, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "w-full rounded-2xl px-3 py-3 text-right transition",
+        active ? "bg-stone-950 text-white" : "text-stone-700 hover:bg-white",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={cn(
+            "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border",
+            active
+              ? "border-white/20 bg-white/10 text-white"
+              : done
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border-stone-200 bg-white text-stone-500",
+          )}
+        >
+          {done && !active ? <Check size={14} /> : <Icon size={15} />}
+        </span>
+        <span className="min-w-0">
+          <span className="block text-xs font-black leading-6">{title}</span>
+          {subtitle && (
+            <span className={cn("mt-0.5 block text-[10px] font-bold leading-5", active ? "text-stone-300" : "text-stone-400")}>
+              {subtitle}
+            </span>
+          )}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function Sidebar({ lesson, screen, axisIndex, completedAxes, onNavigate }) {
+  const axes = arr(lesson?.axes);
+
+  return (
+    <aside className="hidden lg:block">
+      <div className="sticky top-[86px] space-y-2 rounded-[30px] border border-stone-200 bg-stone-50 p-3">
+        <NavItem
+          active={screen === "home"}
+          done={false}
+          icon={BookOpen}
+          title="نظرة عامة"
+          subtitle="الهدف وخريطة الدرس"
+          onClick={() => onNavigate("home")}
+        />
+
+        <div className="my-2 h-px bg-stone-200" />
+
+        {axes.map((axis, index) => (
+          <NavItem
+            key={axis.id}
+            active={screen === "axis" && axisIndex === index}
+            done={completedAxes.has(axis.id)}
+            icon={Brain}
+            title={`${index + 1}. ${axis.title}`}
+            subtitle={axis.objective}
+            onClick={() => onNavigate("axis", index)}
+          />
+        ))}
+
+        <div className="my-2 h-px bg-stone-200" />
+
+        <NavItem
+          active={screen === "bac"}
+          done={false}
+          icon={GraduationCap}
+          title="أفكار البكالوريا"
+          subtitle="صيغ الأسئلة وطريقة الإجابة"
+          onClick={() => onNavigate("bac")}
+        />
+        <NavItem
+          active={screen === "review"}
+          done={false}
+          icon={RotateCcw}
+          title="المراجعة الذكية"
+          subtitle="استرجاع متباعد"
+          onClick={() => onNavigate("review")}
+        />
+        <NavItem
+          active={screen === "test"}
+          done={false}
+          icon={Trophy}
+          title="اختبار الإتقان"
+          subtitle="تأكد أنك أتقنت الدرس"
+          onClick={() => onNavigate("test")}
+        />
+      </div>
+    </aside>
+  );
+}
+
+function MobileNav({ lesson, screen, axisIndex, completedAxes, onNavigate }) {
+  const axes = arr(lesson?.axes);
+
+  const items = [
+    { id: "home", label: "نظرة عامة", icon: BookOpen },
+    ...axes.map((axis, index) => ({ id: `axis-${index}`, label: `محور ${index + 1}`, icon: Brain, axisIndex: index, axisId: axis.id })),
+    { id: "bac", label: "البكالوريا", icon: GraduationCap },
+    { id: "review", label: "مراجعة", icon: RotateCcw },
+    { id: "test", label: "اختبار", icon: Trophy },
+  ];
+
+  return (
+    <div className="border-b border-stone-200 bg-stone-50 lg:hidden">
+      <div className="scrollbar-none flex gap-2 overflow-x-auto px-4 py-3 sm:px-6">
+        {items.map((item) => {
+          const active = item.axisIndex !== undefined ? screen === "axis" && axisIndex === item.axisIndex : screen === item.id;
+          const done = item.axisId ? completedAxes.has(item.axisId) : false;
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => item.axisIndex !== undefined ? onNavigate("axis", item.axisIndex) : onNavigate(item.id)}
+              className={cn(
+                "flex shrink-0 items-center gap-2 rounded-full px-3 py-2 text-xs font-black transition",
+                active ? "bg-stone-950 text-white" : "border border-stone-200 bg-white text-stone-600",
+              )}
+            >
+              {done && !active ? <Check size={13} /> : <Icon size={13} />}
+              {item.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function BacChallengeRenderer({ screen }) {
-  const questions = arr(screen?.questions);
-  const [answers, setAnswers] = useState({});
-  const [checked, setChecked] = useState({});
+/* =========================================================
+   Home screen
+========================================================= */
 
-  const correctCount = questions.reduce((n, q) => n + (checked[q.id] && answers[q.id] === q.answer ? 1 : 0), 0);
+function HomeScreen({ lesson, completedAxes, onStartAxis, onNavigate }) {
+  const axes = arr(lesson?.axes);
+  const completion = percent(completedAxes.size, axes.length);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
-      <div className="mb-8">
-        <p className="text-[11px] font-black text-emerald-800">تطبيق امتحاني</p>
-        <h3 className="mt-2 text-2xl font-black text-stone-950">{screen?.title || "تحدي البكالوريا"}</h3>
-      </div>
-
-      {questions.map((q, index) => {
-        const isChecked = Boolean(checked[q.id]);
-        const isCorrect = answers[q.id] === q.answer;
-        return (
-          <div key={q.id} className="rounded-[28px] border border-stone-200 bg-white p-5 sm:p-7">
-            <div className="flex gap-4">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-stone-950 text-xs font-black text-white">{index + 1}</span>
-              <p className="text-base font-black leading-8 text-stone-900">{q.prompt}</p>
+    <div className="space-y-8 py-7 sm:py-10">
+      <section className="rounded-[34px] border border-stone-200 bg-white p-6 shadow-[0_22px_70px_rgba(28,25,23,.06)] sm:p-8 lg:p-10">
+        <div className="grid gap-8 xl:grid-cols-[1fr_320px] xl:items-center">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <TinyBadge tone="emerald">الدرس {lesson?.order || 1}</TinyBadge>
+              <TinyBadge>{lesson?.difficulty || "أساسي"}</TinyBadge>
+              <TinyBadge>{lesson?.estimated_minutes || 50} دقيقة</TinyBadge>
             </div>
 
-            <div className="mt-6 grid gap-2 sm:grid-cols-2">
-              {arr(q.options).map((option) => {
-                const selected = answers[q.id] === option;
-                const showRight = isChecked && option === q.answer;
-                const showWrong = isChecked && selected && option !== q.answer;
-                return (
-                  <button
-                    type="button"
-                    key={option}
-                    onClick={() => !isChecked && setAnswers((prev) => ({ ...prev, [q.id]: option }))}
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-right text-sm font-bold leading-7 transition",
-                      showRight ? "border-emerald-700 bg-emerald-50 text-emerald-950" :
-                      showWrong ? "border-rose-300 bg-rose-50 text-rose-900" :
-                      selected ? "border-stone-950 bg-stone-950 text-white" : "border-stone-200 bg-white text-stone-700 hover:bg-stone-50",
-                    )}
-                  >
-                    {option}
-                  </button>
-                );
-              })}
-            </div>
+            <h2 className="mt-5 max-w-4xl text-3xl font-black leading-[1.55] text-stone-950 sm:text-4xl lg:text-5xl">
+              {getLessonTitle(lesson)}
+            </h2>
+            <p className="mt-5 max-w-3xl text-base font-semibold leading-9 text-stone-600 sm:text-lg">
+              {lesson?.lesson_goal}
+            </p>
 
-            <div className="mt-5 flex flex-wrap items-center gap-3">
+            <div className="mt-7 flex flex-wrap gap-3">
               <button
                 type="button"
-                disabled={!answers[q.id] || isChecked}
-                onClick={() => setChecked((prev) => ({ ...prev, [q.id]: true }))}
-                className={cn(
-                  "rounded-full px-4 py-2.5 text-xs font-black",
-                  answers[q.id] && !isChecked ? "bg-stone-950 text-white" : "bg-stone-100 text-stone-400",
-                )}
+                onClick={() => onStartAxis(0)}
+                className="inline-flex items-center gap-2 rounded-2xl bg-stone-950 px-5 py-3 text-sm font-black text-white transition hover:bg-stone-800"
               >
-                تحقق من الإجابة
+                {completedAxes.size ? "واصل التعلم" : "ابدأ الدرس"}
+                <ArrowLeft size={16} />
               </button>
-              {isChecked && (
-                <span className={cn("text-xs font-black", isCorrect ? "text-emerald-800" : "text-rose-700")}>
-                  {isCorrect ? "إجابة صحيحة" : `الصحيح: ${q.answer}`}
-                </span>
-              )}
+              <SoftButton onClick={() => onNavigate("bac")}>
+                <GraduationCap size={16} /> أفكار البكالوريا
+              </SoftButton>
             </div>
-
-            {isChecked && q.why && (
-              <div className="mt-5 border-r-2 border-emerald-700 pr-4 text-sm font-semibold leading-8 text-stone-700">
-                <strong className="text-stone-950">لماذا؟ </strong>{q.why}
-              </div>
-            )}
           </div>
-        );
-      })}
 
-      {questions.length > 0 && Object.keys(checked).length === questions.length && (
-        <div className="rounded-3xl bg-stone-950 p-5 text-white">
-          <p className="text-xs font-black text-emerald-300">نتيجة التطبيق</p>
-          <p className="mt-2 text-xl font-black">{correctCount} / {questions.length}</p>
+          <DarkPanel>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-black text-emerald-300">تقدمك في المحاور</p>
+                <p className="mt-2 text-4xl font-black">{completion}%</p>
+              </div>
+              <Target size={36} className="text-emerald-300" />
+            </div>
+            <div className="mt-6 h-2 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full rounded-full bg-emerald-300" style={{ width: `${completion}%` }} />
+            </div>
+            <p className="mt-4 text-sm font-semibold leading-7 text-stone-300">
+              {completedAxes.size} من {axes.length} محاور تم إتقان أسئلتها القصيرة.
+            </p>
+          </DarkPanel>
         </div>
-      )}
-    </div>
-  );
-}
+      </section>
 
-function PhaseRail({ phases, phaseIndex, completedPhases, onSelect }) {
-  return (
-    <div className="sticky top-0 z-30 border-b border-stone-200 bg-[#f7f6f2]/95 backdrop-blur">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between gap-2 overflow-x-auto py-3">
-          {phases.map((phase, i) => {
-            const active = i === phaseIndex;
-            const done = completedPhases.has(i);
-            const accessible = i <= phaseIndex || done;
+      <section>
+        <SectionLabel icon={ListChecks}>خريطة الدرس</SectionLabel>
+        <div className="grid gap-4 md:grid-cols-2">
+          {axes.map((axis, index) => {
+            const done = completedAxes.has(axis.id);
             return (
               <button
-                key={phase.id}
                 type="button"
-                disabled={!accessible}
-                onClick={() => accessible && onSelect(i)}
-                className={cn(
-                  "flex min-w-max items-center gap-2 rounded-full px-3 py-2 text-xs font-black transition",
-                  active ? "bg-stone-950 text-white" : done ? "text-emerald-900 hover:bg-white" : "text-stone-400",
-                  !accessible && "cursor-not-allowed opacity-50",
-                )}
+                onClick={() => onStartAxis(index)}
+                key={axis.id}
+                className="group rounded-[28px] border border-stone-200 bg-white p-5 text-right transition hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-sm sm:p-6"
               >
-                <span className={cn("flex h-6 w-6 items-center justify-center rounded-full border text-[10px]", active ? "border-white/25" : "border-stone-300 bg-white")}>{done && !active ? <Check size={11}/> : phase.number}</span>
-                {phase.label}
+                <div className="flex items-start justify-between gap-4">
+                  <span className={cn("flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-black", done ? "bg-emerald-900 text-white" : "bg-stone-100 text-stone-600")}>
+                    {done ? <Check size={17} /> : index + 1}
+                  </span>
+                  <ArrowLeft size={17} className="mt-2 text-stone-300 transition group-hover:text-stone-700" />
+                </div>
+                <h3 className="mt-5 text-lg font-black leading-8 text-stone-950">{axis.title}</h3>
+                <p className="mt-2 text-sm font-semibold leading-7 text-stone-500">{axis.objective}</p>
+                <div className="mt-4">
+                  <TinyBadge tone={done ? "emerald" : "stone"}>{done ? "متقن" : "جاهز للتعلم"}</TinyBadge>
+                </div>
               </button>
             );
           })}
         </div>
+      </section>
+
+      {arr(lesson?.learning_outcomes).length > 0 && (
+        <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+          <Panel>
+            <SectionLabel icon={CheckCircle2}>بعد إتمام الدرس</SectionLabel>
+            <div className="space-y-3">
+              {lesson.learning_outcomes.map((item, index) => (
+                <p key={index} className="flex gap-3 text-sm font-semibold leading-7 text-stone-700">
+                  <CheckCircle2 size={16} className="mt-1.5 shrink-0 text-emerald-800" />
+                  {item}
+                </p>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel className="bg-emerald-950 text-white">
+            <SectionLabel icon={Sparkles}>طريقة الدراسة في المنصة</SectionLabel>
+            <div className="space-y-4">
+              {["افهم الفكرة قبل الحفظ", "ثبّت عناصر الحفظ", "اربط الدليل الشرعي بالمعنى", "اختبر نفسك دون النظر", "راجع بصيغ البكالوريا"].map((item, index) => (
+                <div key={item} className="flex items-center gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/20 text-xs font-black text-emerald-200">{index + 1}</span>
+                  <span className="text-sm font-bold text-stone-100">{item}</span>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </section>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   Axis tabs
+========================================================= */
+
+const AXIS_TABS = [
+  { id: "understand", label: "افهم", icon: Brain },
+  { id: "memorize", label: "احفظ", icon: Eye },
+  { id: "evidence", label: "الدليل الشرعي", icon: BookOpen },
+  { id: "check", label: "اختبر فهمك", icon: Target },
+];
+
+function AxisTabs({ active, onChange, axis }) {
+  return (
+    <div className="mb-7 overflow-x-auto">
+      <div className="flex min-w-max gap-2 rounded-2xl bg-stone-100 p-1.5">
+        {AXIS_TABS.map((tab) => {
+          const Icon = tab.icon;
+          const emptyEvidence = tab.id === "evidence" && arr(axis?.evidences).length === 0;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onChange(tab.id)}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-black transition",
+                active === tab.id ? "bg-white text-stone-950 shadow-sm" : "text-stone-500 hover:text-stone-800",
+              )}
+            >
+              <Icon size={14} />
+              {tab.label}
+              {emptyEvidence && <span className="text-[9px] text-stone-300">—</span>}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function PhaseIntro({ phase, itemIndex, itemCount }) {
+function AxisHeader({ axis, index, total }) {
   return (
-    <div className="mx-auto mb-2 max-w-5xl pt-7 sm:pt-10">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-stone-200 pb-5">
-        <div>
-          <p className="text-[11px] font-black text-emerald-800">المرحلة {phase.number} من 05 · {phase.label}</p>
-          <h2 className="mt-2 text-xl font-black text-stone-950 sm:text-2xl">{phase.title}</h2>
-          <p className="mt-2 max-w-2xl text-sm font-semibold leading-7 text-stone-500">{phase.description}</p>
-        </div>
-        <div className="flex gap-1.5" aria-label="تقدم المرحلة">
-          {Array.from({ length: itemCount }).map((_, i) => (
-            <span key={i} className={cn("h-1.5 rounded-full transition-all", i === itemIndex ? "w-8 bg-stone-950" : i < itemIndex ? "w-4 bg-emerald-700" : "w-4 bg-stone-200")} />
+    <div className="mb-8">
+      <div className="flex flex-wrap items-center gap-2">
+        <TinyBadge tone="emerald">المحور {index + 1} من {total}</TinyBadge>
+        <TinyBadge>مهارة قابلة للإتقان</TinyBadge>
+      </div>
+      <h2 className="mt-4 text-3xl font-black leading-[1.5] text-stone-950 sm:text-4xl">{axis.title}</h2>
+      <p className="mt-3 max-w-3xl text-sm font-semibold leading-8 text-stone-600 sm:text-base">{axis.objective}</p>
+    </div>
+  );
+}
+
+function UnderstandPanel({ axis }) {
+  return (
+    <div className="space-y-7">
+      <Panel>
+        <SectionLabel icon={Lightbulb}>الشرح المبسط</SectionLabel>
+        <div className="space-y-4">
+          {arr(axis.explanation).map((paragraph, index) => (
+            <p key={index} className="text-[15px] font-semibold leading-9 text-stone-700 sm:text-base">{paragraph}</p>
           ))}
         </div>
+      </Panel>
+
+      {arr(axis.key_concepts).length > 0 && (
+        <section>
+          <SectionLabel icon={Brain}>المفاهيم الأساسية</SectionLabel>
+          <div className="grid gap-4 md:grid-cols-2">
+            {axis.key_concepts.map((item, index) => (
+              <Panel key={`${item.term}-${index}`}>
+                <p className="text-xs font-black text-emerald-800">{item.term}</p>
+                <p className="mt-3 text-base font-black leading-8 text-stone-950">{item.definition}</p>
+              </Panel>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {arr(axis.understand).length > 0 && (
+        <Panel className="border-emerald-200 bg-emerald-50/60">
+          <SectionLabel icon={Sparkles}>افهم الفكرة</SectionLabel>
+          <div className="space-y-3">
+            {axis.understand.map((item, index) => (
+              <div key={index} className="flex gap-3">
+                <span className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-900 text-[10px] font-black text-white">{index + 1}</span>
+                <p className="text-sm font-bold leading-8 text-stone-700">{item}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        {arr(axis.exam_focus).length > 0 && (
+          <Panel>
+            <SectionLabel icon={GraduationCap}>كيف يأتي في البكالوريا؟</SectionLabel>
+            <div className="space-y-3">
+              {axis.exam_focus.map((item, index) => (
+                <p key={index} className="flex gap-2 text-sm font-bold leading-7 text-stone-700">
+                  <GraduationCap size={15} className="mt-1.5 shrink-0 text-emerald-800" />
+                  {item}
+                </p>
+              ))}
+            </div>
+          </Panel>
+        )}
+
+        {arr(axis.common_mistakes).length > 0 && (
+          <Panel>
+            <SectionLabel icon={ShieldCheck}>أخطاء شائعة تجنبها</SectionLabel>
+            <div className="space-y-3">
+              {axis.common_mistakes.map((item, index) => (
+                <p key={index} className="flex gap-2 text-sm font-bold leading-7 text-stone-700">
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />
+                  {item}
+                </p>
+              ))}
+            </div>
+          </Panel>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MemorizePanel({ axis }) {
+  const [hidden, setHidden] = useState(false);
+  const memory = axis?.memorize;
+  const structured = Boolean(memory && !Array.isArray(memory) && typeof memory === "object");
+
+  const blocks = structured
+    ? arr(memory.blocks)
+    : arr(memory).map((text, index) => ({
+        id: `legacy-memory-${index + 1}`,
+        label: `العنصر ${index + 1}`,
+        badge: "حفظ",
+        text,
+        cue: [],
+      }));
+
+  const map = structured ? memory.mind_map : null;
+  const mapBranches = arr(map?.branches);
+
+  const cueParts = (value) => {
+    if (Array.isArray(value)) return value;
+    if (!value) return [];
+    return String(value)
+      .split(/←|→|↔|\+|\//)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  };
+
+  if (!blocks.length) {
+    return <EmptyState title="لا توجد عناصر حفظ مستقلة في هذا المحور." />;
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* رأس ركن الحفظ */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <TinyBadge tone="emerald">حفظ حرفي</TinyBadge>
+            <TinyBadge>{blocks.length} عناصر</TinyBadge>
+          </div>
+          <h3 className="mt-4 text-2xl font-black leading-9 text-stone-950">
+            {structured ? memory.title || "ما الذي يجب أن تحفظه حرفيًا؟" : "ما الذي يجب أن تحفظه؟"}
+          </h3>
+          <p className="mt-2 text-sm font-semibold leading-8 text-stone-500">
+            {structured
+              ? memory.subtitle || "ابدأ بالخريطة الذهنية، ثم احفظ الصياغة المكتوبة كما هي، وبعدها اختبر نفسك بإخفاء النص."
+              : "افهمه أولًا، ثم اختبر ذاكرتك بإخفاء العناصر."}
+          </p>
+        </div>
+
+        <SoftButton active={hidden} onClick={() => setHidden((value) => !value)}>
+          <Eye size={15} /> {hidden ? "اكشف النصوص الحرفية" : "اختبر حفظي"}
+        </SoftButton>
+      </div>
+
+      {/* الخريطة الذهنية */}
+      {map && mapBranches.length > 0 && (
+        <section>
+          <SectionLabel icon={Brain}>الخريطة الذهنية للحفظ</SectionLabel>
+
+          <div className="overflow-hidden rounded-[32px] border border-emerald-200 bg-gradient-to-b from-emerald-50/80 to-white p-5 sm:p-7">
+            <div className="mx-auto flex max-w-sm justify-center">
+              <div className="rounded-3xl bg-emerald-950 px-6 py-4 text-center text-white shadow-[0_16px_45px_rgba(6,78,59,.14)]">
+                <p className="text-[10px] font-black text-emerald-300">مركز الخريطة</p>
+                <p className="mt-1 text-lg font-black leading-8">{map.center || axis.title}</p>
+              </div>
+            </div>
+
+            <div className="mx-auto h-8 w-px bg-emerald-300" />
+
+            <div className="relative grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <span className="pointer-events-none absolute left-[8%] right-[8%] top-0 hidden h-px bg-emerald-200 md:block" />
+
+              {mapBranches.map((branch, index) => {
+                const parts = cueParts(branch.cue);
+                return (
+                  <div key={`${branch.label}-${index}`} className="relative pt-0 md:pt-5">
+                    <span className="pointer-events-none absolute left-1/2 top-0 hidden h-5 w-px -translate-x-1/2 bg-emerald-200 md:block" />
+
+                    <Panel className="h-full border-emerald-100 bg-white/95 p-4 sm:p-5">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-xs font-black text-emerald-950">
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-black leading-7 text-stone-950">{branch.label}</p>
+
+                          {parts.length > 0 ? (
+                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                              {parts.map((part, partIndex) => (
+                                <div key={`${part}-${partIndex}`} className="contents">
+                                  <span className="rounded-xl bg-stone-100 px-2.5 py-1.5 text-[11px] font-black leading-5 text-stone-700">
+                                    {part}
+                                  </span>
+                                  {partIndex < parts.length - 1 && (
+                                    <ArrowLeft size={12} className="shrink-0 text-emerald-500" />
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-xs font-bold leading-6 text-stone-500">{branch.cue}</p>
+                          )}
+                        </div>
+                      </div>
+                    </Panel>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* النص الحرفي الكامل */}
+      <section>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <SectionLabel icon={CheckCircle2}>النص الذي يُحفظ كما هو</SectionLabel>
+          <p className="text-[11px] font-bold text-stone-400">
+            {hidden ? "النص مخفي الآن — استرجعه من الكلمات المفتاحية" : "اقرأ بصوت مرتفع ثم أعده دون النظر"}
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {blocks.map((item, index) => {
+            const cues = cueParts(item.cue);
+            return (
+              <Panel key={item.id || index} className="relative overflow-hidden p-0">
+                <div className="border-b border-stone-100 bg-stone-50/70 px-5 py-4 sm:px-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-stone-950 text-xs font-black text-white">
+                        {index + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-black leading-7 text-stone-950">{item.label || `العنصر ${index + 1}`}</p>
+                      </div>
+                    </div>
+                    <TinyBadge tone="emerald">{item.badge || "حفظ حرفي"}</TinyBadge>
+                  </div>
+                </div>
+
+                <div className="px-5 py-5 sm:px-6 sm:py-6">
+                  {hidden ? (
+                    <div className="rounded-2xl border border-dashed border-emerald-300 bg-emerald-50/40 p-4 sm:p-5">
+                      <p className="text-[11px] font-black text-emerald-800">استرجع النص من هذه المفاتيح</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(cues.length ? cues : ["حاول قول النص كاملًا دون النظر"]).map((cue, cueIndex) => (
+                          <span key={`${cue}-${cueIndex}`} className="rounded-xl border border-emerald-100 bg-white px-3 py-2 text-xs font-black leading-6 text-stone-700">
+                            {cue}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-[17px] font-black leading-[2.15] text-stone-950 sm:text-lg">
+                        {item.text}
+                      </p>
+
+                      {cues.length > 0 && (
+                        <div className="mt-5 border-t border-stone-100 pt-4">
+                          <p className="text-[10px] font-black text-stone-400">مفاتيح الاسترجاع</p>
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            {cues.map((cue, cueIndex) => (
+                              <div key={`${cue}-${cueIndex}`} className="contents">
+                                <span className="rounded-lg bg-stone-100 px-2.5 py-1.5 text-[11px] font-black text-stone-700">
+                                  {cue}
+                                </span>
+                                {cueIndex < cues.length - 1 && (
+                                  <ArrowLeft size={11} className="text-stone-300" />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {item.evidence && !hidden && (
+                    <div className="mt-5 rounded-2xl border-r-4 border-emerald-700 bg-emerald-50/60 px-4 py-4 sm:px-5">
+                      <div className="flex items-center gap-2 text-[11px] font-black text-emerald-900">
+                        <BookOpen size={14} /> الدليل المرتبط بهذا العنصر
+                      </div>
+                      <p className="mt-3 text-base font-black leading-[2] text-stone-950 sm:text-lg">
+                        {item.evidence.text}
+                      </p>
+                      {item.evidence.reference && (
+                        <p className="mt-2 text-xs font-black text-emerald-800">{item.evidence.reference}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Panel>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* السلسلة النهائية */}
+      {structured && memory.recall_chain && (
+        <DarkPanel>
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-emerald-300">
+              <Sparkles size={18} />
+            </span>
+            <div>
+              <p className="text-[11px] font-black text-emerald-300">السلسلة الذهنية الأخيرة</p>
+              <p className="mt-2 text-base font-black leading-8 text-white">{memory.recall_chain}</p>
+              <p className="mt-2 text-xs font-semibold leading-6 text-stone-300">
+                إذا استطعت تحويل هذه السلسلة إلى النصوص الكاملة أعلاه دون النظر، فقد ثبت الحفظ.
+              </p>
+            </div>
+          </div>
+        </DarkPanel>
+      )}
+    </div>
+  );
+}
+
+function EvidenceCard({ evidence, index }) {
+  const [revealed, setRevealed] = useState(false);
+
+  return (
+    <Panel className="overflow-hidden">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <TinyBadge tone="emerald">دليل {index + 1}</TinyBadge>
+          <p className="mt-4 text-xl font-black leading-[2.1] text-stone-950 sm:text-2xl">{evidence.text}</p>
+          {evidence.reference && <p className="mt-2 text-xs font-black text-emerald-800">{evidence.reference}</p>}
+        </div>
+        <BookOpen size={20} className="mt-1 shrink-0 text-stone-300" />
+      </div>
+
+      <div className="mt-5 border-t border-stone-100 pt-5">
+        {!revealed ? (
+          <button
+            type="button"
+            onClick={() => setRevealed(true)}
+            className="text-sm font-black text-emerald-800 hover:text-emerald-950"
+          >
+            حاول تحديد الأثر ثم اكشف وجه الاستدلال
+          </button>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <p className="text-[11px] font-black text-stone-400">الأثر</p>
+              <p className="mt-1 text-base font-black leading-7 text-emerald-950">{evidence.effect}</p>
+            </div>
+            {evidence.connection && (
+              <div>
+                <p className="text-[11px] font-black text-stone-400">وجه الاستدلال</p>
+                <p className="mt-1 text-sm font-semibold leading-8 text-stone-700">{evidence.connection}</p>
+              </div>
+            )}
+            <button type="button" onClick={() => setRevealed(false)} className="text-xs font-black text-stone-400 hover:text-stone-700">
+              أخفِ الإجابة
+            </button>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function EvidencePanel({ axis }) {
+  const evidences = arr(axis.evidences);
+
+  if (!evidences.length) {
+    return (
+      <EmptyState
+        icon={BookOpen}
+        title="لا يوجد دليل مستقل مطلوب في هذا المحور ضمن الصفحات المرفقة."
+        description="ركز هنا على التعريفات والمفاهيم، وستظهر النصوص الشرعية في المحاور التي تتناول آثار العقيدة."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="max-w-3xl">
+        <p className="text-lg font-black text-stone-950">الدليل ليس للحفظ المنفصل فقط</p>
+        <p className="mt-2 text-sm font-semibold leading-8 text-stone-600">
+          المطلوب أن تعرف الكلمة أو المعنى الذي يقودك إلى الأثر الصحيح في السؤال.
+        </p>
+      </div>
+      {evidences.map((evidence, index) => (
+        <EvidenceCard key={evidence.id || index} evidence={evidence} index={index} />
+      ))}
+    </div>
+  );
+}
+
+function LocalCoverage({ coverage }) {
+  if (!coverage) return null;
+
+  const label = coverage.value >= 75 ? "ذكرت معظم الكلمات المفتاحية" : coverage.value >= 40 ? "الإجابة قريبة وتحتاج تدقيقًا" : "راجع الإجابة النموذجية";
+
+  return (
+    <div className="rounded-2xl bg-stone-50 p-4">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-xs font-black text-stone-700">مؤشر الكلمات المفتاحية</p>
+        <span className="text-xs font-black text-emerald-900">{coverage.hits}/{coverage.total}</span>
+      </div>
+      <div className="mt-2"><ProgressBar value={coverage.value} /></div>
+      <p className="mt-2 text-[11px] font-bold leading-5 text-stone-500">{label} — هذا مؤشر مساعد وليس تصحيحًا دلاليًا نهائيًا.</p>
+    </div>
+  );
+}
+
+function QuestionCard({
+  question,
+  number,
+  status,
+  onStatus,
+  onEvaluateAnswer,
+  namespace = "q",
+}) {
+  const [answer, setAnswer] = useState("");
+  const [revealed, setRevealed] = useState(false);
+  const [aiState, setAiState] = useState({ loading: false, result: null, error: "" });
+  const coverage = revealed ? keywordCoverage(answer, question.keywords) : null;
+  const key = `${namespace}:${question.id || number}`;
+
+  const evaluate = async () => {
+    if (!onEvaluateAnswer || !answer.trim()) return;
+    setAiState({ loading: true, result: null, error: "" });
+    try {
+      const result = await onEvaluateAnswer({ question, answer, key });
+      setAiState({ loading: false, result: result || null, error: "" });
+    } catch (error) {
+      setAiState({ loading: false, result: null, error: error?.message || "تعذر تصحيح الإجابة الآن." });
+    }
+  };
+
+  return (
+    <Panel>
+      <div className="flex items-start gap-4">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-stone-950 text-xs font-black text-white">{number}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-black leading-8 text-stone-950">{question.prompt || question.question}</p>
+
+          <textarea
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            rows={3}
+            placeholder="اكتب إجابتك من ذاكرتك هنا..."
+            className="mt-4 w-full resize-none rounded-2xl border border-stone-200 bg-stone-50 p-4 text-sm font-semibold leading-7 text-stone-800 outline-none transition focus:border-emerald-700 focus:bg-white"
+          />
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <SoftButton onClick={() => setRevealed((v) => !v)} active={revealed}>
+              <Eye size={14} /> {revealed ? "أخفِ الإجابة" : "اكشف الإجابة"}
+            </SoftButton>
+            {onEvaluateAnswer && (
+              <SoftButton onClick={evaluate} disabled={!answer.trim() || aiState.loading}>
+                <Sparkles size={14} /> {aiState.loading ? "جاري التصحيح..." : "تصحيح بالذكاء الاصطناعي"}
+              </SoftButton>
+            )}
+          </div>
+
+          {revealed && (
+            <div className="mt-5 space-y-4 border-t border-stone-100 pt-5">
+              <div className="rounded-2xl bg-emerald-50 p-4">
+                <p className="text-[11px] font-black text-emerald-800">الإجابة النموذجية</p>
+                <p className="mt-2 text-sm font-black leading-8 text-emerald-950">{question.answer}</p>
+              </div>
+              <LocalCoverage coverage={coverage} />
+              <div>
+                <p className="mb-2 text-xs font-black text-stone-500">قيّم نفسك بعد المقارنة:</p>
+                <div className="flex flex-wrap gap-2">
+                  <SoftButton active={status === true} onClick={() => onStatus(key, true)}>
+                    <CheckCircle2 size={14} /> أتقنتها
+                  </SoftButton>
+                  <SoftButton active={status === false} onClick={() => onStatus(key, false)}>
+                    <RotateCcw size={14} /> أحتاج مراجعة
+                  </SoftButton>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {aiState.result && (
+            <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <p className="text-[11px] font-black text-violet-800">تصحيح الذكاء الاصطناعي</p>
+              {aiState.result.score !== undefined && <p className="mt-1 text-lg font-black text-violet-950">{aiState.result.score}</p>}
+              {aiState.result.feedback && <p className="mt-2 text-sm font-semibold leading-7 text-violet-900">{aiState.result.feedback}</p>}
+            </div>
+          )}
+
+          {aiState.error && <p className="mt-3 text-xs font-bold text-rose-700">{aiState.error}</p>}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function QuickCheckPanel({ axis, answerStatus, onStatus, onEvaluateAnswer }) {
+  const questions = arr(axis.quick_check);
+  const ids = questions.map((q, index) => `axis:${axis.id}:${q.id || index}`);
+  const mastered = ids.filter((id) => answerStatus[id] === true).length;
+
+  if (!questions.length) {
+    return <EmptyState title="لا توجد أسئلة تحقق في هذا المحور." />;
+  }
+
+  return (
+    <div className="space-y-5">
+      <DarkPanel>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-black text-emerald-300">إتقان المحور</p>
+            <p className="mt-1 text-2xl font-black">{mastered} / {questions.length}</p>
+          </div>
+          <Target size={28} className="text-emerald-300" />
+        </div>
+        <p className="mt-3 text-sm font-semibold leading-7 text-stone-300">
+          حاول الإجابة قبل كشف الحل. يُعد المحور متقنًا عندما تضع جميع الأسئلة في «أتقنتها».
+        </p>
+      </DarkPanel>
+
+      {questions.map((question, index) => (
+        <QuestionCard
+          key={question.id || index}
+          question={question}
+          number={index + 1}
+          status={answerStatus[`axis:${axis.id}:${question.id || index}`]}
+          onStatus={(key, value) => onStatus(key, value, axis)}
+          onEvaluateAnswer={onEvaluateAnswer}
+          namespace={`axis:${axis.id}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon = CircleHelp, title, description = "" }) {
+  return (
+    <div className="rounded-[28px] border border-dashed border-stone-300 bg-stone-50 p-8 text-center">
+      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-emerald-900 shadow-sm">
+        <Icon size={20} />
+      </span>
+      <p className="mt-4 text-base font-black text-stone-900">{title}</p>
+      {description && <p className="mx-auto mt-2 max-w-xl text-sm font-semibold leading-7 text-stone-500">{description}</p>}
+    </div>
+  );
+}
+
+function AxisScreen({
+  lesson,
+  axisIndex,
+  activeTab,
+  onTabChange,
+  answerStatus,
+  onStatus,
+  onEvaluateAnswer,
+  onPrevious,
+  onNext,
+}) {
+  const axes = arr(lesson?.axes);
+  const axis = axes[axisIndex];
+
+  if (!axis) return <EmptyState title="المحور غير موجود." />;
+
+  return (
+    <div className="py-7 sm:py-10">
+      <AxisHeader axis={axis} index={axisIndex} total={axes.length} />
+      <AxisTabs active={activeTab} onChange={onTabChange} axis={axis} />
+
+      {activeTab === "understand" && <UnderstandPanel axis={axis} />}
+      {activeTab === "memorize" && <MemorizePanel axis={axis} />}
+      {activeTab === "evidence" && <EvidencePanel axis={axis} />}
+      {activeTab === "check" && (
+        <QuickCheckPanel
+          axis={axis}
+          answerStatus={answerStatus}
+          onStatus={onStatus}
+          onEvaluateAnswer={onEvaluateAnswer}
+        />
+      )}
+
+      <div className="mt-9 flex items-center justify-between gap-3 border-t border-stone-200 pt-5">
+        <SoftButton onClick={onPrevious} disabled={axisIndex === 0}>
+          <ArrowRight size={15} /> المحور السابق
+        </SoftButton>
+        <button
+          type="button"
+          onClick={onNext}
+          className="inline-flex items-center gap-2 rounded-2xl bg-stone-950 px-5 py-3 text-sm font-black text-white transition hover:bg-stone-800"
+        >
+          {axisIndex === axes.length - 1 ? "أفكار البكالوريا" : "المحور التالي"}
+          <ArrowLeft size={15} />
+        </button>
       </div>
     </div>
   );
 }
 
 /* =========================================================
-   Main screen resolver
+   BAC ideas
 ========================================================= */
 
-function ScreenContent({ screen, step }) {
-  const content = step?.content || {};
+function BacIdeaCard({ idea, index }) {
+  const [open, setOpen] = useState(false);
 
-  if (screen.kind === "opening") return <OpeningRenderer content={content} />;
-  if (screen.kind === "definition") return <DefinitionRenderer content={content} />;
-  if (screen.kind === "importance") return <ImportanceRenderer content={content} />;
-  if (screen.kind === "overview") return <OverviewRenderer content={content} />;
-  if (screen.kind === "mean") return <MeanRenderer screen={screen} content={content} />;
-  if (screen.kind === "memory") return <MemoryRenderer content={content} />;
-  if (screen.kind === "bac_method") return <BacMethodRenderer content={content} />;
-  if (screen.kind === "comparison") return <ComparisonRenderer content={content} />;
-  if (screen.kind === "active_recall") return <ActiveRecallRenderer screen={screen} />;
-  if (screen.kind === "micro_recall") return <MicroRecallRenderer screen={screen} />;
-  if (screen.kind === "bac_challenge") return <BacChallengeRenderer screen={screen} />;
-  if (screen.kind === "teach_back") return <TeachBackRenderer screen={screen} />;
-  if (screen.kind === "spaced_review") return <SpacedReviewRenderer screen={screen} />;
-  if (screen.kind === "summary") return <SummaryRenderer content={content} />;
-  if (screen.kind === "quiz") return <QuizRenderer content={content} />;
+  return (
+    <Panel>
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full text-right">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap gap-2">
+              <TinyBadge tone="emerald">فكرة {index + 1}</TinyBadge>
+              <TinyBadge>{idea.skill}</TinyBadge>
+            </div>
+            <h3 className="mt-4 text-lg font-black leading-8 text-stone-950">{idea.title}</h3>
+            <p className="mt-2 text-sm font-semibold leading-8 text-stone-700">{idea.prompt}</p>
+          </div>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-stone-100 text-stone-500">
+            {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </span>
+        </div>
+      </button>
 
-  return <GenericValue value={content} />;
+      {open && (
+        <div className="mt-5 border-t border-stone-100 pt-5">
+          <p className="text-[11px] font-black text-emerald-800">إجابة نموذجية مختصرة</p>
+          <p className="mt-2 text-sm font-black leading-8 text-stone-800">{idea.model_answer}</p>
+          {idea.source_kind && <p className="mt-4 text-[10px] font-bold text-stone-400">{idea.source_kind}</p>}
+        </div>
+      )}
+    </Panel>
+  );
 }
 
-function FocusStage({ screen, step }) {
+function BacIdeasScreen({ lesson, onGoTest }) {
+  const ideas = arr(lesson?.bac_ideas);
+
   return (
-    <section className="mx-auto w-full max-w-5xl py-8 sm:py-12 lg:py-14">
-      <FocusHeading screen={screen} step={step} />
-      <ScreenContent screen={screen} step={step} />
-      {step?.content && <ExtraFields content={step.content} />}
-    </section>
+    <div className="space-y-7 py-7 sm:py-10">
+      <div className="max-w-4xl">
+        <div className="flex items-center gap-2">
+          <TinyBadge tone="dark">البكالوريا</TinyBadge>
+          <TinyBadge>{ideas.length} أفكار</TinyBadge>
+        </div>
+        <h2 className="mt-4 text-3xl font-black leading-[1.5] text-stone-950 sm:text-4xl">أفكار السؤال التي يجب أن تتقنها</h2>
+        <p className="mt-3 text-sm font-semibold leading-8 text-stone-600 sm:text-base">
+          لا تحفظ الجواب فقط. تعرّف أولًا على فعل السؤال: عرّف، اذكر، فرّق، استخرج؛ ثم أعطِ جوابًا مباشرًا ومحددًا.
+        </p>
+      </div>
+
+      {lesson?.content_policy?.bac_ideas_note && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-bold leading-6 text-amber-950">
+          {lesson.content_policy.bac_ideas_note}
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {ideas.map((idea, index) => (
+          <BacIdeaCard key={idea.id || index} idea={idea} index={index} />
+        ))}
+      </div>
+
+      <DarkPanel>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[11px] font-black text-emerald-300">المرحلة التالية</p>
+            <p className="mt-1 text-lg font-black">هل تستطيع الإجابة دون فتح البطاقات؟</p>
+          </div>
+          <button
+            type="button"
+            onClick={onGoTest}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-black text-stone-950"
+          >
+            ابدأ اختبار الإتقان <ArrowLeft size={15} />
+          </button>
+        </div>
+      </DarkPanel>
+    </div>
   );
 }
 
 /* =========================================================
-   Overview drawer
+   Review plan
 ========================================================= */
 
-function OverviewDrawer({ open, onClose, lesson, title }) {
-  if (!open) return null;
+function ReviewScreen({ lesson }) {
+  const schedule = arr(lesson?.review_plan);
+  const axes = arr(lesson?.axes);
+
   return (
-    <div className="fixed inset-0 z-50">
-      <button type="button" aria-label="إغلاق" onClick={onClose} className="absolute inset-0 bg-stone-950/25 backdrop-blur-sm" />
-      <aside className="absolute inset-y-0 right-0 w-full max-w-md overflow-y-auto bg-white p-6 shadow-2xl sm:p-7">
-        <div className="flex items-center justify-between gap-4">
-          <div><p className="text-[11px] font-black text-emerald-800">معلومات الدرس</p><h2 className="mt-1 text-lg font-black text-stone-950">{title}</h2></div>
-          <button type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200"><X size={18} /></button>
+    <div className="space-y-8 py-7 sm:py-10">
+      <div className="max-w-4xl">
+        <TinyBadge tone="emerald">مراجعة ذكية</TinyBadge>
+        <h2 className="mt-4 text-3xl font-black leading-[1.5] text-stone-950 sm:text-4xl">لا تترك الدرس يختفي من الذاكرة</h2>
+        <p className="mt-3 text-sm font-semibold leading-8 text-stone-600 sm:text-base">
+          المراجعة هنا تعتمد على الاسترجاع من الذاكرة، لا على إعادة قراءة الدرس كاملًا كل مرة.
+        </p>
+      </div>
+
+      <Panel>
+        <SectionLabel icon={Clock3}>خطة المراجعة المتباعدة</SectionLabel>
+        <div className="mt-5">
+          {schedule.map((item, index) => (
+            <div key={index} className="grid grid-cols-[36px_1fr] gap-4">
+              <div className="flex flex-col items-center">
+                <span className="mt-1 h-3 w-3 rounded-full border-[3px] border-emerald-800 bg-white" />
+                {index < schedule.length - 1 && <span className="h-full w-px bg-stone-200" />}
+              </div>
+              <div className="pb-7">
+                <p className="text-xs font-black text-emerald-800">{item.when}</p>
+                <p className="mt-2 text-sm font-bold leading-8 text-stone-700">{item.task}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      <section>
+        <SectionLabel icon={Brain}>استرجاع سريع للمحاور</SectionLabel>
+        <div className="grid gap-4 md:grid-cols-2">
+          {axes.map((axis, index) => (
+            <Panel key={axis.id}>
+              <p className="text-[11px] font-black text-stone-400">المحور {index + 1}</p>
+              <p className="mt-1 text-base font-black text-stone-950">{axis.title}</p>
+              <p className="mt-3 text-sm font-semibold leading-7 text-stone-600">
+                أغلق الدرس وحاول شرح هذا المحور في دقيقة واحدة، ثم افتحه وتحقق مما نسيته.
+              </p>
+            </Panel>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/* =========================================================
+   Final test
+========================================================= */
+
+function FinalTestScreen({ lesson, answerStatus, onStatus, onEvaluateAnswer, onComplete }) {
+  const test = lesson?.final_test || {};
+  const questions = arr(test.questions);
+  const keys = questions.map((q, index) => `final:${q.id || index}`);
+  const mastered = keys.filter((key) => answerStatus[key] === true).length;
+  const reviewed = keys.filter((key) => answerStatus[key] !== undefined).length;
+  const passScore = Number(test.pass_score) || Math.ceil(questions.length * 0.75);
+  const passed = mastered >= passScore;
+
+  return (
+    <div className="space-y-6 py-7 sm:py-10">
+      <div className="grid gap-5 xl:grid-cols-[1fr_300px] xl:items-start">
+        <div>
+          <TinyBadge tone="dark">اختبار الإتقان</TinyBadge>
+          <h2 className="mt-4 text-3xl font-black leading-[1.5] text-stone-950 sm:text-4xl">{test.title || "اختبار إتقان الدرس"}</h2>
+          <p className="mt-3 max-w-3xl text-sm font-semibold leading-8 text-stone-600 sm:text-base">{test.instructions}</p>
         </div>
 
-        <div className="mt-8 space-y-7">
-          {lesson.lesson_goal && <div><SectionLabel>هدف الدرس</SectionLabel><p className="text-sm font-semibold leading-8 text-stone-700">{lesson.lesson_goal}</p></div>}
-          {arr(lesson.prerequisites).length > 0 && <div><SectionLabel>ما تحتاجه قبل البدء</SectionLabel><div className="space-y-2">{lesson.prerequisites.map((x,i)=><p key={i} className="text-sm font-semibold leading-7 text-stone-700">• {x}</p>)}</div></div>}
-          {arr(lesson.learning_outcomes).length > 0 && <div><SectionLabel>بعد الدرس تستطيع</SectionLabel><div className="space-y-2">{lesson.learning_outcomes.map((x,i)=><p key={i} className="flex gap-2 text-sm font-semibold leading-7 text-stone-700"><CheckCircle2 size={15} className="mt-1.5 shrink-0 text-emerald-800" />{x}</p>)}</div></div>}
-          {lesson.figure_policy && <div><SectionLabel>سياسة الرسومات</SectionLabel><p className="text-sm font-semibold leading-8 text-stone-600">{lesson.figure_policy}</p></div>}
+        <DarkPanel>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-black text-emerald-300">نتيجتك الذاتية</p>
+              <p className="mt-2 text-3xl font-black">{mastered} / {questions.length}</p>
+            </div>
+            <Trophy size={30} className="text-emerald-300" />
+          </div>
+          <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/10">
+            <div className="h-full rounded-full bg-emerald-300" style={{ width: `${percent(mastered, questions.length)}%` }} />
+          </div>
+          <p className="mt-3 text-xs font-semibold leading-6 text-stone-300">
+            شرط الإتقان في الملف: {passScore}/{questions.length} على الأقل.
+          </p>
+        </DarkPanel>
+      </div>
+
+      <div className="space-y-4">
+        {questions.map((question, index) => (
+          <QuestionCard
+            key={question.id || index}
+            question={question}
+            number={index + 1}
+            status={answerStatus[`final:${question.id || index}`]}
+            onStatus={onStatus}
+            onEvaluateAnswer={onEvaluateAnswer}
+            namespace="final"
+          />
+        ))}
+      </div>
+
+      {reviewed === questions.length && (
+        <div className={cn("rounded-[28px] border p-6", passed ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50")}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className={cn("text-sm font-black", passed ? "text-emerald-950" : "text-amber-950")}>
+                {passed ? "أحسنت، وصلت إلى حد الإتقان المطلوب." : "تحتاج مراجعة الأسئلة التي وضعتها في «أحتاج مراجعة»."}
+              </p>
+              <p className="mt-1 text-xs font-semibold leading-6 text-stone-600">
+                الإتقان هنا تقييم ذاتي ما لم تربط المكوّن بخدمة تصحيح الذكاء الاصطناعي عبر onEvaluateAnswer.
+              </p>
+            </div>
+            {passed && (
+              <button
+                type="button"
+                onClick={() => onComplete?.({ score: mastered, total: questions.length })}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-stone-950 px-5 py-3 text-sm font-black text-white"
+              >
+                إنهاء الدرس <CheckCircle2 size={16} />
+              </button>
+            )}
+          </div>
         </div>
-      </aside>
+      )}
     </div>
   );
 }
@@ -1302,134 +1388,159 @@ function OverviewDrawer({ open, onClose, lesson, title }) {
    Main component
 ========================================================= */
 
-export default function IslamicLessonMastery10({ data, onComplete }) {
+export default function IslamicLessonMastery10({
+  data,
+  onComplete,
+  onEvaluateAnswer,
+}) {
   const lesson = normalizeLesson(data);
-  const title = getTitle(data, lesson);
-  const experience = lesson?.mastery_experience;
-  const phases = arr(experience?.phases);
-  const steps = useMemo(() => stepIndexById(lesson), [lesson]);
+  const axes = useMemo(() => arr(lesson?.axes), [lesson]);
 
-  const [started, setStarted] = useState(false);
-  const [phaseIndex, setPhaseIndex] = useState(0);
-  const [itemIndex, setItemIndex] = useState(0);
-  const [overviewOpen, setOverviewOpen] = useState(false);
-  const [completedPhases, setCompletedPhases] = useState(new Set());
-  const stageRef = useRef(null);
+  const [screen, setScreen] = useState("home");
+  const [axisIndex, setAxisIndex] = useState(0);
+  const [axisTab, setAxisTab] = useState("understand");
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [answerStatus, setAnswerStatus] = useState({});
+  const [completedAxes, setCompletedAxes] = useState(() => new Set());
+
+  useEffect(() => {
+    setScreen("home");
+    setAxisIndex(0);
+    setAxisTab("understand");
+    setAnswerStatus({});
+    setCompletedAxes(new Set());
+  }, [lesson?.id]);
 
   if (!lesson) {
-    return <div dir="rtl" className="p-8 text-center font-bold text-stone-600">لا توجد بيانات للدرس.</div>;
-  }
-
-  if (!experience || phases.length === 0) {
     return (
-      <div dir="rtl" className="mx-auto max-w-3xl p-8">
-        <QuietPanel>
-          <p className="font-black text-stone-950">هذا الملف لا يحتوي على mastery_experience.</p>
-          <p className="mt-2 text-sm font-semibold leading-7 text-stone-600">استخدم ملف JSON المرفق مع هذا المكوّن.</p>
-        </QuietPanel>
+      <div dir="rtl" className="min-h-screen bg-stone-50 p-6">
+        <EmptyState title="لا توجد بيانات للدرس." description="مرّر ملف JSON إلى الخاصية data." />
       </div>
     );
   }
 
-  const phase = phases[phaseIndex];
-  const items = arr(phase?.items);
-  const current = items[itemIndex] || items[0];
-  const currentStep = current?.ref ? steps.get(current.ref) : null;
+  if (!axes.length) {
+    return (
+      <div dir="rtl" className="min-h-screen bg-stone-50 p-6">
+        <EmptyState title="ملف الدرس لا يحتوي على محاور." description="يجب أن يحتوي lesson.axes على محور واحد على الأقل." />
+      </div>
+    );
+  }
 
-  const scrollTop = () => requestAnimationFrame(() => stageRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  const questionTotal = axes.reduce((sum, axis) => sum + axisQuestionIds(axis).length, 0);
+  const axisMasteredQuestions = Object.entries(answerStatus).filter(([key, value]) => key.startsWith("axis:") && value === true).length;
+  const lessonProgress = percent(axisMasteredQuestions, questionTotal);
 
-  const goPhase = (nextPhase) => {
-    const safe = Math.max(0, Math.min(nextPhase, phases.length - 1));
-    setPhaseIndex(safe);
-    setItemIndex(0);
-    scrollTop();
-  };
-
-  const next = () => {
-    if (itemIndex < items.length - 1) {
-      setItemIndex((v) => v + 1);
-      scrollTop();
+  const navigate = (target, nextAxisIndex = axisIndex) => {
+    if (target === "axis") {
+      const safe = Math.max(0, Math.min(nextAxisIndex, axes.length - 1));
+      setAxisIndex(safe);
+      setAxisTab("understand");
+      setScreen("axis");
+      if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
 
-    setCompletedPhases((prev) => {
-      const nextSet = new Set(prev);
-      nextSet.add(phaseIndex);
-      return nextSet;
+    setScreen(target);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleStatus = (key, value, axis = null) => {
+    setAnswerStatus((previous) => {
+      const next = { ...previous, [key]: value };
+
+      if (axis?.id) {
+        const keys = axisQuestionIds(axis).map((id) => `axis:${axis.id}:${id}`);
+        const mastered = keys.length > 0 && keys.every((itemKey) => next[itemKey] === true);
+        setCompletedAxes((current) => {
+          const updated = new Set(current);
+          if (mastered) updated.add(axis.id);
+          else updated.delete(axis.id);
+          return updated;
+        });
+      }
+
+      return next;
     });
+  };
 
-    if (phaseIndex < phases.length - 1) {
-      setPhaseIndex((v) => v + 1);
-      setItemIndex(0);
-      scrollTop();
+  const nextAxis = () => {
+    if (axisIndex < axes.length - 1) {
+      navigate("axis", axisIndex + 1);
     } else {
-      onComplete?.();
+      navigate("bac");
     }
   };
 
-  const previous = () => {
-    if (itemIndex > 0) {
-      setItemIndex((v) => v - 1);
-      scrollTop();
-      return;
-    }
-    if (phaseIndex > 0) {
-      const prevPhase = phases[phaseIndex - 1];
-      setPhaseIndex((v) => v - 1);
-      setItemIndex(Math.max(0, arr(prevPhase?.items).length - 1));
-      scrollTop();
-    }
+  const previousAxis = () => {
+    if (axisIndex > 0) navigate("axis", axisIndex - 1);
   };
-
-  const isFirst = phaseIndex === 0 && itemIndex === 0;
-  const isLast = phaseIndex === phases.length - 1 && itemIndex === items.length - 1;
 
   return (
     <div dir="rtl" className="min-h-screen bg-[#f7f6f2] text-stone-950">
-      <CourseHeader title={title} lesson={lesson} onOpenOverview={() => setOverviewOpen(true)} />
+      <Header
+        lesson={lesson}
+        progress={lessonProgress}
+        onOpenInfo={() => setInfoOpen(true)}
+        onGoHome={() => navigate("home")}
+      />
 
-      {!started ? (
-        <IntroScreen
-          experience={experience}
-          title={title}
+      <MobileNav
+        lesson={lesson}
+        screen={screen}
+        axisIndex={axisIndex}
+        completedAxes={completedAxes}
+        onNavigate={navigate}
+      />
+
+      <div className="mx-auto grid max-w-7xl gap-7 px-4 sm:px-6 lg:grid-cols-[280px_1fr] lg:px-8">
+        <Sidebar
           lesson={lesson}
-          onStart={() => setStarted(true)}
-          onOverview={() => setOverviewOpen(true)}
+          screen={screen}
+          axisIndex={axisIndex}
+          completedAxes={completedAxes}
+          onNavigate={navigate}
         />
-      ) : (
-        <>
-          <PhaseRail phases={phases} phaseIndex={phaseIndex} completedPhases={completedPhases} onSelect={goPhase} />
-          <main ref={stageRef} className="px-4 sm:px-6 lg:px-8">
-            <PhaseIntro phase={phase} itemIndex={itemIndex} itemCount={items.length} />
-            <FocusStage screen={current} step={currentStep} />
-          </main>
 
-          <footer className="border-t border-stone-200 bg-white">
-            <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
-              <SoftButton onClick={previous} disabled={isFirst}>
-                <ArrowRight size={16} /> السابق
-              </SoftButton>
+        <main className="min-w-0">
+          {screen === "home" && (
+            <HomeScreen
+              lesson={lesson}
+              completedAxes={completedAxes}
+              onStartAxis={(index) => navigate("axis", index)}
+              onNavigate={navigate}
+            />
+          )}
 
-              <div className="hidden text-center sm:block">
-                <p className="text-[11px] font-black text-stone-400">{phase.label}</p>
-                <p className="mt-1 text-xs font-bold text-stone-600">{current?.label || current?.nav_label || "محطة تعلم"}</p>
-              </div>
+          {screen === "axis" && (
+            <AxisScreen
+              lesson={lesson}
+              axisIndex={axisIndex}
+              activeTab={axisTab}
+              onTabChange={setAxisTab}
+              answerStatus={answerStatus}
+              onStatus={handleStatus}
+              onEvaluateAnswer={onEvaluateAnswer}
+              onPrevious={previousAxis}
+              onNext={nextAxis}
+            />
+          )}
 
-              <button
-                type="button"
-                onClick={next}
-                className="inline-flex items-center gap-2 rounded-full bg-stone-950 px-5 py-3 text-sm font-black text-white transition hover:bg-stone-800"
-              >
-                {isLast ? "إنهاء الدرس" : itemIndex === items.length - 1 ? "المرحلة التالية" : "التالي"}
-                {isLast ? <CheckCircle2 size={16} /> : <ArrowLeft size={16} />}
-              </button>
-            </div>
-          </footer>
-        </>
-      )}
+          {screen === "bac" && <BacIdeasScreen lesson={lesson} onGoTest={() => navigate("test")} />}
+          {screen === "review" && <ReviewScreen lesson={lesson} />}
+          {screen === "test" && (
+            <FinalTestScreen
+              lesson={lesson}
+              answerStatus={answerStatus}
+              onStatus={handleStatus}
+              onEvaluateAnswer={onEvaluateAnswer}
+              onComplete={onComplete}
+            />
+          )}
+        </main>
+      </div>
 
-      <OverviewDrawer open={overviewOpen} onClose={() => setOverviewOpen(false)} lesson={lesson} title={title} />
+      <InfoDrawer open={infoOpen} onClose={() => setInfoOpen(false)} lesson={lesson} />
     </div>
   );
 }
-

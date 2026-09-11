@@ -2846,6 +2846,10 @@ export default function GeneratedAIExercises({
   data,
   apiBaseUrl = API_BASE_URL,
   alternativeSolutionEndpoint,
+  onTutorExerciseChange,
+  onTutorQuestionChange,
+  onTutorStepChange,
+  onTutorViewStateChange,
 }) {
   const { token } = useContext(UserContext);
 
@@ -2915,6 +2919,60 @@ export default function GeneratedAIExercises({
 
   const alternativeError =
     alternativeErrorsById[currentKey] || "";
+
+  useEffect(() => {
+    if (!currentExercise) {
+      onTutorExerciseChange?.(null);
+      onTutorQuestionChange?.(null);
+      onTutorStepChange?.(null);
+      return;
+    }
+
+    const text =
+      currentExercise.question ||
+      currentExercise.statement ||
+      currentExercise.text ||
+      "";
+
+    onTutorExerciseChange?.({
+      kind: "generated_axis_exercise",
+      id: currentExercise.id,
+      code: currentExercise.code || "",
+      title: currentExercise.title || `التمرين المولد ${currentIndex + 1}`,
+      text,
+      difficulty: currentExercise.difficulty || "",
+      skill: currentExercise.skill || "",
+    });
+
+    onTutorQuestionChange?.({
+      id: `generated-${currentExercise.id}`,
+      number: 1,
+      title: currentExercise.title || "",
+      text,
+      skill: currentExercise.skill || "",
+    });
+    onTutorStepChange?.(null);
+  }, [
+    currentExercise,
+    currentIndex,
+    onTutorExerciseChange,
+    onTutorQuestionChange,
+    onTutorStepChange,
+  ]);
+
+  useEffect(() => {
+    onTutorViewStateChange?.({
+      solution_visible: solutionVisible,
+      alternative_solution_visible: alternativeVisible,
+      visible_hints: visibleHints,
+      showing_reexplanation: alternativeVisible,
+    });
+  }, [
+    solutionVisible,
+    alternativeVisible,
+    visibleHints,
+    onTutorViewStateChange,
+  ]);
 
   const progress = useMemo(() => {
     if (exercises.length === 0) return 0;
@@ -3400,7 +3458,15 @@ export default function GeneratedAIExercises({
             generating={generating}
           />
         ) : (
-          <article className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-3xl">
+          <article
+            data-tutor-context
+            data-tutor-exercise-kind="generated_axis_exercise"
+            data-tutor-exercise-id={currentExercise?.id ?? ""}
+            data-tutor-question-id={currentExercise?.id ? `generated-${currentExercise.id}` : ""}
+            data-tutor-question-number="1"
+            data-tutor-title={currentExercise?.title || `التمرين المولد ${currentIndex + 1}`}
+            className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm sm:rounded-3xl"
+          >
             <ExerciseNavigation
               currentIndex={currentIndex}
               total={exercises.length}
@@ -5033,7 +5099,14 @@ function SolutionStep({ step, index }) {
   );
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    <section
+      data-tutor-context
+      data-tutor-step-id={normalized.id ?? normalized.step_id ?? normalized.step_number ?? index + 1}
+      data-tutor-step-number={normalized.step_number ?? normalized.number ?? index + 1}
+      data-tutor-step-title={normalized.title || `الخطوة ${index + 1}`}
+      data-tutor-step-type="generated_solution_step"
+      className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+    >
       <div
         dir="rtl"
         className="flex items-center gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3"

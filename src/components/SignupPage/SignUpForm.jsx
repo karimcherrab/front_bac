@@ -31,7 +31,6 @@ const INITIAL_VALUES = {
   email: "",
   password: "",
   branch: "",
-  acceptTerms: false,
 };
 
 export default function SignUpForm() {
@@ -271,16 +270,11 @@ export default function SignUpForm() {
     const {
       name,
       value,
-      type,
-      checked,
     } = event.target;
 
     setFormValues((previous) => ({
       ...previous,
-      [name]:
-        type === "checkbox"
-          ? checked
-          : value,
+      [name]: value,
     }));
 
     setFormErrors((previous) => ({
@@ -356,11 +350,6 @@ export default function SignUpForm() {
     if (!formValues.branch) {
       errors.branch =
         "يرجى اختيار الشعبة.";
-    }
-
-    if (!formValues.acceptTerms) {
-      errors.acceptTerms =
-        "يجب الموافقة على الشروط والأحكام.";
     }
 
     return errors;
@@ -775,7 +764,7 @@ const handleSubmit = async (event) => {
         className="w-full max-w-md"
         dir="rtl"
       >
-        <Link
+        {/* <Link
           to="/"
           className="
             mb-4 inline-flex items-center
@@ -785,7 +774,7 @@ const handleSubmit = async (event) => {
         >
           <ArrowRight size={17} />
           العودة إلى الرئيسية
-        </Link>
+        </Link> */}
 
         <div className="mb-6">
           <h1
@@ -1039,57 +1028,6 @@ const handleSubmit = async (event) => {
                 "
               >
                 {formErrors.branch}
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label
-              className="
-                flex cursor-pointer
-                items-start gap-3 text-xs
-                leading-6 text-slate-600
-              "
-            >
-              <input
-                name="acceptTerms"
-                type="checkbox"
-                checked={
-                  formValues.acceptTerms
-                }
-                onChange={handleChange}
-                disabled={isLoading}
-                className="
-                  mt-1 h-4 w-4 rounded
-                  border-slate-300
-                  accent-brand-600
-                "
-              />
-
-              <span>
-                أوافق على{" "}
-
-                <span
-                  className="
-                    font-bold
-                    text-brand-600
-                  "
-                >
-                  الشروط والأحكام
-                </span>{" "}
-
-                وسياسة الخصوصية.
-              </span>
-            </label>
-
-            {formErrors.acceptTerms && (
-              <p
-                className="
-                  mt-1 text-xs
-                  font-medium text-red-500
-                "
-              >
-                {formErrors.acceptTerms}
               </p>
             )}
           </div>

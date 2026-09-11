@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="720" viewBox="0 0 900 720">
+  <rect width="900" height="720" fill="white"/>
+  <g stroke="#111" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- heavy chains -->
+    <path d="M430 610 L430 390 L260 180"/>
+    <path d="M470 610 L470 390 L640 180"/>
+    <!-- light chains -->
+    <path d="M360 365 L210 190" stroke-width="10"/>
+    <path d="M540 365 L690 190" stroke-width="10"/>
+    <!-- disulfide bridges -->
+    <line x1="430" y1="400" x2="470" y2="400" stroke-width="7"/>
+    <line x1="315" y1="300" x2="340" y2="280" stroke-width="7"/>
+    <line x1="585" y1="300" x2="560" y2="280" stroke-width="7"/>
+  </g>
+  <!-- variable region caps -->
+  <g fill="#ddd" stroke="#111" stroke-width="3">
+    <circle cx="245" cy="165" r="42"/><circle cx="655" cy="165" r="42"/>
+  </g>
+  <!-- antigen binding markers -->
+  <g fill="#111"><circle cx="205" cy="130" r="11"/><circle cx="695" cy="130" r="11"/></g>
+  <!-- hinge marker -->
+  <ellipse cx="450" cy="405" rx="72" ry="34" fill="none" stroke="#555" stroke-width="3" stroke-dasharray="9 7"/>
+  <!-- numeric labels -->
+  <g font-family="DejaVu Sans, Arial" font-size="30" font-weight="bold" fill="#000">
+    <text x="378" y="555">1</text>
+    <text x="185" y="300">2</text>
+    <text x="225" y="172">3</text>
+    <text x="500" y="520">4</text>
+    <text x="165" y="112">5</text>
+    <text x="455" y="385">6</text>
+    <text x="520" y="420">7</text>
+    <text x="455" y="660">8</text>
+  </g>
+  <g font-family="DejaVu Sans, Arial" font-size="25" fill="#222">
+    <text x="300" y="700">Schematic antibody structure - labels 1 to 8 are explained in the solution</text>
+  </g>
+</svg>

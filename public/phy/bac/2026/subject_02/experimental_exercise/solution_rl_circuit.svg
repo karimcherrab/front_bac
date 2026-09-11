@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-label="دارة RL مع جهة التيار وأسهم التوترات">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrC" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+  </marker>
+</defs>
+
+<!-- top and bottom wires -->
+<path d="M170 115 H330" stroke="#111827" stroke-width="4" fill="none"/>
+<circle cx="330" cy="115" r="7" fill="#111827"/>
+<circle cx="375" cy="115" r="7" fill="#111827"/>
+<line x1="330" y1="115" x2="368" y2="84" stroke="#111827" stroke-width="4"/>
+<text x="341" y="66" font-size="27" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">K</text>
+<path d="M375 115 H680 V380 H585" stroke="#111827" stroke-width="4" fill="none"/>
+
+<!-- real inductor -->
+<path d="M585 380
+ c-18 -45 -38 -45 -56 0
+ c-18 45 -38 45 -56 0
+ c-18 -45 -38 -45 -56 0
+ c-18 45 -38 45 -56 0
+ c-18 -45 -38 -45 -56 0
+ c-18 45 -38 45 -56 0" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="410" y="438" text-anchor="middle" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">(L,r)</text>
+
+<!-- resistor -->
+<path d="M249 380 H300" stroke="#111827" stroke-width="4"/>
+<rect x="300" y="352" width="115" height="56" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="357" y="389" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">R</text>
+<path d="M415 380 H450" stroke="#111827" stroke-width="4"/>
+
+<!-- source -->
+<path d="M170 380 H249" stroke="#111827" stroke-width="4"/>
+<circle cx="170" cy="248" r="58" fill="white" stroke="#111827" stroke-width="4"/>
+<line x1="170" y1="115" x2="170" y2="190" stroke="#111827" stroke-width="4"/>
+<line x1="170" y1="306" x2="170" y2="380" stroke="#111827" stroke-width="4"/>
+<text x="100" y="257" font-size="30" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">E</text>
+
+<!-- current -->
+<line x1="420" y1="82" x2="555" y2="82" stroke="#2563eb" stroke-width="3" marker-end="url(#arrC)"/>
+<text x="488" y="58" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb" font-style="italic">i</text>
+<line x1="505" y1="428" x2="370" y2="428" stroke="#2563eb" stroke-width="3" marker-end="url(#arrC)"/>
+<text x="438" y="460" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb" font-style="italic">i</text>
+
+<!-- voltages -->
+<line x1="105" y1="325" x2="105" y2="190" stroke="#2563eb" stroke-width="3" marker-end="url(#arrC)"/>
+<text x="73" y="263" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">E</text>
+
+<line x1="285" y1="455" x2="430" y2="455" stroke="#2563eb" stroke-width="3" marker-end="url(#arrC)"/>
+<text x="357" y="490" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">uR</text>
+
+<line x1="630" y1="410" x2="630" y2="325" stroke="#2563eb" stroke-width="3" marker-end="url(#arrC)"/>
+<text x="660" y="370" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">ub</text>
+
+</svg>

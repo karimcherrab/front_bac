@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-label="الشكل 1: الدارة 1 بالمكثفة والدارة 2 بالوشيعة">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrB" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#111827"/></marker>
+</defs>
+<!-- Divider -->
+<line x1="450" y1="45" x2="450" y2="455" stroke="#6b7280" stroke-width="2"/>
+<!-- Circuit 2 (left): source, switch, lamp, L -->
+<circle cx="150" cy="245" r="48" fill="white" stroke="#111827" stroke-width="4"/>
+<path d="M150 197 V110 H275" stroke="#111827" stroke-width="4" fill="none"/>
+<path d="M150 293 V385 H365" stroke="#111827" stroke-width="4" fill="none"/>
+<circle cx="275" cy="110" r="6" fill="#111827"/><circle cx="315" cy="110" r="6" fill="#111827"/>
+<line x1="275" y1="110" x2="309" y2="83" stroke="#111827" stroke-width="4"/>
+<text x="285" y="67" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">K</text>
+<path d="M315 110 H335" stroke="#111827" stroke-width="4"/>
+<circle cx="375" cy="110" r="38" fill="white" stroke="#111827" stroke-width="4"/>
+<path d="M351 86 L399 134 M399 86 L351 134" stroke="#111827" stroke-width="3"/>
+<text x="375" y="62" text-anchor="middle" font-size="22" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">مصباح</text>
+<path d="M413 110 H420 V205" stroke="#111827" stroke-width="4" fill="none"/>
+<path d="M420 205
+ c-18 -36 -35 -36 -52 0 c-18 36 -35 36 -52 0 c-18 -36 -35 -36 -52 0
+ c-18 36 -35 36 -52 0" transform="rotate(90 420 205)" stroke="#111827" stroke-width="4" fill="none"/>
+<!-- easier direct vertical inductor -->
+<path d="M420 190
+ c-35 18 -35 35 0 52 c35 18 35 35 0 52 c-35 18 -35 35 0 52" stroke="#111827" stroke-width="4" fill="none"/>
+<line x1="420" y1="346" x2="420" y2="385" stroke="#111827" stroke-width="4"/>
+<text x="390" y="285" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">L</text>
+<text x="92" y="253" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">E</text>
+<text x="285" y="430" text-anchor="middle" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الدارة 2</text>
+
+<!-- Circuit 1 (right): source, switch, lamp, C -->
+<circle cx="550" cy="245" r="48" fill="white" stroke="#111827" stroke-width="4"/>
+<path d="M550 197 V110 H675" stroke="#111827" stroke-width="4" fill="none"/>
+<path d="M550 293 V385 H820" stroke="#111827" stroke-width="4" fill="none"/>
+<circle cx="675" cy="110" r="6" fill="#111827"/><circle cx="715" cy="110" r="6" fill="#111827"/>
+<line x1="675" y1="110" x2="709" y2="83" stroke="#111827" stroke-width="4"/>
+<text x="685" y="67" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">K</text>
+<path d="M715 110 H735" stroke="#111827" stroke-width="4"/>
+<circle cx="775" cy="110" r="38" fill="white" stroke="#111827" stroke-width="4"/>
+<path d="M751 86 L799 134 M799 86 L751 134" stroke="#111827" stroke-width="3"/>
+<text x="775" y="62" text-anchor="middle" font-size="22" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">مصباح</text>
+<path d="M813 110 H820 V240" stroke="#111827" stroke-width="4"/>
+<line x1="780" y1="240" x2="860" y2="240" stroke="#111827" stroke-width="5"/>
+<line x1="780" y1="267" x2="860" y2="267" stroke="#111827" stroke-width="5"/>
+<line x1="820" y1="267" x2="820" y2="385" stroke="#111827" stroke-width="4"/>
+<text x="865" y="263" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">C</text>
+<text x="492" y="253" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">E</text>
+<text x="685" y="430" text-anchor="middle" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الدارة 1</text>
+<text x="450" y="500" text-anchor="middle" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الشكل 1</text>
+
+</svg>

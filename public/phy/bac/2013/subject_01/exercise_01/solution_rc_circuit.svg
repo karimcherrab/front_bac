@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-label="دارة شحن المكثفة مع توجيه التيار والتوترات">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrRC13" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+  </marker>
+</defs>
+<!-- source -->
+<circle cx="175" cy="265" r="56" fill="white" stroke="#111827" stroke-width="4"/>
+<line x1="175" y1="115" x2="175" y2="209" stroke="#111827" stroke-width="4"/>
+<line x1="175" y1="321" x2="175" y2="415" stroke="#111827" stroke-width="4"/>
+<text x="105" y="275" font-size="30" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">E</text>
+<line x1="105" y1="325" x2="105" y2="205" stroke="#2563eb" stroke-width="3" marker-end="url(#arrRC13)"/>
+
+<!-- top switch -->
+<path d="M175 115 H340" stroke="#111827" stroke-width="4"/>
+<circle cx="340" cy="115" r="7" fill="#111827"/>
+<circle cx="395" cy="115" r="7" fill="#111827"/>
+<line x1="340" y1="115" x2="388" y2="82" stroke="#111827" stroke-width="4"/>
+<text x="356" y="65" font-size="27" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">K</text>
+<path d="M395 115 H655 V210" stroke="#111827" stroke-width="4" fill="none"/>
+
+<!-- capacitor right upper -->
+<line x1="610" y1="210" x2="700" y2="210" stroke="#111827" stroke-width="5"/>
+<line x1="610" y1="240" x2="700" y2="240" stroke="#111827" stroke-width="5"/>
+<line x1="655" y1="240" x2="655" y2="285" stroke="#111827" stroke-width="4"/>
+<text x="720" y="235" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">C</text>
+<!-- resistor lower right -->
+<rect x="622" y="285" width="66" height="105" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="715" y="345" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">R</text>
+<path d="M655 390 V415 H175" stroke="#111827" stroke-width="4" fill="none"/>
+
+<!-- current arrow, matching correction (bottom left) -->
+<line x1="420" y1="455" x2="275" y2="455" stroke="#2563eb" stroke-width="3" marker-end="url(#arrRC13)"/>
+<text x="348" y="485" text-anchor="middle" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb" font-style="italic">i</text>
+
+<!-- voltage arrows on C and R -->
+<line x1="755" y1="248" x2="755" y2="195" stroke="#2563eb" stroke-width="3" marker-end="url(#arrRC13)"/>
+<text x="785" y="228" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">uC</text>
+<line x1="755" y1="392" x2="755" y2="285" stroke="#2563eb" stroke-width="3" marker-end="url(#arrRC13)"/>
+<text x="785" y="345" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">uR</text>
+
+</svg>

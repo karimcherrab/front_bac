@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 540" role="img" aria-label="الشكل 2: دارة شحن وتفريغ RC"><rect width="100%" height="100%" fill="white"/>
+<defs><marker id="b" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#111827"/></marker></defs>
+<circle cx="150" cy="270" r="55" fill="white" stroke="#111827" stroke-width="4"/><line x1="150" y1="115" x2="150" y2="215" stroke="#111827" stroke-width="4"/><line x1="150" y1="325" x2="150" y2="440" stroke="#111827" stroke-width="4"/><text x="84" y="280" font-size="29" font-family="DejaVu Sans,Arial,sans-serif">E</text>
+<path d="M150 115 H225" stroke="#111827" stroke-width="4"/><rect x="225" y="87" width="110" height="56" fill="white" stroke="#111827" stroke-width="4"/><text x="280" y="125" text-anchor="middle" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">R</text>
+<path d="M335 115 H395" stroke="#111827" stroke-width="4"/><circle cx="395" cy="115" r="7" fill="#111827"/><circle cx="500" cy="115" r="7" fill="#111827"/><text x="385" y="82" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">1</text><text x="493" y="82" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">2</text>
+<circle cx="445" cy="170" r="7" fill="#111827"/><line x1="445" y1="170" x2="402" y2="122" stroke="#111827" stroke-width="4"/>
+<path d="M445 170 V250" stroke="#111827" stroke-width="4"/><line x1="395" y1="250" x2="495" y2="250" stroke="#111827" stroke-width="5"/><line x1="395" y1="280" x2="495" y2="280" stroke="#111827" stroke-width="5"/><path d="M445 280 V400" stroke="#111827" stroke-width="4"/><text x="510" y="275" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">C</text><text x="520" y="230" font-size="23" font-family="DejaVu Sans,Arial,sans-serif">uAB</text>
+<path d="M500 115 H690 V210" stroke="#111827" stroke-width="4" fill="none"/><rect x="657" y="210" width="66" height="120" fill="white" stroke="#111827" stroke-width="4"/><text x="745" y="278" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">R′</text><path d="M690 330 V400 H445" stroke="#111827" stroke-width="4" fill="none"/>
+<path d="M445 400 H150 V440" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="430" y="515" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الشكل 2</text>
+</svg>

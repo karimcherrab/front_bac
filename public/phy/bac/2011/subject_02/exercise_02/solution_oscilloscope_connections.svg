@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" role="img" aria-label="الشكل 2: دارة RL">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrRL11" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#111827"/>
+  </marker>
+</defs>
+<!-- source -->
+<line x1="160" y1="120" x2="255" y2="120" stroke="#111827" stroke-width="4"/>
+<line x1="255" y1="85" x2="255" y2="155" stroke="#111827" stroke-width="4"/>
+<line x1="285" y1="95" x2="285" y2="145" stroke="#111827" stroke-width="7"/>
+<path d="M285 120 H350" stroke="#111827" stroke-width="4"/>
+<text x="270" y="65" text-anchor="middle" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">E</text>
+<text x="247" y="175" font-size="23" font-family="DejaVu Sans,Arial,sans-serif">−</text>
+<text x="286" y="175" font-size="23" font-family="DejaVu Sans,Arial,sans-serif">+</text>
+
+<!-- switch -->
+<circle cx="350" cy="120" r="7" fill="#111827"/>
+<circle cx="405" cy="120" r="7" fill="#111827"/>
+<line x1="350" y1="120" x2="397" y2="88" stroke="#111827" stroke-width="4"/>
+<text x="365" y="72" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">K</text>
+<path d="M405 120 H690 V330 H570" stroke="#111827" stroke-width="4" fill="none"/>
+
+<!-- coil -->
+<path d="M570 330
+ c-18 -42 -38 -42 -56 0 c-18 42 -38 42 -56 0
+ c-18 -42 -38 -42 -56 0 c-18 42 -38 42 -56 0
+ c-18 -42 -38 -42 -56 0" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="430" y="390" text-anchor="middle" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">L,r</text>
+<path d="M290 330 H160" stroke="#111827" stroke-width="4"/>
+
+<!-- resistor -->
+<rect x="160" y="302" width="130" height="56" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="225" y="340" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">R</text>
+<path d="M160 330 V120" stroke="#111827" stroke-width="4"/>
+
+<!-- current -->
+<line x1="465" y1="83" x2="585" y2="83" stroke="#111827" stroke-width="3" marker-end="url(#arrRL11)"/>
+<text x="525" y="58" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">i</text>
+
+<text x="425" y="475" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الشكل 2</text>
+
+
+<defs>
+  <marker id="blueScope" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+  </marker>
+</defs>
+<!-- common reference at junction between R and coil -->
+<circle cx="290" cy="330" r="6" fill="#2563eb"/>
+<line x1="290" y1="330" x2="290" y2="420" stroke="#2563eb" stroke-width="2.5"/>
+<line x1="260" y1="420" x2="320" y2="420" stroke="#2563eb" stroke-width="3"/>
+<line x1="270" y1="433" x2="310" y2="433" stroke="#2563eb" stroke-width="3"/>
+<line x1="280" y1="446" x2="300" y2="446" stroke="#2563eb" stroke-width="3"/>
+<!-- Y1 at right side of coil for ub -->
+<circle cx="570" cy="330" r="6" fill="#2563eb"/>
+<line x1="570" y1="330" x2="760" y2="330" stroke="#2563eb" stroke-width="2.5"/>
+<text x="775" y="338" font-size="22" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">Y1 : ub</text>
+<!-- Y2 at left of R gives inverse of uR with common at junction -->
+<circle cx="160" cy="330" r="6" fill="#2563eb"/>
+<line x1="160" y1="330" x2="75" y2="330" stroke="#2563eb" stroke-width="2.5"/>
+<text x="18" y="338" font-size="21" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">Y2 + INV</text>
+</svg>

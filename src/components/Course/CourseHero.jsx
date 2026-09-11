@@ -9,7 +9,7 @@ import {
   Sigma,
 } from "lucide-react";
 
-export default function CourseHero({ course }) {
+export default function CourseHero({ course  , courseData}) {
   return (
     <section
       dir="rtl"
@@ -59,14 +59,14 @@ export default function CourseHero({ course }) {
 
           <div>
             <h1 className="text-3xl font-extrabold text-slate-900">
-              {course.title}
+              {courseData.name}
             </h1>
 
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">
-              {course.description}
+              {courseData.description}
             </p>
 
-            <div className="mt-5 flex max-w-lg items-center gap-4">
+            {/* <div className="mt-5 flex max-w-lg items-center gap-4">
               <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-violet-100">
                 <div
                   className="
@@ -83,29 +83,29 @@ export default function CourseHero({ course }) {
               <span className="text-sm font-bold text-slate-700">
                 {course.progress}% مكتمل
               </span>
-            </div>
+            </div> */}
 
             <div className="mt-5 flex flex-wrap gap-5 text-xs font-semibold text-slate-500">
               <span className="flex items-center gap-1.5">
                 <BookOpen size={15} />
-                {course.lessonsCount} درس
+                {courseData.chaptersCount} درس
               </span>
 
               <span className="flex items-center gap-1.5">
                 <PenLine size={15} />
-                {course.exercisesCount} تمرين
+                {courseData.exercisesCount} تمرين
               </span>
 
               <span className="flex items-center gap-1.5">
                 <ClipboardCheck size={15} />
-                {course.examsCount} اختبارات
+                {courseData.bacExercisesCount} اختبارات
               </span>
             </div>
           </div>
         </div>
 
         {/* رسم رياضي */}
-        <div
+        {/* <div
           className="
             relative mx-auto flex h-44 w-full
             max-w-[330px] items-center justify-center
@@ -143,7 +143,7 @@ export default function CourseHero({ course }) {
           >
             <Calculator size={50} className="text-white" />
           </div>
-        </div>
+        </div> */}
       </div>
     </section>
   );

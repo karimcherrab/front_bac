@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680">
+<defs>
+  <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="black"/>
+  </marker>
+</defs>
+<style>
+text { font-family: Arial, "DejaVu Sans", sans-serif; font-size: 28px; }
+.box { fill:white; stroke:black; stroke-width:3; rx:16; ry:16; }
+.arr { stroke:black; stroke-width:3; fill:none; marker-end:url(#a); }
+</style>
+<text x="600" y="50" text-anchor="middle" font-size="34" font-weight="bold">آلية تخريب الخلية المصابة بواسطة البرفورين</text>
+<rect class="box" x="40" y="150" width="220" height="115"/>
+<text x="150" y="195" text-anchor="middle">تعرف مزدوج</text>
+<text x="150" y="235" text-anchor="middle">LTc / خلية مصابة</text>
+<rect class="box" x="320" y="150" width="220" height="115"/>
+<text x="430" y="215" text-anchor="middle">إفراز البرفورين</text>
+<rect class="box" x="600" y="150" width="240" height="115"/>
+<text x="720" y="195" text-anchor="middle">تثبيت البرفورين</text>
+<text x="720" y="235" text-anchor="middle">على الغشاء</text>
+<rect class="box" x="900" y="150" width="250" height="115"/>
+<text x="1025" y="195" text-anchor="middle">تشكيل قنوات</text>
+<text x="1025" y="235" text-anchor="middle">غشائية</text>
+<path class="arr" d="M260 207 L320 207"/>
+<path class="arr" d="M540 207 L600 207"/>
+<path class="arr" d="M840 207 L900 207"/>
+
+<rect class="box" x="365" y="390" width="250" height="115"/>
+<text x="490" y="435" text-anchor="middle">دخول الماء</text>
+<text x="490" y="475" text-anchor="middle">والشوارد</text>
+<rect class="box" x="715" y="390" width="250" height="115"/>
+<text x="840" y="435" text-anchor="middle">صدمة حلولية</text>
+<text x="840" y="475" text-anchor="middle">وانفجار الخلية</text>
+<path class="arr" d="M1025 265 C1025 330,920 350,870 390"/>
+<path class="arr" d="M615 447 L715 447"/>
+</svg>

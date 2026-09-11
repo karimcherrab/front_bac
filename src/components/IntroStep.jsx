@@ -110,7 +110,6 @@ const TECHNICAL_PRESENTATION_FIELDS = new Set([
   "pre_question",
   "quick_check",
   "attempt_instruction",
-  "scoring",
   "law_guides",
   "law_guide",
 
@@ -451,6 +450,20 @@ function normalizeMathText(value) {
 function getPureMathExpression(value) {
   let text = decodeLatexEscapes(value).trim();
 
+  // إزالة محددات الصيغة حتى عند وجود نقطة أو فاصلة بعد \(...\).
+  // إبقاء المحددات ثم تغليفها مرة ثانية داخل \[...\] يجعل MathJax
+  // يعرض \( و\) باللون الأحمر كما في بطاقة القاعدة الأساسية.
+  const inlineDelimited = text.match(
+    /^\\\(([\s\S]*?)\\\)\s*[.،,؛;:]?\s*$/,
+  );
+  const displayDelimited = text.match(
+    /^\\\[([\s\S]*?)\\\]\s*[.،,؛;:]?\s*$/,
+  );
+
+  if (inlineDelimited || displayDelimited) {
+    text = (inlineDelimited?.[1] ?? displayDelimited?.[1] ?? "").trim();
+  }
+
   if (
     (text.startsWith("\\(") && text.endsWith("\\)")) ||
     (text.startsWith("\\[") && text.endsWith("\\]"))
@@ -567,6 +580,61 @@ function cleanMixedMathSource(value) {
     .trim();
 }
 
+function normalizeMixedMathToken(value) {
+  return String(value || "")
+    .replace(/\*\*/g, "^")
+    .replace(/\^\s*\(([^()]+)\)/g, "^{$1}")
+    .replace(/\^\s*(-?\d+(?:\.\d+)?)/g, "^{$1}")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// MathJax يتعامل جيدًا مع الصيغ الرياضية، لكن إدخال العربية داخل
+// \\text{...} داخل نفس الصيغة قد يؤدي إلى قلب الحروف أو ترتيبها بصورة خاطئة.
+// لذلك نفصل النص العربي عن الصيغة الرياضية ونترك المتصفح يعرضه RTL طبيعيًا.
+function splitArabicTextInsideLatex(value) {
+  const source = String(value || "");
+  if (!source) return [];
+
+  const result = [];
+  const arabicInsideMathPattern =
+    /\\(?:text|mbox)\{([^{}]*)\}|([\u0600-\u06FF][\u0600-\u06FF\u064B-\u065F\u0670\s،؛؟]*)/g;
+
+  let cursor = 0;
+  let match;
+
+  const pushMath = (chunk) => {
+    const normalized = normalizeMixedMathToken(chunk);
+    if (normalized) result.push({ type: "math", value: normalized });
+  };
+
+  const pushArabic = (chunk) => {
+    const cleaned = String(chunk || "")
+      .replace(/\\(?=[\u0600-\u06FF])/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (cleaned) result.push({ type: "text", value: cleaned });
+  };
+
+  while ((match = arabicInsideMathPattern.exec(source)) !== null) {
+    const latexTextContent = match[1];
+    const rawArabicContent = match[2];
+    const candidate = latexTextContent ?? rawArabicContent ?? "";
+
+    // لا نفصل \\text{...} إذا لم يكن عربيًا، حتى تبقى صيغ مثل \\text{if} سليمة.
+    if (!containsArabic(candidate)) continue;
+
+    pushMath(source.slice(cursor, match.index));
+    pushArabic(candidate);
+    cursor = arabicInsideMathPattern.lastIndex;
+  }
+
+  pushMath(source.slice(cursor));
+
+  return result;
+}
+
 function splitMixedArabicMath(value) {
   const source = cleanMixedMathSource(value);
   if (!source) return [];
@@ -602,33 +670,31 @@ function splitMixedArabicMath(value) {
         return;
       }
 
-      const normalizedMath = cleaned
-        .replace(/\*\*/g, "^")
-        .replace(/\^\s*\(([^()]+)\)/g, "^{$1}")
-        .replace(/\^\s*(-?\d+(?:\.\d+)?)/g, "^{$1}")
-        .replace(/\s+/g, " ")
-        .trim();
-
+      const normalizedMath = normalizeMixedMathToken(cleaned);
       if (normalizedMath) {
         tokens.push({ type: "math", value: normalizedMath });
       }
     });
   };
 
+  const pushMathPart = (mathValue) => {
+    const splitTokens = splitArabicTextInsideLatex(mathValue);
+    if (splitTokens.length > 0) {
+      tokens.push(...splitTokens);
+      return;
+    }
+
+    const normalizedMath = normalizeMixedMathToken(mathValue);
+    if (normalizedMath) {
+      tokens.push({ type: "math", value: normalizedMath });
+    }
+  };
+
   while ((match = explicitMathPattern.exec(source)) !== null) {
     pushPlainPart(source.slice(cursor, match.index));
 
     const mathValue = (match[1] ?? match[2] ?? "").trim();
-    if (mathValue) {
-      tokens.push({
-        type: "math",
-        value: mathValue
-          .replace(/\*\*/g, "^")
-          .replace(/\^\s*\(([^()]+)\)/g, "^{$1}")
-          .replace(/\^\s*(-?\d+(?:\.\d+)?)/g, "^{$1}")
-          .trim(),
-      });
-    }
+    if (mathValue) pushMathPart(mathValue);
 
     cursor = explicitMathPattern.lastIndex;
   }
@@ -666,7 +732,7 @@ function MixedArabicMath({
               key={`mixed-text-${index}`}
               dir="rtl"
               className={cn(
-                "inline-flex whitespace-nowrap font-bold [unicode-bidi:isolate]",
+                "inline-flex max-w-full whitespace-normal text-right font-bold leading-7 [unicode-bidi:isolate]",
                 dark ? "text-white" : "text-slate-800",
               )}
             >
@@ -843,6 +909,7 @@ function InfoBox({
   children,
   tone = "indigo",
   compact = true,
+  stretch = false,
   className = "",
 }) {
   const tones = {
@@ -857,7 +924,10 @@ function InfoBox({
   return (
     <div
       className={cn(
-        "h-full border shadow-sm ring-1 ring-white/60",
+        // لا نضع h-full افتراضيًا: داخل بطاقات grid كان يجعل InfoBox
+        // يأخذ ارتفاع البطاقة كاملًا ثم يفيض فوق العناصر التالية.
+        "min-w-0 border shadow-sm ring-1 ring-white/60",
+        stretch && "h-full",
         compact
           ? "rounded-2xl p-3.5 sm:p-4"
           : "rounded-[22px] p-5",
@@ -865,7 +935,7 @@ function InfoBox({
         className,
       )}
     >
-      <div className="flex items-start gap-2.5">
+      <div className="flex min-w-0 items-start gap-2.5">
         <Icon
           size={compact ? 16 : 19}
           className="mt-0.5 shrink-0 rounded-lg bg-white/75 p-1 shadow-sm"
@@ -885,7 +955,7 @@ function InfoBox({
 
           <div
             className={cn(
-              "[&_.MathJax]:mx-0",
+              "min-w-0 [&_.MathJax]:mx-0",
               compact &&
                 "[&_p]:text-sm [&_p]:leading-7 [&_mjx-container]:text-[95%]",
             )}
@@ -912,10 +982,20 @@ function getDisplayText(item) {
       item.equation ||
       item.hint ||
       item.instruction ||
+      item.teacher_explanation ||
+      item.explanation ||
+      item.solution ||
       item.question ||
       item.answer ||
       item.result ||
       item.meaning ||
+      item.statement ||
+      item.action ||
+      item.correction ||
+      item.correct ||
+      item.wrong ||
+      item.why ||
+      item.reason ||
       item.statement ||
       item.title ||
       item.label ||
@@ -1109,6 +1189,7 @@ function MotivationStep({ content = {} }) {
     "real_life_examples",
     "examples",
     "example",
+    "mini_example",
     "attention",
   ]);
 
@@ -1187,11 +1268,23 @@ function MotivationStep({ content = {} }) {
         </section>
       )}
 
-      {content.attention && (
+      {content.mini_example && (
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <Lightbulb size={18} className="text-amber-600" />
+            <h3 className="font-black text-slate-950">
+              مثال تطبيقي
+            </h3>
+          </div>
+          <SemanticExampleValue value={content.mini_example} />
+        </section>
+      )}
+
+      {/* {content.attention && (
         <InfoBox title="انتبه قبل أن تبدأ" tone="rose" icon={AlertTriangle} compact={false}>
           <MathText className="font-black leading-8">{content.attention}</MathText>
         </InfoBox>
-      )}
+      )} */}
 
       {Object.keys(remainingContent).length > 0 && (
         <StructuredValue value={remainingContent} depth={1} />
@@ -1309,6 +1402,145 @@ function DynamicDataTable({
 
 
 
+function isObjectRow(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value),
+  );
+}
+
+function isComplexPartsExampleRows(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (item) =>
+        isObjectRow(item) &&
+        ("z" in item || "number" in item) &&
+        ("real" in item || "imaginary" in item),
+    )
+  );
+}
+
+function ExampleCollection({ value, title = "" }) {
+  const items = Array.isArray(value)
+    ? value.filter((item) => !isEmpty(item))
+    : !isEmpty(value)
+      ? [value]
+      : [];
+
+  if (items.length === 0) return null;
+
+  const allObjects = items.every(isObjectRow);
+  const allPrimitive = items.every(
+    (item) =>
+      typeof item === "string" ||
+      typeof item === "number" ||
+      typeof item === "boolean",
+  );
+
+  if (isComplexPartsExampleRows(items)) {
+    return (
+      <DynamicDataTable
+        rows={items}
+        preferredColumns={["z", "real", "imaginary"]}
+        title={title}
+      />
+    );
+  }
+
+  if (allObjects) {
+    const discoveredColumns = Array.from(
+      new Set(
+        items.flatMap((item) =>
+          Object.keys(item).filter(
+            (key) =>
+              !["id", "step_number", "level"].includes(key) &&
+              !isEmpty(item[key]) &&
+              !isTechnicalPresentationField(key),
+          ),
+        ),
+      ),
+    );
+
+    const scalarOnly = items.every((item) =>
+      discoveredColumns.every((key) => {
+        const nestedValue = item[key];
+        return (
+          isEmpty(nestedValue) ||
+          typeof nestedValue === "string" ||
+          typeof nestedValue === "number" ||
+          typeof nestedValue === "boolean"
+        );
+      }),
+    );
+
+    if (scalarOnly && discoveredColumns.length > 0 && discoveredColumns.length <= 5) {
+      return (
+        <DynamicDataTable
+          rows={items}
+          preferredColumns={discoveredColumns}
+          title={title}
+        />
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {items.map((item, index) => (
+          <SemanticExampleValue
+            key={item?.id || `example-object-${index}`}
+            value={item}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (allPrimitive) {
+    return (
+      <div
+        className={cn(
+          "grid gap-3",
+          items.length === 1
+            ? "grid-cols-1"
+            : items.length === 2
+              ? "sm:grid-cols-2"
+              : items.length === 3
+                ? "sm:grid-cols-3"
+                : "sm:grid-cols-2 lg:grid-cols-4",
+        )}
+      >
+        {items.map((item, index) => (
+          <div
+            key={`example-value-${index}`}
+            className="flex min-h-[72px] items-center justify-center rounded-2xl border border-indigo-100 bg-gradient-to-b from-indigo-50/70 to-white px-4 py-3 text-center shadow-sm"
+          >
+            <MathText className="font-black text-slate-900">
+              {String(item)}
+            </MathText>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {items.map((item, index) => (
+        <div
+          key={`mixed-example-${index}`}
+          className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+        >
+          <StructuredValue value={item} fieldKey="example" depth={1} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 function FlexibleTable({ table, title = "", className = "" }) {
   if (!table) return null;
 
@@ -1338,6 +1570,22 @@ function FlexibleTable({ table, title = "", className = "" }) {
   const caption = table.caption || table.description || "";
   const resolvedTitle = title || table.title || "";
 
+  const extraTableEntries = Object.entries(table).filter(
+    ([key, value]) =>
+      ![
+        "headers",
+        "columns",
+        "rows",
+        "data",
+        "caption",
+        "description",
+        "title",
+      ].includes(key) &&
+      !isEmpty(value) &&
+      !isTechnicalPresentationField(key) &&
+      !looksLikeSvgMarkup(value),
+  );
+
   if (headers.length === 0 && rows.length === 0) {
     return <StructuredValue value={table} depth={1} />;
   }
@@ -1360,8 +1608,24 @@ function FlexibleTable({ table, title = "", className = "" }) {
         </div>
       )}
 
+      {extraTableEntries.length > 0 && (
+        <div className="grid gap-3 border-b border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2">
+          {extraTableEntries.map(([key, value]) => (
+            <div
+              key={key}
+              className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3.5"
+            >
+              <p className="mb-1.5 text-[11px] font-black text-slate-500">
+                {fieldLabel(key)}
+              </p>
+              <StructuredValue value={value} fieldKey={key} depth={1} />
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="overflow-x-auto">
-        <table dir="rtl" className="w-full min-w-[560px] text-center text-sm">
+        <table dir="rtl" className="w-full min-w-[520px] text-center text-sm">
           {headers.length > 0 && (
             <thead className="bg-gradient-to-l from-slate-950 to-indigo-950 text-white">
               <tr>
@@ -2265,7 +2529,24 @@ function GuidedExplanationStep({ content = {} }) {
   );
 }
 
-function NotationStep({ content }) {
+function NotationStep({ content = {} }) {
+  const handledKeys = new Set([
+    "teacher",
+    "symbols",
+    "comparison",
+    "memory_tip",
+  ]);
+
+  const remainingContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !handledKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
   return (
     <div className="space-y-5 sm:space-y-6">
       <MathText className="text-slate-700">{content.teacher}</MathText>
@@ -2298,6 +2579,10 @@ function NotationStep({ content }) {
           <MathText className="font-bold">{content.memory_tip}</MathText>
         </InfoBox>
       )}
+
+      {Object.keys(remainingContent).length > 0 && (
+        <GenericObjectStep content={remainingContent} />
+      )}
     </div>
   );
 }
@@ -2325,43 +2610,160 @@ function RankStep({ content }) {
   );
 }
 
-function MethodsOverviewStep({ content }) {
+function MethodsOverviewStep({ content = {} }) {
+  const methods = Array.isArray(content.methods)
+    ? content.methods.filter(
+        (method) => method && typeof method === "object" && !Array.isArray(method),
+      )
+    : [];
+
   return (
     <div className="space-y-5 sm:space-y-6">
-      <MathText className="text-slate-700">{content.teacher}</MathText>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        {(content.methods || []).map((method, index) => (
-          <div
-            key={index}
-            className={cn(
-              "rounded-[28px] border p-5",
-              index === 0
-                ? "border-indigo-200 bg-indigo-50"
-                : "border-emerald-200 bg-emerald-50",
-            )}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="rounded-full bg-white px-3 py-1 text-xs font-black shadow-sm">
-                الطريقة {index + 1}
-              </span>
-              {index === 0 ? <Zap size={21} /> : <Route size={21} />}
+      {!isEmpty(content.teacher) && (
+        <section className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 shadow-sm sm:px-6">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100">
+              <Brain size={17} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="mb-1 text-xs font-black text-indigo-700">
+                كيف تُعرَّف المتتالية؟
+              </p>
+              <MathText className="font-semibold leading-8 text-slate-700">
+                {content.teacher}
+              </MathText>
             </div>
-            <h3 className="mt-4 text-lg font-black text-slate-950">{method.name}</h3>
-            <MathText className="mt-3 text-slate-700">{method.idea}</MathText>
-            <div className="mt-4">
-              <BulletList items={method.needs} tone={index === 0 ? "indigo" : "emerald"} />
-            </div>
-            <InfoBox title="الميزة" tone={index === 0 ? "indigo" : "emerald"} icon={Trophy}>
-              <MathText className="text-sm font-bold">{method.advantage}</MathText>
-            </InfoBox>
           </div>
-        ))}
-      </div>
+        </section>
+      )}
 
-      <InfoBox title="ملاحظة مهمة" tone="rose" icon={AlertTriangle}>
-        <MathText className="font-bold">{content.important_note}</MathText>
-      </InfoBox>
+      {methods.length > 0 && (
+        <div className="grid items-stretch gap-5 lg:grid-cols-2">
+          {methods.map((method, index) => {
+            const isExplicit = index === 0;
+            const MethodIcon = isExplicit ? Zap : Route;
+            const needs = Array.isArray(method.needs)
+              ? method.needs.filter((item) => !isEmpty(item))
+              : !isEmpty(method.needs)
+                ? [method.needs]
+                : [];
+
+            return (
+              <article
+                key={method.id || method.name || `definition-method-${index}`}
+                className={cn(
+                  "relative flex min-w-0 flex-col overflow-hidden rounded-[30px] border p-5 shadow-sm sm:p-6",
+                  isExplicit
+                    ? "border-indigo-200 bg-gradient-to-b from-indigo-50/90 to-white"
+                    : "border-emerald-200 bg-gradient-to-b from-emerald-50/90 to-white",
+                )}
+              >
+                <div
+                  className={cn(
+                    "pointer-events-none absolute -left-10 -top-10 h-32 w-32 rounded-full blur-3xl",
+                    isExplicit ? "bg-indigo-200/35" : "bg-emerald-200/35",
+                  )}
+                />
+
+                <div className="relative flex items-center justify-between gap-3">
+                  <span className="inline-flex items-center rounded-full border border-white/90 bg-white/90 px-3 py-1.5 text-xs font-black text-slate-700 shadow-sm">
+                    الطريقة {index + 1}
+                  </span>
+                  <span
+                    className={cn(
+                      "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm ring-1",
+                      isExplicit
+                        ? "text-indigo-700 ring-indigo-100"
+                        : "text-emerald-700 ring-emerald-100",
+                    )}
+                  >
+                    <MethodIcon size={20} />
+                  </span>
+                </div>
+
+                <div className="relative mt-5 min-w-0">
+                  {!isEmpty(method.name) && (
+                    <h3 className="text-lg font-black leading-8 text-slate-950 sm:text-xl">
+                      {method.name}
+                    </h3>
+                  )}
+
+                  {!isEmpty(method.idea) && (
+                    <MathText className="mt-2 font-semibold leading-8 text-slate-700">
+                      {method.idea}
+                    </MathText>
+                  )}
+                </div>
+
+                {needs.length > 0 && (
+                  <div className="relative mt-5 flex-1">
+                    <p
+                      className={cn(
+                        "mb-2.5 text-xs font-black",
+                        isExplicit ? "text-indigo-700" : "text-emerald-700",
+                      )}
+                    >
+                      ما الذي نحتاجه؟
+                    </p>
+
+                    <div className="space-y-2.5">
+                      {needs.map((need, needIndex) => {
+                        const needText = getDisplayText(need);
+                        if (!needText) return null;
+
+                        return (
+                          <div
+                            key={`${needText}-${needIndex}`}
+                            className="flex min-w-0 items-start gap-3 rounded-2xl border border-slate-200/80 bg-white/90 px-4 py-3 shadow-sm"
+                          >
+                            <CheckCircle2
+                              size={17}
+                              className={cn(
+                                "mt-1 shrink-0",
+                                isExplicit ? "text-indigo-600" : "text-emerald-600",
+                              )}
+                            />
+                            <MathText className="min-w-0 flex-1 text-sm font-bold leading-7 text-slate-700">
+                              {needText}
+                            </MathText>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {!isEmpty(method.advantage) && (
+                  <InfoBox
+                    title="الميزة"
+                    tone={isExplicit ? "indigo" : "emerald"}
+                    icon={Trophy}
+                    className="relative mt-5 shrink-0"
+                  >
+                    <MathText className="text-sm font-bold leading-7">
+                      {method.advantage}
+                    </MathText>
+                  </InfoBox>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {!isEmpty(content.important_note) && (
+        <InfoBox
+          title="ملاحظة مهمة"
+          tone="rose"
+          icon={AlertTriangle}
+          compact={false}
+          className="relative z-0"
+        >
+          <MathText className="font-bold leading-8">
+            {content.important_note}
+          </MathText>
+        </InfoBox>
+      )}
     </div>
   );
 }
@@ -2682,9 +3084,22 @@ function RecursiveMethodStep({ content }) {
 }
 
 function ComparisonStep({ content = {} }) {
-  const comparisons = Array.isArray(content.comparisons)
-    ? content.comparisons.filter(Boolean)
-    : [];
+  /*
+   * هذا النوع من المراحل يصل بأكثر من بنية JSON:
+   * - comparisons: [...]  (البنية القديمة)
+   * - items: [...]        (البنية الجديدة)
+   *
+   * لذلك نوحّد المصدر هنا بدل إسقاط المحتوى إذا تغيّر اسم الحقل.
+   */
+  const comparisonSource = Array.isArray(content.comparisons)
+    ? content.comparisons
+    : Array.isArray(content.comparison)
+      ? content.comparison
+      : Array.isArray(content.items)
+        ? content.items
+        : [];
+
+  const comparisons = comparisonSource.filter(Boolean);
 
   const comparisonTable = Array.isArray(content.comparison_table)
     ? content.comparison_table.filter(Boolean)
@@ -2694,36 +3109,130 @@ function ComparisonStep({ content = {} }) {
     ? content.decision_rule.filter(Boolean)
     : [];
 
+  const quadrants = Array.isArray(content.quadrants)
+    ? content.quadrants.filter(Boolean)
+    : [];
+
+  const manuallyRenderedKeys = new Set([
+    "comparisons",
+    "comparison",
+    "items",
+    "quadrants",
+    "comparison_table",
+    "decision_rule",
+    "main_difference",
+    "memory_tip",
+
+    // هذه الحقول يعرضها LessonStepCard مركزيًا عبر PedagogicalBlocks.
+    "why",
+    "how_to_think",
+    "attention",
+    "quick_check",
+    "takeaway",
+    "mastery_rule",
+    "next_step",
+  ]);
+
+  /*
+   * لا نخفي أي حقل جديد غير معروف مستقبلًا.
+   * أي بيانات إضافية في JSON ستظهر تلقائيًا في نهاية المرحلة.
+   */
+  const remainingContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !manuallyRenderedKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 sm:space-y-6">
       {comparisons.length > 0 && (
-        <section>
-          <div className="mb-3 flex items-center gap-2">
-            <ListChecks size={18} className="text-indigo-600" />
-            <h3 className="font-black text-slate-950">
-              المقارنة بين المفهومين
-            </h3>
+        <section className="rounded-[28px] border border-slate-200 bg-slate-50/45 p-4 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-500/20">
+              <ListChecks size={19} />
+            </span>
+            <div>
+              <h3 className="font-black text-slate-950">
+                مقارنة منظمة
+              </h3>
+              <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                قارن العناصر بندًا بندًا مع الحفاظ على الصيغ الرياضية واضحة.
+              </p>
+            </div>
           </div>
 
           <div
             className={cn(
               "grid grid-cols-1 gap-4",
-              comparisons.length >= 2 && "md:grid-cols-2",
+              comparisons.length >= 2 && "lg:grid-cols-2",
               comparisons.length >= 3 && "xl:grid-cols-3",
             )}
           >
-            {comparisons.map((item, index) => {
+            {comparisons.map((rawItem, index) => {
+              const item =
+                rawItem && typeof rawItem === "object" && !Array.isArray(rawItem)
+                  ? rawItem
+                  : { concept: getDisplayText(rawItem) };
+
               const isFirst = index === 0;
+              const definition =
+                item.definition ||
+                item.meaning ||
+                item.description ||
+                item.idea ||
+                "";
+
+              const keyCondition =
+                item.key_condition ||
+                item.condition ||
+                item.requirement ||
+                item.when_to_use ||
+                "";
+
+              const knownItemKeys = new Set([
+                "id",
+                "concept",
+                "title",
+                "name",
+                "item",
+                "notation",
+                "definition",
+                "meaning",
+                "description",
+                "idea",
+                "example",
+                "key_condition",
+                "condition",
+                "requirement",
+                "when_to_use",
+              ]);
+
+              const extraItemContent = Object.fromEntries(
+                Object.entries(item).filter(
+                  ([key, value]) =>
+                    !knownItemKeys.has(key) &&
+                    !isEmpty(value) &&
+                    !isTechnicalPresentationField(key) &&
+                    !looksLikeSvgMarkup(value),
+                ),
+              );
 
               return (
                 <article
                   key={
+                    item?.id ||
                     item?.concept ||
+                    item?.title ||
+                    item?.item ||
                     item?.notation ||
                     `comparison-${index}`
                   }
                   className={cn(
-                    "overflow-hidden rounded-2xl border bg-white shadow-sm",
+                    "flex min-w-0 flex-col overflow-hidden rounded-[24px] border bg-white shadow-sm",
                     isFirst
                       ? "border-indigo-200"
                       : "border-emerald-200",
@@ -2731,10 +3240,10 @@ function ComparisonStep({ content = {} }) {
                 >
                   <div
                     className={cn(
-                      "flex items-center justify-between gap-3 px-4 py-3",
+                      "flex min-h-[88px] items-center justify-between gap-3 border-b px-4 py-4 sm:px-5",
                       isFirst
-                        ? "bg-indigo-50"
-                        : "bg-emerald-50",
+                        ? "border-indigo-100 bg-gradient-to-l from-indigo-50 to-white"
+                        : "border-emerald-100 bg-gradient-to-l from-emerald-50 to-white",
                     )}
                   >
                     <div className="min-w-0">
@@ -2746,12 +3255,19 @@ function ComparisonStep({ content = {} }) {
                             : "text-emerald-600",
                         )}
                       >
-                        المفهوم
+                        النوع {index + 1}
                       </p>
 
-                      <h4 className="mt-0.5 text-base font-black text-slate-950">
-                        {item?.concept || `العنصر ${index + 1}`}
-                      </h4>
+                      <MathText
+                        as="h4"
+                        className="mt-1 text-base font-black leading-7 text-slate-950 sm:text-lg"
+                      >
+                        {item?.concept ||
+                          item?.title ||
+                          item?.name ||
+                          item?.item ||
+                          `العنصر ${index + 1}`}
+                      </MathText>
                     </div>
 
                     {item?.notation && (
@@ -2779,42 +3295,78 @@ function ComparisonStep({ content = {} }) {
                     )}
                   </div>
 
-                  <div className="space-y-3 p-4">
-                    {item?.meaning && (
-                      <div>
-                        <p className="mb-1 text-[11px] font-black text-slate-500">
-                          المعنى
-                        </p>
-
-                        <MathText className="text-sm font-semibold leading-7 text-slate-700">
-                          {item.meaning}
+                  <div className="flex flex-1 flex-col space-y-3 p-4 sm:p-5">
+                    {!isEmpty(definition) && (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                        <div className="mb-2 flex items-center gap-2">
+                          <BookOpen
+                            size={16}
+                            className={
+                              isFirst ? "text-indigo-600" : "text-emerald-600"
+                            }
+                          />
+                          <p className="text-xs font-black text-slate-600">
+                            التعريف / طريقة الرسم
+                          </p>
+                        </div>
+                        <MathText className="text-sm font-semibold leading-7 text-slate-800">
+                          {definition}
                         </MathText>
                       </div>
                     )}
 
-                    {item?.example && (
+                    {!isEmpty(item?.example) && (
                       <div
                         className={cn(
-                          "rounded-xl border px-3 py-3",
+                          "rounded-2xl border p-4",
                           isFirst
                             ? "border-indigo-100 bg-indigo-50/60"
                             : "border-emerald-100 bg-emerald-50/60",
                         )}
                       >
-                        <p
-                          className={cn(
-                            "mb-1 text-[11px] font-black",
-                            isFirst
-                              ? "text-indigo-700"
-                              : "text-emerald-700",
-                          )}
-                        >
-                          مثال
-                        </p>
-
-                        <MathText className="text-sm font-bold leading-7 text-slate-800">
+                        <div className="mb-2 flex items-center gap-2">
+                          <Hash
+                            size={16}
+                            className={
+                              isFirst ? "text-indigo-700" : "text-emerald-700"
+                            }
+                          />
+                          <p
+                            className={cn(
+                              "text-xs font-black",
+                              isFirst
+                                ? "text-indigo-700"
+                                : "text-emerald-700",
+                            )}
+                          >
+                            مثال
+                          </p>
+                        </div>
+                        <MathText className="text-sm font-black leading-7 text-slate-900">
                           {item.example}
                         </MathText>
+                      </div>
+                    )}
+
+                    {!isEmpty(keyCondition) && (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/75 p-4">
+                        <div className="mb-2 flex items-center gap-2 text-amber-800">
+                          <Target size={16} />
+                          <p className="text-xs font-black">الشرط الأساسي</p>
+                        </div>
+                        <MathText className="text-sm font-bold leading-7 text-amber-950">
+                          {keyCondition}
+                        </MathText>
+                      </div>
+                    )}
+
+                    {Object.keys(extraItemContent).length > 0 && (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                        <StructuredValue
+                          value={extraItemContent}
+                          fieldKey="comparison_item_details"
+                          depth={1}
+                        />
                       </div>
                     )}
                   </div>
@@ -2825,16 +3377,40 @@ function ComparisonStep({ content = {} }) {
         </section>
       )}
 
+      {!isEmpty(content.main_difference) && (
+        <section className="overflow-hidden rounded-[26px] border border-indigo-200 bg-gradient-to-l from-indigo-50 via-white to-violet-50 shadow-sm">
+          <div className="flex items-start gap-3 p-5 sm:p-6">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-500/20">
+              <Route size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="mb-1.5 text-xs font-black text-indigo-700">
+                الفرق الأساسي
+              </p>
+              <MathText className="text-[15px] font-black leading-8 text-slate-900 sm:text-base">
+                {content.main_difference}
+              </MathText>
+            </div>
+          </div>
+        </section>
+      )}
+
       {decisionRule.length > 0 && (
-        <BulletList
-          items={decisionRule}
-          tone="indigo"
-          icon={Compass}
-        />
+        <section className="rounded-[26px] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="mb-3 flex items-center gap-2 text-indigo-700">
+            <Compass size={18} />
+            <h3 className="font-black text-slate-950">قاعدة الاختيار</h3>
+          </div>
+          <BulletList
+            items={decisionRule}
+            tone="indigo"
+            icon={Compass}
+          />
+        </section>
       )}
 
       {comparisonTable.length > 0 && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-right">
               <thead className="bg-gradient-to-l from-slate-950 to-indigo-950 text-white">
@@ -2886,77 +3462,45 @@ function ComparisonStep({ content = {} }) {
         </div>
       )}
 
-      {(content.memory_tip ||
-        content.why ||
-        content.how_to_think) && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {content.memory_tip && (
-            <InfoBox
-              title="حيلة للحفظ"
-              tone="amber"
-              icon={Lightbulb}
-            >
-              <MathText className="text-sm font-semibold leading-7">
-                {content.memory_tip}
-              </MathText>
-            </InfoBox>
-          )}
-
-          {content.why && (
-            <InfoBox
-              title="لماذا هذه المقارنة مهمة؟"
-              tone="indigo"
-              icon={CircleHelp}
-            >
-              <MathText className="text-sm font-semibold leading-7">
-                {content.why}
-              </MathText>
-            </InfoBox>
-          )}
-
-          {content.how_to_think && (
-            <InfoBox
-              title="كيف أفكر؟"
-              tone="sky"
-              icon={Brain}
-            >
-              <MathText className="text-sm font-semibold leading-7">
-                {content.how_to_think}
-              </MathText>
-            </InfoBox>
-          )}
-        </div>
-      )}
-
-      {content.attention && (
+      {!isEmpty(content.memory_tip) && (
         <InfoBox
-          title="انتبه إلى هذه النقطة"
-          tone="rose"
-          icon={AlertTriangle}
+          title="حيلة للحفظ"
+          tone="amber"
+          icon={Lightbulb}
+          compact={false}
         >
-          <MathText className="text-sm font-semibold leading-7">
-            {content.attention}
+          <MathText className="font-black leading-8">
+            {content.memory_tip}
           </MathText>
         </InfoBox>
       )}
 
-      {content.takeaway && (
-        <div className="flex items-start gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-l from-indigo-50 to-white p-4 shadow-sm">
-          <CheckCircle2
-            size={19}
-            className="mt-1 shrink-0 text-indigo-600"
-          />
-
-          <div className="min-w-0">
-            <p className="mb-1 text-xs font-black text-indigo-700">
-              الخلاصة
-            </p>
-
-            <MathText className="text-sm font-black leading-7 text-slate-900">
-              {content.takeaway}
-            </MathText>
+      {quadrants.length > 0 && (
+        <section className="rounded-[26px] border border-violet-100 bg-violet-50/35 p-4 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <Compass size={18} className="text-violet-600" />
+            <div>
+              <h3 className="font-black text-slate-950">إشارات الأرباع</h3>
+              <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                الربع، إشارات الجزأين، وصيغة الزاوية في جدول واحد واضح.
+              </p>
+            </div>
           </div>
-        </div>
+          <DynamicDataTable
+            rows={quadrants}
+            preferredColumns={["quadrant", "signs", "angle_form"]}
+          />
+        </section>
+      )}
+
+      {Object.keys(remainingContent).length > 0 && (
+        <section className="rounded-[26px] border border-slate-200 bg-slate-50/60 p-4 shadow-sm sm:p-5">
+          <StructuredValue
+            value={remainingContent}
+            fieldKey="comparison_extra_content"
+            depth={1}
+          />
+        </section>
       )}
     </div>
   );
@@ -3107,6 +3651,155 @@ function CommonMistakesStep({ content = {} }) {
   );
 }
 
+function normalizeQuizComparable(value) {
+  return String(value ?? "")
+    .replace(/\\\(|\\\)|\\\[|\\\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function resolveQuizCorrectIndex(question = {}, choices = []) {
+  if (!Array.isArray(choices) || choices.length === 0) return -1;
+
+  const rawAnswer =
+    question.correct_answer ??
+    question.correctAnswer ??
+    question.answer ??
+    question.expected_answer ??
+    null;
+
+  // الأولوية دائمًا لمطابقة نص الإجابة نفسها.
+  if (rawAnswer !== null && rawAnswer !== undefined && rawAnswer !== "") {
+    const normalizedAnswer = normalizeQuizComparable(rawAnswer);
+    const byValue = choices.findIndex(
+      (choice) => normalizeQuizComparable(choice) === normalizedAnswer,
+    );
+
+    if (byValue >= 0) return byValue;
+  }
+
+  // دعم البنى التي تخزن موضع الإجابة بدل نصها.
+  const rawIndex =
+    question.correct_index ??
+    question.correctIndex ??
+    question.answer_index ??
+    question.answerIndex ??
+    question.correct_choice_index ??
+    null;
+
+  if (rawIndex !== null && rawIndex !== undefined && rawIndex !== "") {
+    const numericIndex = Number(rawIndex);
+
+    if (Number.isInteger(numericIndex)) {
+      // المشروع الحالي يستعمل correct_index بصيغة 0-based.
+      if (numericIndex >= 0 && numericIndex < choices.length) {
+        return numericIndex;
+      }
+
+      // fallback فقط للملفات القديمة التي قد تستعمل 1-based.
+      if (numericIndex >= 1 && numericIndex <= choices.length) {
+        return numericIndex - 1;
+      }
+    }
+  }
+
+  // أحيانًا يصل correct_answer نفسه كرقم index.
+  if (rawAnswer !== null && rawAnswer !== undefined && rawAnswer !== "") {
+    const numericAnswer = Number(rawAnswer);
+
+    if (Number.isInteger(numericAnswer)) {
+      if (numericAnswer >= 0 && numericAnswer < choices.length) {
+        return numericAnswer;
+      }
+
+      if (numericAnswer >= 1 && numericAnswer <= choices.length) {
+        return numericAnswer - 1;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function quizSeedHash(value) {
+  const text = String(value ?? "");
+  let hash = 2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function shuffleQuizEntries(entries, seed) {
+  const result = [...entries];
+  let state = seed || 1;
+
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    const swapIndex = state % (index + 1);
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+
+  return result;
+}
+
+function buildQuizChoiceEntries(question = {}, questionIndex = 0, sourceKey = "") {
+  const choices = Array.isArray(question.choices)
+    ? question.choices
+    : Array.isArray(question.options)
+      ? question.options
+      : [];
+
+  if (choices.length === 0) {
+    return {
+      choices,
+      correctOriginalIndex: -1,
+      displayChoices: [],
+    };
+  }
+
+  const correctOriginalIndex = resolveQuizCorrectIndex(question, choices);
+  const entries = choices.map((value, originalIndex) => ({
+    value,
+    originalIndex,
+    isCorrect: originalIndex === correctOriginalIndex,
+  }));
+
+  // إذا لم نستطع تحديد الإجابة الصحيحة، نحافظ على الترتيب الأصلي بدل التخمين.
+  if (correctOriginalIndex < 0) {
+    return {
+      choices,
+      correctOriginalIndex,
+      displayChoices: entries,
+    };
+  }
+
+  const correctEntry = entries[correctOriginalIndex];
+  const distractors = entries.filter(
+    (entry) => entry.originalIndex !== correctOriginalIndex,
+  );
+
+  const seed = quizSeedHash(
+    `${sourceKey}|${question?.id ?? ""}|${question?.question ?? question?.prompt ?? ""}|${questionIndex}`,
+  );
+
+  const shuffledDistractors = shuffleQuizEntries(distractors, seed);
+
+  // نغيّر موضع الإجابة الصحيحة من سؤال لآخر بدل بقائها دائمًا في الموضع نفسه.
+  const targetIndex = (seed + questionIndex) % choices.length;
+  const displayChoices = [...shuffledDistractors];
+  displayChoices.splice(targetIndex, 0, correctEntry);
+
+  return {
+    choices,
+    correctOriginalIndex,
+    displayChoices,
+  };
+}
+
 function MiniQuizStep({ content }) {
   const [answers, setAnswers] = useState({});
   const [showHint, setShowHint] = useState({});
@@ -3115,27 +3808,67 @@ function MiniQuizStep({ content }) {
     ? content.questions
     : [];
 
-  const answeredCount = questions.filter((question, questionIndex) => {
-    const key = question.id || questionIndex;
+  const quizHandledKeys = new Set([
+    "id",
+    "title",
+    "instruction",
+    "questions",
+    "mastery_threshold",
+    "success_message",
+    "review_message",
+  ]);
+
+  const extraQuizContent = Object.fromEntries(
+    Object.entries(content || {}).filter(
+      ([key, value]) =>
+        !quizHandledKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
+  const preparedQuestions = useMemo(
+    () =>
+      questions.map((question, questionIndex) => ({
+        question,
+        questionIndex,
+        ...buildQuizChoiceEntries(
+          question,
+          questionIndex,
+          content?.id || content?.title || "mini-quiz",
+        ),
+      })),
+    [questions, content?.id, content?.title],
+  );
+
+  const answeredCount = preparedQuestions.filter(({ question, questionIndex }) => {
+    const key = question?.id ?? questionIndex;
     return answers[key] !== undefined;
   }).length;
 
-  const correctCount = questions.reduce((total, question, questionIndex) => {
-    const key = question.id || questionIndex;
-    const selected = answers[key];
+  const correctCount = preparedQuestions.reduce(
+    (total, { question, questionIndex, correctOriginalIndex }) => {
+      const key = question?.id ?? questionIndex;
+      const selectedOriginalIndex = answers[key];
 
-    return (
-      total +
-      (selected !== undefined &&
-      String(selected).trim() === String(question.correct_answer).trim()
-        ? 1
-        : 0)
-    );
-  }, 0);
+      return (
+        total +
+        (selectedOriginalIndex !== undefined &&
+        correctOriginalIndex >= 0 &&
+        selectedOriginalIndex === correctOriginalIndex
+          ? 1
+          : 0)
+      );
+    },
+    0,
+  );
 
   const masteryThreshold =
     Number(content?.mastery_threshold) ||
-    Math.max(1, Math.ceil(questions.length * 0.75));
+    Math.max(1, Math.ceil(preparedQuestions.length * 0.75));
+
+  const optionLabels = ["أ", "ب", "ج", "د", "هـ", "و", "ز", "ح"];
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -3145,116 +3878,177 @@ function MiniQuizStep({ content }) {
         </InfoBox>
       )}
 
-      {questions.map((question, questionIndex) => {
-        const answerKey = question.id || questionIndex;
-        const selected = answers[answerKey];
-        const answered = selected !== undefined;
-        const correct =
-          String(selected).trim() ===
-          String(question.correct_answer).trim();
+      {preparedQuestions.map(
+        ({
+          question,
+          questionIndex,
+          correctOriginalIndex,
+          displayChoices,
+        }) => {
+          const answerKey = question?.id ?? questionIndex;
+          const selectedOriginalIndex = answers[answerKey];
+          const answered = selectedOriginalIndex !== undefined;
+          const correct =
+            answered &&
+            correctOriginalIndex >= 0 &&
+            selectedOriginalIndex === correctOriginalIndex;
 
-        return (
-          <div
-            key={answerKey}
-            className="rounded-3xl border border-fuchsia-200 bg-white p-5 shadow-sm"
-          >
-            <div className="flex items-start gap-3.5">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fuchsia-600 font-black text-white">
-                {questionIndex + 1}
-              </span>
+          return (
+            <div
+              key={answerKey}
+              className="rounded-3xl border border-fuchsia-200 bg-white p-5 shadow-sm"
+            >
+              <div className="flex items-start gap-3.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-fuchsia-600 font-black text-white">
+                  {questionIndex + 1}
+                </span>
 
-              <MathText className="font-black text-slate-950">
-                {question.question}
-              </MathText>
-            </div>
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {(question.choices || []).map((choice, choiceIndex) => {
-                const isSelected = selected === choice;
-                const isCorrectChoice =
-                  String(choice).trim() ===
-                  String(question.correct_answer).trim();
-
-                return (
-                  <button
-                    key={choiceIndex}
-                    type="button"
-                    onClick={() =>
-                      setAnswers((current) => ({
-                        ...current,
-                        [answerKey]: choice,
-                      }))
-                    }
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-right font-bold transition",
-                      !answered &&
-                        "border-slate-200 bg-slate-50 hover:border-fuchsia-300 hover:bg-fuchsia-50",
-                      answered &&
-                        isCorrectChoice &&
-                        "border-emerald-300 bg-emerald-50 text-emerald-950",
-                      answered &&
-                        isSelected &&
-                        !isCorrectChoice &&
-                        "border-rose-300 bg-rose-50 text-rose-950",
-                      answered &&
-                        !isSelected &&
-                        !isCorrectChoice &&
-                        "border-slate-200 bg-slate-50 text-slate-400",
-                    )}
-                  >
-                    <MathText as="span">{choice}</MathText>
-                  </button>
-                );
-              })}
-            </div>
-
-            {!answered && question.hint && (
-              <button
-                type="button"
-                onClick={() =>
-                  setShowHint((current) => ({
-                    ...current,
-                    [answerKey]: !current[answerKey],
-                  }))
-                }
-                className="mt-4 text-sm font-black text-amber-700"
-              >
-                {showHint[answerKey]
-                  ? "إخفاء التلميح"
-                  : "أحتاج تلميحًا"}
-              </button>
-            )}
-
-            {showHint[answerKey] && !answered && (
-              <div className="mt-3">
-                <InfoBox tone="amber" title="تلميح">
-                  <MathText>{question.hint}</MathText>
-                </InfoBox>
+                <MathText className="font-black text-slate-950">
+                  {question.question || question.prompt}
+                </MathText>
               </div>
-            )}
 
-            {answered && (
-              <div className="mt-4">
-                <InfoBox
-                  tone={correct ? "emerald" : "rose"}
-                  title={
-                    correct
-                      ? "إجابة صحيحة، أحسنت"
-                      : "الإجابة غير صحيحة"
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {displayChoices.map((choiceEntry, displayIndex) => {
+                  const isSelected =
+                    selectedOriginalIndex === choiceEntry.originalIndex;
+                  const isCorrectChoice =
+                    correctOriginalIndex >= 0 &&
+                    choiceEntry.originalIndex === correctOriginalIndex;
+
+                  return (
+                    <button
+                      key={`${choiceEntry.originalIndex}-${displayIndex}`}
+                      type="button"
+                      disabled={answered}
+                      onClick={() =>
+                        setAnswers((current) => ({
+                          ...current,
+                          [answerKey]: choiceEntry.originalIndex,
+                        }))
+                      }
+                      className={cn(
+                        "flex items-center gap-3 rounded-2xl border px-4 py-3 text-right font-bold transition",
+                        !answered &&
+                          "border-slate-200 bg-slate-50 hover:-translate-y-0.5 hover:border-fuchsia-300 hover:bg-fuchsia-50 hover:shadow-sm",
+                        answered &&
+                          isCorrectChoice &&
+                          "border-emerald-300 bg-emerald-50 text-emerald-950",
+                        answered &&
+                          isSelected &&
+                          !isCorrectChoice &&
+                          "border-rose-300 bg-rose-50 text-rose-950",
+                        answered &&
+                          !isSelected &&
+                          !isCorrectChoice &&
+                          "border-slate-200 bg-slate-50 text-slate-400",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border text-xs font-black",
+                          answered && isCorrectChoice
+                            ? "border-emerald-300 bg-emerald-600 text-white"
+                            : answered && isSelected && !isCorrectChoice
+                              ? "border-rose-300 bg-rose-600 text-white"
+                              : "border-slate-200 bg-white text-slate-600",
+                        )}
+                      >
+                        {answered && isCorrectChoice ? (
+                          <Check size={16} />
+                        ) : answered && isSelected && !isCorrectChoice ? (
+                          <XCircle size={16} />
+                        ) : (
+                          optionLabels[displayIndex] || displayIndex + 1
+                        )}
+                      </span>
+
+                      <MathText as="span" className="min-w-0 flex-1">
+                        {choiceEntry.value}
+                      </MathText>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {correctOriginalIndex < 0 && (
+                <div className="mt-4">
+                  <InfoBox tone="amber" title="تنبيه في بيانات السؤال" icon={AlertTriangle}>
+                    <MathText className="font-semibold">
+                      تعذر تحديد الإجابة الصحيحة لهذا السؤال. تحقق من correct_answer أو correct_index.
+                    </MathText>
+                  </InfoBox>
+                </div>
+              )}
+
+              {!answered && question.hint && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowHint((current) => ({
+                      ...current,
+                      [answerKey]: !current[answerKey],
+                    }))
                   }
-                  icon={correct ? CheckCircle2 : XCircle}
+                  className="mt-4 text-sm font-black text-amber-700"
                 >
-                  <MathText className="font-semibold">
-                    {question.explanation}
-                  </MathText>
-                </InfoBox>
-              </div>
-            )}
-          </div>
-        );
-      })}
+                  {showHint[answerKey]
+                    ? "إخفاء التلميح"
+                    : "أحتاج تلميحًا"}
+                </button>
+              )}
 
-      {questions.length > 0 && (
+              {showHint[answerKey] && !answered && (
+                <div className="mt-3">
+                  <InfoBox tone="amber" title="تلميح">
+                    <MathText>{question.hint}</MathText>
+                  </InfoBox>
+                </div>
+              )}
+
+              {answered && (
+                <div className="mt-4">
+                  <InfoBox
+                    tone={correct ? "emerald" : "rose"}
+                    title={
+                      correct
+                        ? "إجابة صحيحة، أحسنت"
+                        : "الإجابة غير صحيحة"
+                    }
+                    icon={correct ? CheckCircle2 : XCircle}
+                  >
+                    <MathText className="font-semibold">
+                      {question.explanation ||
+                        (correct
+                          ? "إجابة صحيحة."
+                          : "راجع الفكرة ثم حاول من جديد.")}
+                    </MathText>
+                  </InfoBox>
+
+                  {!correct && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setAnswers((current) => {
+                          const next = { ...current };
+                          delete next[answerKey];
+                          return next;
+                        })
+                      }
+                      className="mt-3 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:text-fuchsia-700"
+                    >
+                      <RefreshCw size={15} />
+                      أعد المحاولة
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        },
+      )}
+
+      {preparedQuestions.length > 0 && (
         <div className="rounded-[28px] border border-indigo-200 bg-gradient-to-l from-indigo-50 to-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -3262,16 +4056,16 @@ function MiniQuizStep({ content }) {
                 النتيجة الحالية
               </p>
               <p className="mt-1 text-sm font-semibold text-slate-600">
-                أجبت عن {answeredCount} من {questions.length} أسئلة.
+                أجبت عن {answeredCount} من {preparedQuestions.length} أسئلة.
               </p>
             </div>
 
             <span className="rounded-2xl bg-indigo-600 px-5 py-3 text-lg font-black text-white">
-              {correctCount} / {questions.length}
+              {correctCount} / {preparedQuestions.length}
             </span>
           </div>
 
-          {answeredCount === questions.length && (
+          {answeredCount === preparedQuestions.length && (
             <div className="mt-4">
               <InfoBox
                 tone={
@@ -3281,25 +4075,36 @@ function MiniQuizStep({ content }) {
                 }
                 title={
                   correctCount >= masteryThreshold
-                    ? "أحسنت، لقد فهمت المحور"
-                    : "راجع بعض أفكار الدرس"
+                    ? "أحسنت، وصلت إلى مستوى الإتقان"
+                    : "تحتاج إلى مراجعة سريعة"
                 }
                 icon={
                   correctCount >= masteryThreshold
-                    ? CheckCircle2
+                    ? Trophy
                     : RefreshCw
                 }
               >
                 <MathText className="font-semibold">
                   {correctCount >= masteryThreshold
-                    ? content?.takeaway ||
-                      "يمكنك الانتقال إلى تمارين المحور."
-                    : `راجع التعريف، تصنيف التحولات، واختيار طريقة المتابعة. تحتاج إلى ${masteryThreshold} إجابات صحيحة على الأقل.`}
+                    ? content?.success_message ||
+                      "نتيجتك جيدة ويمكنك الانتقال إلى المرحلة التالية."
+                    : content?.review_message ||
+                      "راجع الأسئلة التي أخطأت فيها ثم أعد المحاولة."}
                 </MathText>
               </InfoBox>
             </div>
           )}
         </div>
+      )}
+
+      {Object.keys(extraQuizContent).length > 0 && (
+        <section className="rounded-[26px] border border-slate-200 bg-slate-50/60 p-4 shadow-sm sm:p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <ListChecks size={17} className="text-indigo-600" />
+            <h3 className="font-black text-slate-950">معلومات الاختبار</h3>
+          </div>
+          <GenericObjectStep content={extraQuizContent} />
+        </section>
       )}
     </div>
   );
@@ -3744,6 +4549,255 @@ const FIELD_LABELS = {
   method_name: "اسم الطريقة",
   name: "الاسم",
   calculation: "الحساب",
+
+  // ===== حقول محاور الأعداد المركبة الجديدة =====
+  z: "العدد المركب",
+  real: "الجزء الحقيقي",
+  imaginary: "الجزء التخيلي",
+  quadrants: "الأرباع",
+  item: "العنصر",
+  title: "العنوان",
+  pattern: "النمط",
+  correct_answer: "الإجابة الصحيحة",
+  learning_outcomes: "نواتج التعلم",
+  prerequisites: "المتطلبات السابقة",
+  lesson_goal: "هدف الدرس",
+  relation: "العلاقة",
+  relations: "العلاقات",
+  properties: "الخواص",
+  cycle_rule: "دورية القوى",
+  method: "الطريقة",
+  algorithm: "خطوات الحل",
+  steps: "الخطوات",
+  checks: "التحقق",
+  categories: "الحالات",
+  definitions: "التعاريف",
+  notation: "الترميز",
+  equivalence: "التكافؤ",
+  general_formula: "الصيغة العامة",
+  boundary_note: "ملاحظة حول حدود المحور",
+  patterns: "حالات نموذجية",
+  items: "تطبيقات",
+  consequences: "النتائج الهندسية",
+  classification: "التصنيف",
+  condition: "الشرط",
+  interpretation: "التفسير",
+  transformation: "التحويل",
+  quadrant: "الربع",
+  signs: "الإشارات",
+  angle_form: "صيغة الزاوية",
+  role: "الدور",
+  difference: "ما يميزه",
+  rule: "القاعدة",
+  center: "المركز",
+  ratio: "النسبة",
+  angle: "الزاوية",
+  transformation_type: "نوع التحويل",
+  boundary_note: "تنبيه منهجي",
+
+  // ===== حقول الهندسة في الفضاء =====
+  mini_example: "مثال تطبيقي",
+  quick_example: "مثال سريع",
+  experiment: "التجربة",
+  outcomes: "النتائج الممكنة",
+  universe: "المجموعة الشاملة",
+  event_text: "الحادثة",
+  event: "الحادثة",
+  certain: "الحادثة الأكيدة",
+  impossible: "الحادثة المستحيلة",
+  intersection: "التقاطع",
+  union: "الاتحاد",
+  matching_outcomes: "النتائج الموافقة",
+  matching_values: "القيم الموافقة",
+  probability: "الاحتمال",
+  favorable: "الحالات الملائمة",
+  possible: "الحالات الممكنة",
+  idea: "الفكرة",
+  entry_fee: "ثمن المشاركة",
+  prize: "الجائزة",
+  net_win: "الربح الصافي",
+  net_loss: "الخسارة الصافية",
+  probability_law: "قانون احتمال المتغير العشوائي",
+  x: "قيمة X",
+  p: "الاحتمال",
+  order_matters: "هل الترتيب مهم؟",
+  repetition: "هل التكرار ممكن؟",
+  model: "نموذج العد",
+  count: "عدد الحالات",
+  sampling: "نوع السحب",
+  phrase: "العبارة",
+  translation: "الترجمة الرياضية",
+  known_event: "الحادثة المعلومة",
+  target_event: "الحادثة المطلوبة",
+  position: "الموضع",
+  weight: "الوزن",
+  effect: "الأثر",
+  focus: "ما الذي نركز عليه؟",
+  operation: "العملية",
+  mapping: "الربط",
+  tool_choice: "الأداة المناسبة",
+  sign_rule: "قاعدة الإشارة",
+  diagnosis: "تشخيص الوضعية",
+  decision: "القرار",
+  situations: "وضعيات للتصنيف",
+  branch_scope: "حسب الشعبة",
+  axis_limits: "حدود المحور",
+  central_skill: "المهارة المركزية",
+  central_question: "السؤال المركزي",
+  decision_table: "خريطة اختيار نموذج العد",
+  sampling_map: "ربط نوع السحب بنموذج العد",
+  translation_patterns: "أنماط الترجمة",
+  translation_table: "جدول الترجمة",
+  effects: "الآثار",
+  equivalent_when_nonzero: "صيغة مكافئة عند عدم الانعدام",
+  exactly_one: "بالضبط واحد",
+  at_least_one: "على الأقل واحد",
+  at_most_one: "على الأكثر واحد",
+  reason: "السبب",
+  correct: "الصحيح",
+  wrong: "الخاطئ",
+  mastery_criterion: "معيار الإتقان",
+  assessment_method: "طريقة التقييم",
+  axis_role: "دور المحور",
+  prerequisites_by_branch: "المتطلبات حسب الشعبة",
+  enrichment_not_required_for_mastery: "إثراء غير مطلوب للإتقان",
+  A: "الحادثة A",
+  B: "الحادثة B",
+  worked_check: "تحقق محلول",
+  central_relation: "العلاقة الأساسية",
+  criterion: "المعيار",
+  why_non_parallel: "لماذا يجب ألا يكونا متوازيين؟",
+  equivalent_form: "صيغة مكافئة",
+  equivalent_condition: "شرط مكافئ",
+  shortcut_note: "ملاحظة مختصرة",
+  example_rule: "قاعدة المثال",
+  important: "معلومة مهمة",
+  important_note: "ملاحظة مهمة",
+  key_rule: "القاعدة الأساسية",
+  setup: "الإعداد",
+  tangency_condition: "شرط التماس",
+  consequence: "النتيجة المباشرة",
+  geometric_meaning: "المعنى الهندسي",
+  general_form: "الشكل العام",
+  example_form: "صيغة المثال",
+  chain: "سلسلة الحل",
+  scenario: "سيناريو التطبيق",
+  mastery_threshold: "عتبة الإتقان",
+  learning_path: "مسار التعلم",
+  features: "الخصائص",
+  connection: "الربط",
+
+  // ===== حقول الكيمياء الحركية والمتابعة الزمنية =====
+  lesson_summary: "ملخص الدرس",
+  lesson_intro: "مقدمة الدرس",
+  math_format: "صيغة الرياضيات",
+  prerequisites_title: "عنوان المكتسبات القبلية",
+  simple_model: "النموذج المبسط",
+  simple_diagram: "مخطط مبسط",
+  roles: "الأدوار",
+  action: "الفعل",
+  electron_action: "التعامل مع الإلكترونات",
+  undergoes: "العملية التي يخضع لها",
+  simple_word: "الكلمة المفتاحية",
+  general_half_equation: "الصيغة العامة لنصف المعادلة",
+  how_to_identify: "كيف أتعرف عليها؟",
+  general_equation: "المعادلة العامة",
+  states: "حالات التقدم",
+  state: "الحالة",
+  value: "القيمة",
+  conservation: "قانون الانحفاظ",
+  progress_table: "جدول التقدم",
+  xmax_definition: "تعريف التقدم الأعظمي",
+  limiting_reactant_rule: "قاعدة المتفاعل المحد",
+  excess_reactant_formula: "علاقة المتفاعل الفائض",
+  non_negative_conditions: "شروط عدم السلبية",
+  complete_or_not: "هل التحول تام؟",
+  initial_value: "القيمة الابتدائية",
+  final_value: "القيمة النهائية",
+  general_relation: "العلاقة العامة",
+  derived_formulas: "العلاقات المستنتجة",
+  dilution_factor: "عامل التمديد",
+  equipment: "الزجاجيات والأدوات",
+  equipment_rules: "قواعد اختيار الأدوات",
+  protocol: "البروتوكول التجريبي",
+  titration_protocol: "بروتوكول المعايرة",
+  safety: "قواعد السلامة",
+  precision_rule: "قاعدة الدقة",
+  precision_errors: "أخطاء الدقة",
+  question_types: "أنواع الأسئلة",
+  recognition: "كيف أتعرف على السؤال؟",
+  measured_quantity: "الكمية المقاسة",
+  measurable_quantities: "الكميات القابلة للقياس",
+  decision_rules: "قواعد الاختيار",
+  pressure: "الضغط",
+  conductivity: "الناقلية",
+  gas: "الغاز",
+  gas_method: "المتابعة بحجم الغاز",
+  mass_method: "المتابعة بالكتلة",
+  pressure_graph: "منحنى الضغط",
+  conductivity_graph: "منحنى الناقلية",
+  mass_graph: "منحنى الكتلة",
+  graphs: "الرسوم البيانية",
+  gas_cases: "حالات متابعة الغاز",
+  measurement_cases: "حالات القياس",
+  pressure_and_conductivity: "الضغط والناقلية",
+  pressure_attention: "تنبيه حول الضغط",
+  concentration_example: "مثال على التركيز",
+  pressure_example: "مثال على الضغط",
+  reactant_example: "مثال لمتفاعل",
+  product_example: "مثال لناتج",
+  product_relation: "علاقة الناتج",
+  reactant_graph_method: "طريقة استثمار منحنى المتفاعل",
+  trend_cases: "حالات اتجاه التغير",
+  trend: "اتجاه التغير",
+  reading: "القراءة",
+  reading_steps: "خطوات القراءة",
+  graph_reading: "قراءة الرسم",
+  end_method: "طريقة تحديد النهاية",
+  half_time_method: "طريقة تحديد زمن النصف",
+  half_time_relations: "علاقات زمن نصف التفاعل",
+  speed_algorithm: "منهجية حساب السرعة",
+  speed_relation: "علاقة السرعة",
+  average_method: "طريقة السرعة المتوسطة",
+  unit_attention: "تنبيه حول الوحدات",
+  factors: "العوامل الحركية",
+  factor: "العامل",
+  stirring_role: "دور التحريك",
+  kinetic_factors: "العوامل الحركية",
+  comparison_rule: "قاعدة المقارنة",
+  comparison_rules: "قواعد المقارنة",
+  question_families: "عائلات الأسئلة",
+  answer_template: "نموذج الإجابة",
+  answer_templates: "نماذج الإجابة",
+  complete_example: "مثال كامل",
+  instant_example: "مثال مباشر",
+  derivation_steps: "خطوات الاشتقاق",
+  wrong_example: "مثال خاطئ",
+  checklist: "قائمة التحقق",
+  scoring: "سلم التنقيط",
+  total: "المجموع",
+  passing_score: "علامة النجاح",
+  levels: "مستويات الأداء",
+  score: "العلامة",
+  level: "المستوى",
+  message: "الرسالة",
+  instructions: "التعليمات",
+  instruction: "التعليمة",
+  review_message: "رسالة المراجعة",
+  success_message: "رسالة النجاح",
+  formulas_title: "عنوان العلاقات",
+  general_rule: "القاعدة العامة",
+  important_rule: "قاعدة مهمة",
+  sign_rules: "قواعد الإشارة",
+  sign_rule: "قاعدة الإشارة",
+  equivalence_relation: "علاقة التكافؤ",
+  concentration: "التركيز",
+  concentration_example: "مثال على التركيز",
+  formula: "العلاقة",
+  units: "الوحدات",
+  reading_steps: "خطوات القراءة",
+  method_template: "الخطة المنهجية",
+  mastery_threshold: "عتبة الإتقان",
 };
 
 
@@ -3760,10 +4814,13 @@ function fieldLabel(key) {
 
   if (!readable) return "تفصيل";
 
-  // لا نعرض أسماء مفاتيح إنجليزية خام أو عناوين عامة غير مفيدة للتلميذ.
-  // الحقل غير المعروف سيُعرض محتواه فقط دون عنوان.
+  /*
+   * لا نخفي الحقل غير المعروف.
+   * إذا لم نملك ترجمة عربية بعد، نعطيه عنوانًا عامًا بدل إسقاطه من الواجهة.
+   * محتوى الحقل نفسه يبقى ظاهرًا كاملًا بواسطة StructuredValue.
+   */
   if (/^[A-Za-z0-9 ]+$/.test(readable)) {
-    return "";
+    return "تفاصيل إضافية";
   }
 
   return readable;
@@ -3887,7 +4944,37 @@ function normalizeGraph(graph) {
   };
 
   if (Array.isArray(graph.series)) {
-    graph.series.forEach((serie) => pushSeries(serie));
+    const seriesLooksLikePointList =
+      graph.series.length > 0 &&
+      graph.series.every(
+        (point) =>
+          point &&
+          typeof point === "object" &&
+          !Array.isArray(point) &&
+          (
+            point.x !== undefined ||
+            point.t !== undefined ||
+            point.n !== undefined ||
+            point.index !== undefined
+          ) &&
+          (
+            point.y !== undefined ||
+            point.value !== undefined ||
+            point.u_n !== undefined ||
+            point.un !== undefined
+          ),
+      );
+
+    if (seriesLooksLikePointList) {
+      pushSeries({
+        id: graph.id || "main-series",
+        label: graph.label || graph.title || "المنحنى",
+        type: graph.kind || graph.type || "curve",
+        data: graph.series,
+      });
+    } else {
+      graph.series.forEach((serie) => pushSeries(serie));
+    }
   }
 
   if (graph.function) {
@@ -4233,7 +5320,7 @@ function GraphRenderer({ graph }) {
       <div className="overflow-x-auto p-3 sm:p-5" dir="ltr">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full min-w-[680px]"
+          className="block h-auto w-full min-w-0"
           role="img"
           aria-label={normalizedGraph.title}
         >
@@ -7415,6 +8502,69 @@ function MethodStep({ content = {} }) {
     item?.conclusion ||
     "";
 
+  // أي حقل جديد في JSON لا يملك تصميمًا خاصًا هنا يجب ألا يختفي.
+  // هذا مهم لمحاور الهندسة في الفضاء التي تستعمل حقولًا مثل:
+  // mini_example / worked_check / equivalent_form / shortcut_note / example_rule ...
+  const methodHandledKeys = new Set([
+    "teacher",
+    "introduction",
+    "method_goal",
+    "methods",
+    "recommended_for_student",
+    "student_recommendation",
+    "recommended_method",
+    "central_idea",
+    "example_expression",
+    "sign_analysis",
+    "result",
+    "conditions",
+    "equivalent_method",
+    "alternative_method",
+    "other_method",
+    "when_to_use",
+    "memory_tip",
+    "algorithm",
+    "steps",
+    "method",
+    "method_steps",
+    "procedure",
+    "useful_transformations",
+    "useful_transformations_title",
+    "useful_identities",
+    "identities",
+    "formulas",
+    "rules",
+    "formulas_title",
+    "rules_title",
+    "relations",
+    "relations_title",
+    "conclusion_templates",
+    "conclusion_template",
+    "answer_template",
+    "why",
+    "how_to_think",
+    "teacher_tip",
+    "attention",
+    "warning",
+    "important_warning",
+    "takeaway",
+    "general_rule",
+    "worked_example",
+    "alternative_factorization",
+    "quick_check",
+    "graph_data",
+  ]);
+
+  const remainingMethodContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !methodHandledKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
   return (
     <div className="space-y-5">
       {(content.teacher || content.introduction) && (
@@ -7867,6 +9017,16 @@ function MethodStep({ content = {} }) {
 
       {content.graph_data && (
         <GraphRenderer graph={content.graph_data} />
+      )}
+
+      {Object.keys(remainingMethodContent).length > 0 && (
+        <section className="rounded-[26px] border border-slate-200 bg-slate-50/60 p-4 shadow-sm sm:p-5">
+          <div className="mb-3 flex items-center gap-2 text-indigo-700">
+            <Sparkles size={17} />
+            <h3 className="font-black text-slate-950">تفاصيل إضافية</h3>
+          </div>
+          <GenericObjectStep content={remainingMethodContent} />
+        </section>
       )}
     </div>
   );
@@ -8472,9 +9632,17 @@ function VariationTable({ table }) {
 }
 
 function WorkedExampleStep({ content = {} }) {
-  const steps = Array.isArray(content.steps)
-    ? content.steps.filter(Boolean)
-    : [];
+  const rawSteps =
+    content.steps ??
+    content.solution_steps ??
+    content.solution ??
+    [];
+
+  const steps = Array.isArray(rawSteps)
+    ? rawSteps.filter((item) => !isEmpty(item))
+    : !isEmpty(rawSteps)
+      ? [rawSteps]
+      : [];
 
   const verification = Array.isArray(content.verification)
     ? content.verification.filter(Boolean)
@@ -8488,6 +9656,8 @@ function WorkedExampleStep({ content = {} }) {
     "statement",
     "teacher",
     "steps",
+    "solution_steps",
+    "solution",
     "examples",
     "variation_table",
     "graph",
@@ -8582,6 +9752,7 @@ function WorkedExampleStep({ content = {} }) {
                 exampleItem.answer ||
                 exampleItem.result ||
                 exampleItem.final_answer ||
+                exampleItem.solution ||
                 "";
 
               const knownKeys = new Set([
@@ -8595,6 +9766,7 @@ function WorkedExampleStep({ content = {} }) {
                 "answer",
                 "result",
                 "final_answer",
+                "solution",
               ]);
 
               const extraFields = Object.fromEntries(
@@ -8611,20 +9783,22 @@ function WorkedExampleStep({ content = {} }) {
                   key={exampleItem.id || `worked-example-${index}`}
                   className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm"
                 >
-                  <div className="flex items-start gap-3 border-b border-indigo-100 bg-indigo-50/70 p-4">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-sm font-black text-white">
-                      {index + 1}
-                    </span>
+                  {question && (
+                    <div className="flex items-start gap-3 border-b border-indigo-100 bg-indigo-50/70 p-4">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-sm font-black text-white">
+                        {index + 1}
+                      </span>
 
-                    <div className="min-w-0 flex-1">
-                      <p className="mb-1 text-[11px] font-black text-indigo-700">
-                        السؤال
-                      </p>
-                      <MathText className="text-sm font-black leading-7 text-slate-950">
-                        {question}
-                      </MathText>
+                      <div className="min-w-0 flex-1">
+                        <p className="mb-1 text-[11px] font-black text-indigo-700">
+                          السؤال
+                        </p>
+                        <MathText className="text-sm font-black leading-7 text-slate-950">
+                          {question}
+                        </MathText>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <div className="space-y-3 p-4">
                     {reasoning && (
@@ -8674,46 +9848,150 @@ function WorkedExampleStep({ content = {} }) {
           </div>
 
           <div className="space-y-3">
-            {steps.map((step, index) => (
-              <article
-                key={step?.step_number || step?.id || index}
-                className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-              >
-                <div className="mb-3 flex items-center gap-3">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-sm font-black text-white">
-                    {step?.step_number || index + 1}
-                  </span>
+            {steps.map((step, index) => {
+              const isPrimitive =
+                typeof step === "string" ||
+                typeof step === "number" ||
+                typeof step === "boolean";
 
-                  <h4 className="text-sm font-black text-slate-950">
-                    {step?.title || `الخطوة ${index + 1}`}
-                  </h4>
-                </div>
+              const stepObject =
+                !isPrimitive &&
+                step &&
+                typeof step === "object" &&
+                !Array.isArray(step)
+                  ? step
+                  : null;
 
-                {step?.teacher_explanation && (
-                  <MathText className="mb-3 text-sm font-semibold leading-7 text-slate-600">
-                    {step.teacher_explanation}
-                  </MathText>
-                )}
+              const stepNumber =
+                stepObject?.step_number ??
+                stepObject?.number ??
+                index + 1;
 
-                {step?.calculation && (
-                  <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-3">
-                    <MixedArabicMath value={step.calculation} />
+              const stepTitle =
+                stepObject?.title ||
+                stepObject?.label ||
+                `الخطوة ${stepNumber}`;
+
+              // هذه هي المشكلة الأساسية التي كانت تجعل بطاقات الخطوات فارغة:
+              // ملفات JSON الحالية تخزن steps غالبًا كمصفوفة نصوص، وليس كائنات.
+              const explanation = isPrimitive
+                ? String(step)
+                : stepObject?.teacher_explanation ||
+                  stepObject?.explanation ||
+                  stepObject?.instruction ||
+                  stepObject?.text ||
+                  stepObject?.action ||
+                  stepObject?.statement ||
+                  stepObject?.solution ||
+                  "";
+
+              const calculation = stepObject
+                ? stepObject.calculation ||
+                  stepObject.formula ||
+                  stepObject.expression ||
+                  stepObject.equation ||
+                  stepObject.relation ||
+                  ""
+                : "";
+
+              const result = stepObject
+                ? stepObject.result ||
+                  stepObject.answer ||
+                  stepObject.final_answer ||
+                  stepObject.conclusion ||
+                  ""
+                : "";
+
+              const knownStepKeys = new Set([
+                "id",
+                "step_number",
+                "number",
+                "title",
+                "label",
+                "teacher_explanation",
+                "explanation",
+                "instruction",
+                "text",
+                "action",
+                "statement",
+                "solution",
+                "calculation",
+                "formula",
+                "expression",
+                "equation",
+                "relation",
+                "result",
+                "answer",
+                "final_answer",
+                "conclusion",
+              ]);
+
+              const extraStepFields = stepObject
+                ? Object.fromEntries(
+                    Object.entries(stepObject).filter(
+                      ([key, value]) =>
+                        !knownStepKeys.has(key) &&
+                        !isEmpty(value) &&
+                        !isTechnicalPresentationField(key) &&
+                        !looksLikeSvgMarkup(value),
+                    ),
+                  )
+                : {};
+
+              return (
+                <article
+                  key={stepObject?.id || `worked-step-${index}`}
+                  className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm"
+                >
+                  <div className="flex items-center gap-3 border-b border-slate-100 bg-gradient-to-l from-indigo-50/70 via-white to-white px-4 py-3.5">
+                    <span className="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-2 text-sm font-black text-white shadow-sm">
+                      {stepNumber}
+                    </span>
+
+                    <h4 className="text-sm font-black text-slate-950">
+                      {stepTitle}
+                    </h4>
                   </div>
-                )}
 
-                {step?.result && (
-                  <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-3">
-                    <p className="mb-1 text-[11px] font-black text-emerald-700">
-                      النتيجة
-                    </p>
+                  <div className="space-y-3 p-4 sm:p-5">
+                    {explanation && (
+                      <MathText className="block text-sm font-semibold leading-8 text-slate-700 sm:text-[15px]">
+                        {explanation}
+                      </MathText>
+                    )}
 
-                    <MathText className="text-sm font-black leading-7 text-emerald-950">
-                      {step.result}
-                    </MathText>
+                    {calculation && (
+                      <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-3">
+                        <p className="mb-1.5 text-[11px] font-black text-indigo-700">
+                          الحساب
+                        </p>
+                        <MixedArabicMath value={calculation} />
+                      </div>
+                    )}
+
+                    {result && (
+                      <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-3">
+                        <p className="mb-1 text-[11px] font-black text-emerald-700">
+                          النتيجة
+                        </p>
+
+                        <MathText className="text-sm font-black leading-7 text-emerald-950">
+                          {result}
+                        </MathText>
+                      </div>
+                    )}
+
+                    {Object.keys(extraStepFields).length > 0 && (
+                      <StructuredValue
+                        value={extraStepFields}
+                        fieldKey="step_details"
+                        depth={1}
+                      />
+                    )}
                   </div>
-                )}
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         </section>
       )}
@@ -9345,20 +10623,37 @@ function InPathFinalAssessmentStep({ content = {} }) {
 
 
 function InteractiveCheckpoint({ activity }) {
-  const [selectedIndex, setSelectedIndex] = useState(null);
+  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState(null);
   const [showHint, setShowHint] = useState(false);
+
+  const safeOptions = Array.isArray(activity?.options)
+    ? activity.options
+    : [];
+
+  const prepared = buildQuizChoiceEntries(
+    {
+      ...activity,
+      choices: safeOptions,
+    },
+    0,
+    activity?.id || activity?.prompt || "interactive-checkpoint",
+  );
 
   if (
     !activity ||
     !activity.prompt ||
-    !Array.isArray(activity.options) ||
-    activity.options.length === 0
+    safeOptions.length === 0
   ) {
     return null;
   }
 
-  const answered = selectedIndex !== null;
-  const isCorrect = answered && selectedIndex === activity.correct_index;
+  const answered = selectedOriginalIndex !== null;
+  const isCorrect =
+    answered &&
+    prepared.correctOriginalIndex >= 0 &&
+    selectedOriginalIndex === prepared.correctOriginalIndex;
+
+  const optionLabels = ["أ", "ب", "ج", "د", "هـ", "و", "ز", "ح"];
 
   return (
     <section className="mb-7 overflow-hidden rounded-[28px] border border-violet-200 bg-gradient-to-l from-violet-50 via-white to-indigo-50 shadow-sm">
@@ -9378,17 +10673,20 @@ function InteractiveCheckpoint({ activity }) {
       </div>
 
       <div className="space-y-3 p-5 sm:p-6">
-        {activity.options.map((option, index) => {
-          const selected = selectedIndex === index;
-          const correctOption = answered && index === activity.correct_index;
+        {prepared.displayChoices.map((entry, displayIndex) => {
+          const selected = selectedOriginalIndex === entry.originalIndex;
+          const correctOption =
+            answered &&
+            prepared.correctOriginalIndex >= 0 &&
+            entry.originalIndex === prepared.correctOriginalIndex;
           const wrongSelected = answered && selected && !correctOption;
 
           return (
             <button
-              key={`${option}-${index}`}
+              key={`${entry.originalIndex}-${displayIndex}`}
               type="button"
               disabled={answered}
-              onClick={() => setSelectedIndex(index)}
+              onClick={() => setSelectedOriginalIndex(entry.originalIndex)}
               className={cn(
                 "flex w-full items-center gap-3 rounded-2xl border p-4 text-right transition-all duration-300",
                 !answered &&
@@ -9418,13 +10716,21 @@ function InteractiveCheckpoint({ activity }) {
                 ) : wrongSelected ? (
                   <XCircle size={18} />
                 ) : (
-                  String.fromCharCode(1571 + index)
+                  optionLabels[displayIndex] || displayIndex + 1
                 )}
               </span>
-              <MathText className="flex-1 font-bold">{option}</MathText>
+              <MathText className="flex-1 font-bold">{entry.value}</MathText>
             </button>
           );
         })}
+
+        {prepared.correctOriginalIndex < 0 && (
+          <InfoBox tone="amber" title="تنبيه في بيانات السؤال" icon={AlertTriangle}>
+            <MathText className="font-semibold">
+              تعذر تحديد الإجابة الصحيحة. تحقق من correct_answer أو correct_index.
+            </MathText>
+          </InfoBox>
+        )}
 
         {!answered && activity.hint && (
           <div>
@@ -9472,8 +10778,8 @@ function InteractiveCheckpoint({ activity }) {
                 </p>
                 <MathText className="font-bold text-slate-800">
                   {isCorrect
-                    ? activity.feedback_correct
-                    : activity.feedback_wrong}
+                    ? activity.feedback_correct || "إجابة صحيحة."
+                    : activity.feedback_wrong || "راجع الفكرة ثم حاول من جديد."}
                 </MathText>
               </div>
             </div>
@@ -9481,7 +10787,7 @@ function InteractiveCheckpoint({ activity }) {
             <button
               type="button"
               onClick={() => {
-                setSelectedIndex(null);
+                setSelectedOriginalIndex(null);
                 setShowHint(false);
               }}
               className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:text-violet-700"
@@ -9563,6 +10869,19 @@ const PEDAGOGICAL_KEYS = new Set([
   "attempt_instruction",
   "takeaway",
   "bac_connection",
+  "mastery_rule",
+  "next_step",
+]);
+
+// حقول يعرضها LessonStepCard خارج StepBody في موضع واحد ثابت.
+const CENTRALIZED_PEDAGOGICAL_KEYS = new Set([
+  "why",
+  "how_to_think",
+  "attention",
+  "quick_check",
+  "pre_question",
+  "attempt_instruction",
+  "takeaway",
   "mastery_rule",
   "next_step",
 ]);
@@ -9749,10 +11068,15 @@ function CompactObjectCards({ items, fieldKey }) {
 
         const primary =
           item?.name ||
+          item?.term ||
+          item?.concept ||
+          item?.phrase ||
+          item?.model ||
           item?.quantity ||
           item?.situation ||
           item?.condition ||
           item?.case ||
+          item?.title ||
           `العنصر ${index + 1}`;
 
         return (
@@ -9760,13 +11084,29 @@ function CompactObjectCards({ items, fieldKey }) {
             key={item?.id || `${fieldKey}-${index}`}
             className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm"
           >
-            <h4 className="mb-2 text-sm font-black text-indigo-800">
+            <MathText
+              as="h4"
+              className="mb-2 text-sm font-black leading-7 text-indigo-800"
+            >
               {primary}
-            </h4>
+            </MathText>
 
             <div className="space-y-2">
               {entries
-                .filter(([key]) => !["name", "quantity", "situation", "condition", "case"].includes(key))
+                .filter(([key]) =>
+                  ![
+                    "name",
+                    "term",
+                    "concept",
+                    "phrase",
+                    "model",
+                    "quantity",
+                    "situation",
+                    "condition",
+                    "case",
+                    "title",
+                  ].includes(key),
+                )
                 .map(([key, value]) => (
                   <div key={key} className="border-t border-slate-100 pt-2 first:border-0 first:pt-0">
                     <p className="mb-1 text-xs font-black text-slate-500">
@@ -9789,14 +11129,420 @@ function CompactObjectCards({ items, fieldKey }) {
   );
 }
 
+
+const SEMANTIC_EXAMPLE_ORDER = [
+  "situation",
+  "experiment",
+  "example",
+  "question",
+  "outcomes",
+  "universe",
+  "event_text",
+  "event",
+  "A",
+  "B",
+  "condition",
+  "matching_outcomes",
+  "matching_values",
+  "certain",
+  "impossible",
+  "intersection",
+  "union",
+  "entry_fee",
+  "prize",
+  "net_win",
+  "net_loss",
+  "favorable",
+  "possible",
+  "calculation",
+  "probability",
+  "answer",
+  "idea",
+  "meaning",
+  "explanation",
+];
+
+function getSemanticEntryTone(key) {
+  if (["question", "condition"].includes(key)) {
+    return {
+      border: "border-indigo-100",
+      bg: "bg-indigo-50/65",
+      label: "text-indigo-700",
+    };
+  }
+
+  if (["answer", "probability", "calculation"].includes(key)) {
+    return {
+      border: "border-emerald-100",
+      bg: "bg-emerald-50/60",
+      label: "text-emerald-700",
+    };
+  }
+
+  if (["warning", "impossible", "net_loss"].includes(key)) {
+    return {
+      border: "border-rose-100",
+      bg: "bg-rose-50/60",
+      label: "text-rose-700",
+    };
+  }
+
+  if (["idea", "meaning", "explanation"].includes(key)) {
+    return {
+      border: "border-amber-100",
+      bg: "bg-amber-50/55",
+      label: "text-amber-700",
+    };
+  }
+
+  return {
+    border: "border-slate-100",
+    bg: "bg-white",
+    label: "text-slate-500",
+  };
+}
+
+function SemanticExampleValue({ value }) {
+  if (isEmpty(value)) return null;
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50/55 p-4">
+        <MathText className="font-bold text-slate-800">
+          {String(value)}
+        </MathText>
+      </div>
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return (
+      <div className="space-y-3">
+        {value.map((item, index) => (
+          <div
+            key={`semantic-example-${index}`}
+            className="rounded-2xl border border-amber-100 bg-amber-50/35 p-4"
+          >
+            <SemanticExampleValue value={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (typeof value !== "object") return null;
+
+  const entries = Object.entries(value).filter(
+    ([key, nestedValue]) =>
+      !isEmpty(nestedValue) &&
+      !isTechnicalPresentationField(key) &&
+      !looksLikeSvgMarkup(nestedValue),
+  );
+
+  if (entries.length === 0) return null;
+
+  const rank = (key) => {
+    const index = SEMANTIC_EXAMPLE_ORDER.indexOf(key);
+    return index === -1 ? 999 : index;
+  };
+
+  const orderedEntries = [...entries].sort(
+    ([keyA], [keyB]) => rank(keyA) - rank(keyB),
+  );
+
+  return (
+    <div className="overflow-hidden rounded-[24px] border border-amber-200 bg-gradient-to-b from-amber-50/55 to-white shadow-sm">
+      <div className="space-y-2.5 p-4 sm:p-5">
+        {orderedEntries.map(([key, nestedValue]) => {
+          const tone = getSemanticEntryTone(key);
+          const label = fieldLabel(key);
+
+          return (
+            <div
+              key={key}
+              className={cn(
+                "rounded-2xl border p-3.5 sm:p-4",
+                tone.border,
+                tone.bg,
+              )}
+            >
+              {label && (
+                <p
+                  className={cn(
+                    "mb-1.5 text-[11px] font-black",
+                    tone.label,
+                  )}
+                >
+                  {label}
+                </p>
+              )}
+
+              {Array.isArray(nestedValue) ? (
+                <BulletList items={nestedValue} tone="indigo" />
+              ) : nestedValue && typeof nestedValue === "object" ? (
+                <StructuredValue
+                  value={nestedValue}
+                  fieldKey={key}
+                  depth={2}
+                />
+              ) : (
+                <MathText className="text-sm font-bold leading-7 text-slate-800 sm:text-[15px]">
+                  {String(nestedValue)}
+                </MathText>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProbabilityLawValue({ value }) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return <StructuredValue value={value} depth={1} />;
+  }
+
+  const objectRows = value.filter(
+    (item) => item && typeof item === "object" && !Array.isArray(item),
+  );
+
+  if (objectRows.length !== value.length) {
+    return <BulletList items={value} tone="indigo" />;
+  }
+
+  return (
+    <DynamicDataTable
+      rows={value}
+      preferredColumns={["x", "p", "probability"]}
+      title=""
+    />
+  );
+}
+
+function SemanticObjectRows({
+  rows,
+  preferredColumns = [],
+}) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+
+  const objectRows = rows.filter(
+    (item) => item && typeof item === "object" && !Array.isArray(item),
+  );
+
+  if (objectRows.length !== rows.length) {
+    return <BulletList items={rows} tone="indigo" />;
+  }
+
+  return (
+    <DynamicDataTable
+      rows={rows}
+      preferredColumns={preferredColumns}
+      title=""
+    />
+  );
+}
+
+function ClassificationDrillStep({ content = {} }) {
+  const situations = Array.isArray(content.situations)
+    ? content.situations.filter(Boolean)
+    : [];
+
+  return (
+    <div className="space-y-5">
+      {content.teacher && (
+        <InfoBox title="كيف أتعامل مع التصنيف؟" tone="indigo" icon={Brain}>
+          <MathText className="font-semibold">{content.teacher}</MathText>
+        </InfoBox>
+      )}
+
+      {situations.length > 0 && (
+        <div className="space-y-3">
+          {situations.map((item, index) => (
+            <article
+              key={item?.id || `classification-drill-${index}`}
+              className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm"
+            >
+              <div className="flex items-start gap-3 border-b border-indigo-100 bg-indigo-50/60 p-4">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-sm font-black text-white">
+                  {index + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="mb-1 text-[11px] font-black text-indigo-700">
+                    الوضعية
+                  </p>
+                  <MathText className="font-black text-slate-950">
+                    {item?.situation || item?.question || getDisplayText(item)}
+                  </MathText>
+                </div>
+              </div>
+
+              {(item?.answer || item?.result) && (
+                <div className="p-4">
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50/65 p-3.5">
+                    <p className="mb-1 text-[11px] font-black text-emerald-700">
+                      التصنيف الصحيح
+                    </p>
+                    <MathText className="font-black text-emerald-950">
+                      {item.answer || item.result}
+                    </MathText>
+                  </div>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+
+      {content.takeaway && (
+        <StepTakeaway>{content.takeaway}</StepTakeaway>
+      )}
+    </div>
+  );
+}
+
+function BranchGuidanceStep({ content = {} }) {
+  const preferredBranches = ["علوم تجريبية", "رياضيات", "تقني رياضي"];
+
+  const entries = Object.entries(content).filter(
+    ([key, value]) =>
+      !["takeaway", "teacher"].includes(key) &&
+      !isEmpty(value) &&
+      !isTechnicalPresentationField(key),
+  );
+
+  const orderedEntries = [...entries].sort(
+    ([a], [b]) =>
+      preferredBranches.indexOf(a) - preferredBranches.indexOf(b),
+  );
+
+  return (
+    <div className="space-y-5">
+      {content.teacher && (
+        <InfoBox title="حسب الشعبة" tone="indigo" icon={GraduationCap}>
+          <MathText className="font-semibold">{content.teacher}</MathText>
+        </InfoBox>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {orderedEntries.map(([branch, value], index) => (
+          <article
+            key={branch}
+            className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm"
+          >
+            <div
+              className={cn(
+                "px-4 py-3 text-white",
+                index === 0
+                  ? "bg-indigo-600"
+                  : index === 1
+                    ? "bg-violet-600"
+                    : "bg-slate-800",
+              )}
+            >
+              <h3 className="font-black">{branch}</h3>
+            </div>
+            <div className="p-4">
+              {Array.isArray(value) ? (
+                <BulletList items={value} tone="indigo" />
+              ) : (
+                <StructuredValue value={value} fieldKey={branch} depth={1} />
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {content.takeaway && (
+        <StepTakeaway>{content.takeaway}</StepTakeaway>
+      )}
+    </div>
+  );
+}
+
+function DecisionTreeStep({ content = {} }) {
+  const decisions = Array.isArray(content.decision)
+    ? content.decision.filter(Boolean)
+    : content.decision
+      ? [content.decision]
+      : [];
+
+  return (
+    <div className="space-y-5">
+      {decisions.length > 0 && (
+        <section className="space-y-3">
+          {decisions.map((item, index) => (
+            <div
+              key={`decision-${index}`}
+              className="flex items-start gap-3 rounded-2xl border border-violet-100 bg-violet-50/45 p-4 shadow-sm"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-sm font-black text-white">
+                {index + 1}
+              </span>
+              <MathText className="font-bold text-slate-800">
+                {getDisplayText(item)}
+              </MathText>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {content.takeaway && (
+        <StepTakeaway>{content.takeaway}</StepTakeaway>
+      )}
+    </div>
+  );
+}
+
 function StructuredValue({ value, fieldKey, depth = 0 }) {
   if (
     isEmpty(value) ||
-    HIDDEN_PRESENTATION_FIELDS.has(fieldKey) ||
     isTechnicalPresentationField(fieldKey) ||
     looksLikeSvgMarkup(value)
   ) {
     return null;
+  }
+
+  /*
+   * عارض عام آمن:
+   * إذا كان أي كائن داخل JSON يشبه رسمًا بيانيًا أو SVG تعليميًا،
+   * نعرضه كرسم مهما كان اسم المفتاح (pressure_graph, mass_graph, ...).
+   * هذا يمنع ضياع الرسومات الجديدة فقط لأن اسم الحقل لم يكن معروفًا مسبقًا.
+   */
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (isSvgGraph(value) || isRenderableSeriesGraph(value))
+  ) {
+    return <CompleteGraphValue value={value} />;
+  }
+
+  if (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        !Array.isArray(item) &&
+        (isSvgGraph(item) || isRenderableSeriesGraph(item)),
+    )
+  ) {
+    return (
+      <div className="space-y-5">
+        {value.map((graphItem, index) => (
+          <CompleteGraphValue
+            key={graphItem?.id || graphItem?.title || `graph-${index}`}
+            value={graphItem}
+          />
+        ))}
+      </div>
+    );
   }
 
   if (fieldKey === "support_path" && value?.if_student_does_not_understand) {
@@ -9842,6 +11588,75 @@ function StructuredValue({ value, fieldKey, depth = 0 }) {
 
   if (fieldKey === "quick_check") {
     return <QuickCheckCard check={value} />;
+  }
+
+  if (["mini_example", "quick_example"].includes(fieldKey)) {
+    return <SemanticExampleValue value={value} />;
+  }
+
+  if (fieldKey === "probability_law") {
+    return <ProbabilityLawValue value={value} />;
+  }
+
+  if (fieldKey === "examples" && Array.isArray(value)) {
+    return <ExampleCollection value={value} />;
+  }
+
+  if (fieldKey === "quadrants" && Array.isArray(value)) {
+    return (
+      <SemanticObjectRows
+        rows={value}
+        preferredColumns={["quadrant", "signs", "angle_form"]}
+      />
+    );
+  }
+
+  if (
+    fieldKey === "decision_table" &&
+    Array.isArray(value)
+  ) {
+    return (
+      <SemanticObjectRows
+        rows={value}
+        preferredColumns={["order_matters", "repetition", "model", "count"]}
+      />
+    );
+  }
+
+  if (
+    fieldKey === "sampling_map" &&
+    Array.isArray(value)
+  ) {
+    return (
+      <SemanticObjectRows
+        rows={value}
+        preferredColumns={["sampling", "model", "idea"]}
+      />
+    );
+  }
+
+  if (
+    fieldKey === "translation_patterns" &&
+    Array.isArray(value)
+  ) {
+    return (
+      <SemanticObjectRows
+        rows={value}
+        preferredColumns={["phrase", "notation", "known_event", "target_event"]}
+      />
+    );
+  }
+
+  if (
+    fieldKey === "translation_table" &&
+    Array.isArray(value)
+  ) {
+    return (
+      <SemanticObjectRows
+        rows={value}
+        preferredColumns={["phrase", "translation"]}
+      />
+    );
   }
 
   if (
@@ -9957,6 +11772,8 @@ function StructuredValue({ value, fieldKey, depth = 0 }) {
       "definitions",
       "vocabulary",
       "indicators",
+      "patterns",
+      "classification",
     ].includes(fieldKey) &&
     value.every((item) => item && typeof item === "object" && !Array.isArray(item))
   ) {
@@ -10003,8 +11820,7 @@ function StructuredValue({ value, fieldKey, depth = 0 }) {
         key !== "step_number" &&
         key !== "level" &&
         !isTechnicalPresentationField(key) &&
-        !looksLikeSvgMarkup(nestedValue) &&
-        !PEDAGOGICAL_KEYS.has(key),
+        !looksLikeSvgMarkup(nestedValue),
     );
 
     if (visibleEntries.length === 0) return null;
@@ -10012,8 +11828,7 @@ function StructuredValue({ value, fieldKey, depth = 0 }) {
     return (
       <div
         className={cn(
-          "grid grid-cols-1 gap-3",
-          visibleEntries.length > 1 && "sm:grid-cols-2 xl:grid-cols-3",
+          "space-y-3",
           depth > 0 && "mt-2",
         )}
       >
@@ -10327,6 +12142,7 @@ function ReferenceTableStep({ content = {} }) {
     "attention",
     "takeaway",
     "conclusion",
+    "important_conclusion",
   ]);
 
   const remainingContent = Object.fromEntries(
@@ -10362,8 +12178,62 @@ function ReferenceTableStep({ content = {} }) {
   );
 
   const renderPolynomialTable = () => (
-    <div className="overflow-x-auto">
-      <table dir="rtl" className="w-full min-w-[760px] table-fixed text-center text-sm">
+    <>
+      <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 sm:p-4 md:hidden">
+        {cases.map((item, index) => {
+          const coefficient =
+            item.leading_coefficient ?? item.coefficient_sign ?? item.sign ?? "";
+          const isPositive = normalizeComparableText(coefficient).includes("موجب");
+
+          return (
+            <article
+              key={item.id || `polynomial-mobile-case-${index}`}
+              className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm"
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-sm font-black text-white">
+                  {index + 1}
+                </span>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-800 ring-1 ring-violet-100">
+                    درجة {item.degree ?? item.parity ?? "—"}
+                  </span>
+                  <span className={cn(
+                    "rounded-full px-3 py-1 text-xs font-black ring-1",
+                    isPositive
+                      ? "bg-emerald-50 text-emerald-800 ring-emerald-100"
+                      : "bg-rose-50 text-rose-800 ring-rose-100",
+                  )}>
+                    معامل {coefficient || "—"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 divide-x divide-x-reverse divide-slate-100">
+                <div className="bg-emerald-50/35 p-3 text-center">
+                  <MathText className="mb-1 text-xs font-black text-slate-500">
+                    {"\\(x\\to+\\infty\\)"}
+                  </MathText>
+                  <MixedArabicMath
+                    value={item.at_plus_infinity ?? item.plus_infinity ?? ""}
+                  />
+                </div>
+                <div className="bg-indigo-50/35 p-3 text-center">
+                  <MathText className="mb-1 text-xs font-black text-slate-500">
+                    {"\\(x\\to-\\infty\\)"}
+                  </MathText>
+                  <MixedArabicMath
+                    value={item.at_minus_infinity ?? item.minus_infinity ?? ""}
+                  />
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="hidden overflow-x-auto md:block">
+        <table dir="rtl" className="w-full min-w-[760px] table-fixed text-center text-sm">
         <thead className="bg-gradient-to-l from-slate-950 via-indigo-950 to-violet-950 text-white">
           <tr>
             <th className="w-[80px] px-4 py-4 font-black">الحالة</th>
@@ -10451,8 +12321,9 @@ function ReferenceTableStep({ content = {} }) {
             );
           })}
         </tbody>
-      </table>
-    </div>
+        </table>
+      </div>
+    </>
   );
 
   const renderDegreeComparisonTable = () => (
@@ -10742,7 +12613,7 @@ function ReferenceTableStep({ content = {} }) {
                 <Compass size={19} />
               </span>
               <div>
-                <h3 className="font-black text-slate-950">فهم رموز المالانهاية</h3>
+                <h3 className="font-black text-slate-950">فهم الرموز المستعملة</h3>
                 <p className="mt-1 text-xs font-semibold leading-6 text-slate-500">
                   نميّز بين اتجاه المتغير والنتيجة التي تأخذها قيم الدالة.
                 </p>
@@ -10780,7 +12651,7 @@ function ReferenceTableStep({ content = {} }) {
             <ListChecks size={20} />
           </span>
           <div>
-            <h3 className="text-lg font-black text-slate-950">المرجعيات الأساسية عند المالانهاية</h3>
+            <h3 className="text-lg font-black text-slate-950">المرجعيات الأساسية للنهايات</h3>
             <p className="mt-1 text-sm font-semibold leading-7 text-slate-500">
               اقرأ الدالة، تذكّر سلوكها، ثم احفظ النهاية في كل جهة.
             </p>
@@ -10789,11 +12660,35 @@ function ReferenceTableStep({ content = {} }) {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {references.map((item, index) => {
+            // ندعم البنيتين:
+            // 1) { function, limits, memory }
+            // 2) { formula, meaning }
+            const directFormula =
+              item.formula ??
+              item.limit ??
+              item.expression ??
+              item.relation ??
+              "";
+
+            const directMeaning =
+              item.meaning ??
+              item.explanation ??
+              item.description ??
+              "";
+
             const limits = Array.isArray(item.limits)
               ? item.limits.filter((limitItem) => !isEmpty(limitItem))
               : !isEmpty(item.limits)
                 ? [item.limits]
-                : [];
+                : !isEmpty(directFormula)
+                  ? [directFormula]
+                  : [];
+
+            const referenceName =
+              item.function ??
+              item.name ??
+              item.title ??
+              `المرجعية ${index + 1}`;
 
             return (
               <article
@@ -10808,7 +12703,7 @@ function ReferenceTableStep({ content = {} }) {
                     <div className="min-w-0">
                       <p className="text-[11px] font-black text-indigo-600">الدالة المرجعية</p>
                       <MathText className="mt-0.5 text-base font-black text-slate-950">
-                        {item.function}
+                        {referenceName}
                       </MathText>
                     </div>
                   </div>
@@ -10864,6 +12759,25 @@ function ReferenceTableStep({ content = {} }) {
                     );
                   })}
                 </div>
+
+                {directMeaning && (
+                  <div className="border-t border-slate-100 bg-slate-50/70 px-4 py-4 sm:px-5">
+                    <div className="flex items-start gap-3">
+                      <Lightbulb
+                        size={17}
+                        className="mt-1 shrink-0 text-amber-600"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="mb-1 text-[11px] font-black text-amber-700">
+                          المعنى
+                        </p>
+                        <MathText className="text-sm font-semibold leading-7 text-slate-700">
+                          {directMeaning}
+                        </MathText>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </article>
             );
           })}
@@ -10945,6 +12859,14 @@ function ReferenceTableStep({ content = {} }) {
         <InfoBox title="الخلاصة" tone="emerald" icon={CheckCircle2}>
           <MathText className="text-sm font-black leading-7">
             {content.conclusion}
+          </MathText>
+        </InfoBox>
+      )}
+
+      {content.important_conclusion && (
+        <InfoBox title="الاستنتاج المهم" tone="emerald" icon={CheckCircle2}>
+          <MathText className="text-sm font-black leading-7">
+            {content.important_conclusion}
           </MathText>
         </InfoBox>
       )}
@@ -12522,7 +14444,213 @@ function LnDomainExamples({
 }
 
 
+function PolynomialBehaviorConceptStep({ content = {} }) {
+  const cases = Array.isArray(content.cases)
+    ? content.cases.filter(
+        (item) => item && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+
+  const examples = Array.isArray(content.examples)
+    ? content.examples.filter(
+        (item) => item && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+
+  const manuallyRenderedKeys = new Set([
+    "teacher",
+    "cases",
+    "examples",
+  ]);
+
+  const remainingContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !manuallyRenderedKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
+  const caseTone = (index) =>
+    index % 2 === 0
+      ? {
+          border: "border-emerald-200",
+          surface: "from-emerald-50 via-white to-white",
+          icon: "bg-emerald-600",
+          text: "text-emerald-800",
+          formula: "border-emerald-100 bg-emerald-50/70",
+        }
+      : {
+          border: "border-violet-200",
+          surface: "from-violet-50 via-white to-white",
+          icon: "bg-violet-600",
+          text: "text-violet-800",
+          formula: "border-violet-100 bg-violet-50/70",
+        };
+
+  return (
+    <div className="space-y-5 sm:space-y-6">
+      {content.teacher && (
+        <section className="overflow-hidden rounded-[26px] border border-indigo-100 bg-white shadow-sm">
+          <div className="flex items-start gap-3 p-4 sm:p-5">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-700 ring-1 ring-indigo-100">
+              <BookOpen size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="mb-1 text-xs font-black text-indigo-700">شرح الأستاذ</p>
+              <MathText className="font-semibold leading-8 text-slate-700">
+                {content.teacher}
+              </MathText>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {cases.length > 0 && (
+        <section className="rounded-[28px] border border-slate-200 bg-slate-50/70 p-3 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-center gap-3 px-1">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white">
+              <Compass size={19} />
+            </span>
+            <div>
+              <h3 className="font-black text-slate-950">اقرأ الحالة ثم استنتج الإشارة</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                كل بطاقة تجمع الشرط والمرجعية ومعناها في مكان واحد.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {cases.map((item, index) => {
+              const tone = caseTone(index);
+              const heading =
+                item.degree_type || item.condition || item.name || `الحالة ${index + 1}`;
+              const formula = item.reference || item.formula || item.rule || "";
+
+              return (
+                <article
+                  key={item.id || `${heading}-${index}`}
+                  className={cn(
+                    "relative overflow-hidden rounded-[24px] border bg-gradient-to-l p-4 shadow-sm sm:p-5",
+                    tone.border,
+                    tone.surface,
+                  )}
+                >
+                  <div className="mb-4 flex items-center gap-3">
+                    <span className={cn(
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-black text-white shadow-sm",
+                      tone.icon,
+                    )}>
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-1 text-[11px] font-black text-slate-500">الحالة</p>
+                      <MixedArabicMath
+                        value={heading}
+                        centered={false}
+                        className={cn("font-black", tone.text)}
+                      />
+                    </div>
+                  </div>
+
+                  {formula && (
+                    <div className={cn("mb-3 rounded-2xl border px-3 py-4", tone.formula)}>
+                      <p className={cn("mb-2 text-center text-[11px] font-black", tone.text)}>
+                        السلوك عند المالانهاية
+                      </p>
+                      <MixedArabicMath value={formula} className="font-black" />
+                    </div>
+                  )}
+
+                  {item.meaning && (
+                    <div className="flex items-start gap-2.5 rounded-2xl border border-white bg-white/85 px-3.5 py-3 shadow-sm">
+                      <Lightbulb size={17} className="mt-1 shrink-0 text-amber-600" />
+                      <div className="min-w-0">
+                        <p className="mb-1 text-[11px] font-black text-amber-700">المعنى</p>
+                        <MathText className="text-sm font-semibold leading-7 text-slate-700">
+                          {item.meaning}
+                        </MathText>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {examples.length > 0 && (
+        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-start gap-3 border-b border-slate-100 bg-gradient-to-l from-indigo-50 via-white to-white px-4 py-4 sm:px-6">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white">
+              <ListChecks size={19} />
+            </span>
+            <div>
+              <h3 className="font-black text-slate-950">أمثلة تطبيقية سريعة</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                قارن نهاية الحد الرئيسي في الجهتين.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 p-3 sm:p-5 lg:grid-cols-3">
+            {examples.map((item, index) => (
+              <article
+                key={item.id || item.term || `polynomial-example-${index}`}
+                className="overflow-hidden rounded-[22px] border border-slate-200 bg-slate-50/60 shadow-sm"
+              >
+                <div className="border-b border-slate-100 bg-white px-4 py-4 text-center">
+                  <p className="mb-2 text-[11px] font-black text-indigo-600">الحد الرئيسي</p>
+                  <MixedArabicMath value={item.term} />
+                </div>
+                <div className="grid grid-cols-2 divide-x divide-x-reverse divide-slate-200">
+                  <div className="p-3 text-center">
+                    <MathText className="mb-1 text-xs font-black text-slate-500">
+                      {"\\(x\\to+\\infty\\)"}
+                    </MathText>
+                    <MixedArabicMath value={item.at_plus_infinity} />
+                  </div>
+                  <div className="p-3 text-center">
+                    <MathText className="mb-1 text-xs font-black text-slate-500">
+                      {"\\(x\\to-\\infty\\)"}
+                    </MathText>
+                    <MixedArabicMath value={item.at_minus_infinity} />
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {Object.keys(remainingContent).length > 0 && (
+        <GenericObjectStep content={remainingContent} />
+      )}
+    </div>
+  );
+}
+
+
 function ConceptStep({ content = {} }) {
+  const polynomialCases = Array.isArray(content.cases)
+    ? content.cases.filter(
+        (item) => item && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+
+  const isPolynomialBehaviorConcept = polynomialCases.some(
+    (item) =>
+      "degree_type" in item ||
+      ("condition" in item && /a_n|a_\{n\}/.test(String(item.condition || ""))),
+  );
+
+  if (isPolynomialBehaviorConcept) {
+    return <PolynomialBehaviorConceptStep content={content} />;
+  }
+
   const validExamples = Array.isArray(content.valid_examples)
     ? content.valid_examples.filter((item) => !isEmpty(item))
     : [];
@@ -12639,6 +14767,12 @@ function ConceptStep({ content = {} }) {
     ? example.values.filter(Boolean)
     : [];
 
+  const conceptExamples = Array.isArray(content.examples)
+    ? content.examples.filter((item) => !isEmpty(item))
+    : !isEmpty(content.examples)
+      ? [content.examples]
+      : [];
+
   // عرض كل الحقول الجديدة التي لا يملك ConceptStep تصميمًا خاصًا لها.
   const manuallyRenderedKeys = new Set([
     "teacher",
@@ -12651,6 +14785,9 @@ function ConceptStep({ content = {} }) {
     "takeaway",
     "valid_examples",
     "invalid_examples",
+    "mini_example",
+    "quick_example",
+    "examples",
   ]);
 
   // المثال الكائني يعرضه التصميم الخاص، أما المثال النصي فيمر إلى العارض العام.
@@ -12705,6 +14842,47 @@ function ConceptStep({ content = {} }) {
           validExamples={validExamples}
           invalidExamples={invalidExamples}
         />
+      )}
+
+      {content.mini_example && (
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <Lightbulb size={18} className="text-amber-600" />
+            <h3 className="font-black text-slate-950">
+              مثال تطبيقي
+            </h3>
+          </div>
+          <SemanticExampleValue value={content.mini_example} />
+        </section>
+      )}
+
+      {content.quick_example && (
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <Sparkles size={18} className="text-violet-600" />
+            <h3 className="font-black text-slate-950">
+              مثال سريع
+            </h3>
+          </div>
+          <SemanticExampleValue value={content.quick_example} />
+        </section>
+      )}
+
+      {conceptExamples.length > 0 && (
+        <section className="rounded-[26px] border border-slate-200 bg-slate-50/55 p-4 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <GraduationCap size={18} className="text-indigo-600" />
+            <div>
+              <h3 className="font-black text-slate-950">
+                أمثلة توضيحية
+              </h3>
+              <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                عرض منظم للمعطيات والنتائج حتى تبقى العلاقة بين العناصر واضحة.
+              </p>
+            </div>
+          </div>
+          <ExampleCollection value={conceptExamples} />
+        </section>
       )}
 
       {machineView.length > 0 && (
@@ -12979,8 +15157,7 @@ function GenericObjectStep({ content }) {
       !isEmpty(value) &&
       !["graph", "graph_data", "graph_ref", "graphRef", "graph_id", "graphId"].includes(key) &&
       !isTechnicalPresentationField(key) &&
-      !looksLikeSvgMarkup(value) &&
-      !PEDAGOGICAL_KEYS.has(key),
+      !looksLikeSvgMarkup(value),
   );
 
   return (
@@ -13031,6 +15208,26 @@ function GenericObjectStep({ content }) {
 
 
 function InterpretationStep({ content = {} }) {
+  const handledKeys = new Set([
+    "teacher",
+    "interpretations",
+    "sign_meaning",
+    "why",
+    "how_to_think",
+    "attention",
+    "takeaway",
+  ]);
+
+  const remainingContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !handledKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
   const interpretations = Array.isArray(content.interpretations)
     ? content.interpretations.filter(Boolean)
     : [];
@@ -13237,6 +15434,10 @@ function InterpretationStep({ content = {} }) {
             </MathText>
           </div>
         </div>
+      )}
+
+      {Object.keys(remainingContent).length > 0 && (
+        <GenericObjectStep content={remainingContent} />
       )}
     </div>
   );
@@ -13455,6 +15656,12 @@ function DefinitionStep({ content = {} }) {
     },
   ].filter((item) => !isEmpty(item.value));
 
+  const definitionExamples = Array.isArray(content.examples)
+    ? content.examples.filter((item) => !isEmpty(item))
+    : !isEmpty(content.examples)
+      ? [content.examples]
+      : [];
+
   const handledKeys = new Set([
     "teacher",
     "central_idea",
@@ -13462,6 +15669,7 @@ function DefinitionStep({ content = {} }) {
     "increasing_order",
     "decreasing_order",
     "definitions",
+    "examples",
     "symbols",
     "monotone_definition",
     "memory_tip",
@@ -13543,39 +15751,121 @@ function DefinitionStep({ content = {} }) {
 
       {Array.isArray(content.definitions) &&
         content.definitions.length > 0 && (
-          <div className="grid gap-4 md:grid-cols-2">
-            {content.definitions.map((item, index) => (
-              <div
-                key={item?.name || index}
-                className="rounded-[24px] border border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-white p-5 shadow-sm"
-              >
-                {item?.name && (
-                  <h3 className="font-black text-indigo-950">
-                    {item.name}
-                  </h3>
-                )}
+          <div
+            className={cn(
+              "grid gap-4",
+              content.definitions.length === 1
+                ? "grid-cols-1"
+                : content.definitions.length === 2
+                  ? "md:grid-cols-2"
+                  : "md:grid-cols-2 xl:grid-cols-3",
+            )}
+          >
+            {content.definitions.map((item, index) => {
+              const title =
+                item?.name ||
+                item?.term ||
+                item?.title ||
+                item?.concept ||
+                `التعريف ${index + 1}`;
 
-                {item?.formula && (
-                  <div className="mt-3">
-                    <MathPanel>{item.formula}</MathPanel>
-                  </div>
-                )}
+              const knownKeys = new Set([
+                "name",
+                "term",
+                "title",
+                "concept",
+                "formula",
+                "notation",
+                "meaning",
+                "condition",
+              ]);
 
-                {item?.meaning && (
-                  <MathText className="mt-3 text-sm font-semibold text-slate-700">
-                    {item.meaning}
+              const extraFields = Object.fromEntries(
+                Object.entries(item || {}).filter(
+                  ([key, value]) =>
+                    !knownKeys.has(key) &&
+                    !isEmpty(value) &&
+                    !isTechnicalPresentationField(key),
+                ),
+              );
+
+              return (
+                <div
+                  key={item?.id || title || index}
+                  className="rounded-[24px] border border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-white p-5 shadow-sm"
+                >
+                  <MathText
+                    as="h3"
+                    className="text-center text-base font-black leading-8 text-indigo-950 sm:text-lg"
+                  >
+                    {title}
                   </MathText>
-                )}
 
-                {item?.condition && (
-                  <MathText className="mt-3 text-sm font-semibold text-slate-700">
-                    {item.condition}
-                  </MathText>
-                )}
-              </div>
-            ))}
+                  {item?.notation && (
+                    <div className="mt-3 rounded-xl border border-violet-100 bg-white px-3 py-2.5">
+                      <p className="mb-1 text-[11px] font-black text-violet-700">
+                        الترميز
+                      </p>
+                      <MathText className="font-black text-slate-950">
+                        {item.notation}
+                      </MathText>
+                    </div>
+                  )}
+
+                  {item?.formula && (
+                    <div className="mt-3">
+                      <MathPanel>{item.formula}</MathPanel>
+                    </div>
+                  )}
+
+                  {item?.meaning && (
+                    <MathText className="mt-3 text-sm font-semibold text-slate-700">
+                      {item.meaning}
+                    </MathText>
+                  )}
+
+                  {item?.condition && (
+                    <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2.5">
+                      <p className="mb-1 text-[11px] font-black text-amber-700">
+                        الشرط
+                      </p>
+                      <MathText className="text-sm font-semibold text-amber-950">
+                        {item.condition}
+                      </MathText>
+                    </div>
+                  )}
+
+                  {Object.keys(extraFields).length > 0 && (
+                    <div className="mt-3">
+                      <StructuredValue
+                        value={extraFields}
+                        fieldKey="definition_details"
+                        depth={1}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
+
+      {definitionExamples.length > 0 && (
+        <section className="rounded-[26px] border border-indigo-100 bg-indigo-50/35 p-4 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <GraduationCap size={18} className="text-indigo-600" />
+            <div>
+              <h3 className="font-black text-slate-950">
+                أمثلة سريعة
+              </h3>
+              <p className="mt-0.5 text-xs font-semibold text-slate-500">
+                أمثلة قصيرة تثبّت التعريف دون تشتيت أو فراغات كبيرة.
+              </p>
+            </div>
+          </div>
+          <ExampleCollection value={definitionExamples} />
+        </section>
+      )}
 
       {Array.isArray(content.symbols) && content.symbols.length > 0 && (
         <div>
@@ -13803,6 +16093,18 @@ function prepareStepContent(content = {}) {
       return;
     }
 
+    /*
+     * هذه الحقول لها عارض مركزي واحد داخل LessonStepCard:
+     * - PedagogicalBlocks يعرض why / how_to_think / attention / quick_check...
+     * - StepTakeaway يعرض takeaway.
+     *
+     * عدم تمريرها إلى مكوّن المرحلة المتخصص يمنع ظهور البطاقة نفسها مرتين
+     * (مرة داخل ConceptStep/RuleStep/... ومرة داخل PedagogicalBlocks).
+     */
+    if (CENTRALIZED_PEDAGOGICAL_KEYS.has(key)) {
+      return;
+    }
+
     if (key === "intro") {
       if (isEmpty(content.teacher) && !isEmpty(value)) {
         displayContent.teacher = value;
@@ -13820,6 +16122,16 @@ function prepareStepContent(content = {}) {
 }
 
 function RuleStep({ content = {} }) {
+  const symbolGuide = Array.isArray(content.symbol_guide)
+    ? content.symbol_guide.filter(
+        (item) => item && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+
+  const applicationSteps = Array.isArray(content.application_steps)
+    ? content.application_steps.filter(Boolean)
+    : [];
+
   const rawCases = Array.isArray(content.determined_cases)
     ? content.determined_cases
     : Array.isArray(content.cases)
@@ -13841,6 +16153,10 @@ function RuleStep({ content = {} }) {
     "memory_tip",
     "sign_note",
     "takeaway",
+    "general_setting",
+    "simplified_form",
+    "symbol_guide",
+    "application_steps",
   ]);
 
   const remainingContent = Object.fromEntries(
@@ -13890,6 +16206,18 @@ function RuleStep({ content = {} }) {
         </section>
       )}
 
+      {content.general_setting && (
+        <section className="rounded-[24px] border border-sky-100 bg-gradient-to-l from-sky-50/80 via-white to-white p-4 shadow-sm sm:p-5">
+          <div className="mb-3 flex items-center gap-2 text-xs font-black text-sky-700">
+            <Compass size={17} />
+            المعطيات والرموز المستعملة
+          </div>
+          <MathText className="text-center font-black leading-9 text-slate-900">
+            {content.general_setting}
+          </MathText>
+        </section>
+      )}
+
       {content.rule && (
         <section className="relative overflow-hidden rounded-[28px] border border-indigo-200 bg-gradient-to-l from-indigo-950 via-indigo-900 to-violet-800 px-5 py-6 text-white shadow-[0_18px_45px_-24px_rgba(79,70,229,0.85)] sm:px-8 sm:py-7">
           <div className="pointer-events-none absolute -left-10 -top-14 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
@@ -13898,14 +16226,112 @@ function RuleStep({ content = {} }) {
               <Sparkles size={17} />
               القاعدة الأساسية
             </div>
-            <MathJax dynamic hideUntilTypeset="first">
-              <div
-                dir="ltr"
-                className="overflow-x-auto py-2 text-center text-xl font-black sm:text-2xl [&_mjx-container]:mx-auto [&_mjx-container]:block [&_mjx-container]:w-fit"
-              >
-                {`\\[${getPureMathExpression(content.rule)}\\]`}
+            {containsArabic(decodeLatexEscapes(content.rule)) ? (
+              <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-5 sm:px-6">
+                <MixedArabicMath
+                  value={content.rule}
+                  dark
+                  className="justify-center gap-x-2 text-lg font-black text-white sm:text-2xl [&_mjx-container]:text-white"
+                />
               </div>
-            </MathJax>
+            ) : (
+              <MathJax dynamic hideUntilTypeset="first">
+                <div
+                  dir="ltr"
+                  className="overflow-x-auto py-2 text-center text-xl font-black sm:text-2xl [&_mjx-container]:mx-auto [&_mjx-container]:block [&_mjx-container]:w-fit"
+                >
+                  {`\\[${getPureMathExpression(content.rule)}\\]`}
+                </div>
+              </MathJax>
+            )}
+          </div>
+        </section>
+      )}
+
+      {content.simplified_form && (
+        <section className="overflow-hidden rounded-[26px] border border-emerald-100 bg-white shadow-sm">
+          <div className="flex flex-col items-stretch gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center self-center rounded-2xl bg-emerald-100 text-emerald-700 sm:self-auto">
+              <RefreshCw size={20} />
+            </span>
+            <div className="min-w-0 flex-1 text-center sm:text-right">
+              <p className="mb-2 text-xs font-black text-emerald-700">بعد تبسيط خارج الحدين</p>
+              <MixedArabicMath
+                value={content.simplified_form}
+                centered={false}
+                className="justify-center font-black sm:justify-start"
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {symbolGuide.length > 0 && (
+        <section className="rounded-[28px] border border-slate-200 bg-slate-50/65 p-3 shadow-sm sm:p-5">
+          <div className="mb-4 flex items-start gap-3 px-1">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm">
+              <Hash size={18} />
+            </span>
+            <div>
+              <h3 className="font-black text-slate-950">دليل الرموز</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                تعرّف إلى معنى كل رمز قبل تطبيق القاعدة.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {symbolGuide.map((item, index) => (
+              <article
+                key={item.id || item.symbol || `rule-symbol-${index}`}
+                className="group overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md"
+              >
+                <div className="flex min-h-[72px] items-center justify-center border-b border-indigo-100 bg-gradient-to-l from-indigo-50 to-violet-50/50 px-4 py-3">
+                  <MixedArabicMath
+                    value={item.symbol}
+                    className="text-lg font-black text-indigo-950"
+                  />
+                </div>
+                <div className="p-4 text-center">
+                  <p className="mb-1 text-[11px] font-black text-indigo-600">المعنى</p>
+                  <MathText className="text-sm font-semibold leading-7 text-slate-700">
+                    {item.meaning}
+                  </MathText>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {applicationSteps.length > 0 && (
+        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-start gap-3 border-b border-slate-100 bg-gradient-to-l from-slate-50 via-white to-indigo-50/50 px-4 py-4 sm:px-6">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white">
+              <Route size={18} />
+            </span>
+            <div>
+              <h3 className="font-black text-slate-950">طريقة تطبيق القاعدة</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                اتبع الخطوات بالترتيب حتى تصل إلى النهاية.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 sm:p-5 lg:grid-cols-4">
+            {applicationSteps.map((item, index) => (
+              <article
+                key={`rule-application-step-${index}`}
+                className="relative rounded-[22px] border border-indigo-100 bg-indigo-50/45 p-4 pt-5 shadow-sm"
+              >
+                <span className="absolute -top-2.5 right-4 flex h-7 min-w-7 items-center justify-center rounded-lg bg-indigo-600 px-2 text-xs font-black text-white shadow-sm">
+                  {index + 1}
+                </span>
+                <MathText className="mt-1 text-sm font-bold leading-7 text-slate-800">
+                  {item}
+                </MathText>
+              </article>
+            ))}
           </div>
         </section>
       )}
@@ -14116,6 +16542,398 @@ function RuleStep({ content = {} }) {
 }
 
 
+
+/* =========================================================
+   Renderers for the new Complex Numbers axes
+========================================================= */
+
+function ClassificationStep({ content = {} }) {
+  const categories = Array.isArray(content.categories)
+    ? content.categories.filter(Boolean)
+    : [];
+
+  const classification = Array.isArray(content.classification)
+    ? content.classification.filter(Boolean)
+    : [];
+
+  const rows = categories.length > 0 ? categories : classification;
+
+  const manuallyRenderedKeys = new Set([
+    "teacher",
+    "categories",
+    "classification",
+    "takeaway",
+    "attention",
+  ]);
+
+  const remainingContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !manuallyRenderedKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
+  return (
+    <div className="space-y-5">
+      {content.teacher && (
+        <InfoBox title="شرح الأستاذ" tone="indigo" icon={BookOpen} compact={false}>
+          <MathText className="font-semibold leading-8">
+            {content.teacher}
+          </MathText>
+        </InfoBox>
+      )}
+
+      {rows.length > 0 && (
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {rows.map((item, index) => (
+            <article
+              key={item?.name || item?.condition || `classification-${index}`}
+              className="rounded-[24px] border border-indigo-100 bg-gradient-to-b from-indigo-50/60 to-white p-5 shadow-sm"
+            >
+              <div className="mb-3 flex items-center gap-2 text-indigo-700">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-sm font-black text-white">
+                  {index + 1}
+                </span>
+                <MathText
+                  as="h3"
+                  className="font-black leading-7 text-slate-950"
+                >
+                  {item?.name || item?.condition || `الحالة ${index + 1}`}
+                </MathText>
+              </div>
+
+              {item?.description && (
+                <MathText className="text-sm font-semibold leading-7 text-slate-700">
+                  {item.description}
+                </MathText>
+              )}
+
+              {item?.features && (
+                <div className="mt-3">
+                  <BulletList items={item.features} tone="indigo" />
+                </div>
+              )}
+
+              {item && typeof item === "object" && (
+                <StructuredValue
+                  value={Object.fromEntries(
+                    Object.entries(item).filter(
+                      ([key]) => !["name", "condition", "description", "features"].includes(key),
+                    ),
+                  )}
+                  depth={1}
+                />
+              )}
+            </article>
+          ))}
+        </section>
+      )}
+
+      {content.attention && (
+        <InfoBox title="انتبه" tone="rose" icon={AlertTriangle}>
+          <MathText>{content.attention}</MathText>
+        </InfoBox>
+      )}
+
+      {Object.keys(remainingContent).length > 0 && (
+        <GenericObjectStep content={remainingContent} />
+      )}
+
+      {content.takeaway && (
+        <StepTakeaway>{content.takeaway}</StepTakeaway>
+      )}
+    </div>
+  );
+}
+
+
+function CheckStep({ content = {} }) {
+  const checks = Array.isArray(content.checks)
+    ? content.checks.filter(Boolean)
+    : [];
+
+  const manuallyRenderedKeys = new Set([
+    "teacher",
+    "checks",
+    "takeaway",
+    "attention",
+  ]);
+
+  const remainingContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !manuallyRenderedKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
+  return (
+    <div className="space-y-5">
+      {content.teacher && (
+        <InfoBox title="كيف نتحقق؟" tone="sky" icon={CheckCircle2} compact={false}>
+          <MathText className="font-semibold leading-8">
+            {content.teacher}
+          </MathText>
+        </InfoBox>
+      )}
+
+      {checks.length > 0 && (
+        <section className="rounded-[26px] border border-emerald-100 bg-emerald-50/35 p-4 sm:p-5">
+          <div className="mb-4 flex items-center gap-2 text-emerald-800">
+            <ListChecks size={18} />
+            <h3 className="font-black">قائمة التحقق</h3>
+          </div>
+          <BulletList items={checks} tone="emerald" />
+        </section>
+      )}
+
+      {Object.keys(remainingContent).length > 0 && (
+        <GenericObjectStep content={remainingContent} />
+      )}
+
+      {content.attention && (
+        <InfoBox title="تنبيه" tone="rose" icon={AlertTriangle}>
+          <MathText>{content.attention}</MathText>
+        </InfoBox>
+      )}
+
+      {content.takeaway && (
+        <StepTakeaway>{content.takeaway}</StepTakeaway>
+      )}
+    </div>
+  );
+}
+
+
+function ApplicationStep({ content = {} }) {
+  const items = Array.isArray(content.items)
+    ? content.items.filter(Boolean)
+    : [];
+
+  const manuallyRenderedKeys = new Set([
+    "teacher",
+    "items",
+    "mini_example",
+    "takeaway",
+    "attention",
+  ]);
+
+  const remainingContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !manuallyRenderedKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
+  return (
+    <div className="space-y-5">
+      {content.teacher && (
+        <InfoBox title="التطبيق" tone="indigo" icon={Target} compact={false}>
+          <MathText className="font-semibold leading-8">
+            {content.teacher}
+          </MathText>
+        </InfoBox>
+      )}
+
+      {content.mini_example && (
+        <section>
+          <div className="mb-3 flex items-center gap-2">
+            <Lightbulb size={18} className="text-amber-600" />
+            <h3 className="font-black text-slate-950">
+              مثال تطبيقي
+            </h3>
+          </div>
+          <SemanticExampleValue value={content.mini_example} />
+        </section>
+      )}
+
+      {items.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {items.map((item, index) => {
+            const question =
+              item?.question ||
+              item?.statement ||
+              item?.transformation ||
+              item?.title ||
+              `التطبيق ${index + 1}`;
+
+            return (
+              <article
+                key={item?.id || `application-${index}`}
+                className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm"
+              >
+                <div className="border-b border-indigo-100 bg-indigo-50/60 px-5 py-4">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-sm font-black text-white">
+                      {index + 1}
+                    </span>
+                    <MathText className="font-black text-slate-950">
+                      {question}
+                    </MathText>
+                  </div>
+                </div>
+
+                <div className="space-y-3 p-5">
+                  {item?.answer && (
+                    <InfoBox title="النتيجة" tone="emerald" icon={CheckCircle2}>
+                      <MathText className="font-black">{item.answer}</MathText>
+                    </InfoBox>
+                  )}
+
+                  {item?.why && (
+                    <InfoBox title="لماذا؟" tone="sky" icon={CircleHelp}>
+                      <MathText>{item.why}</MathText>
+                    </InfoBox>
+                  )}
+
+                  {item?.consequences && (
+                    <BulletList items={item.consequences} tone="indigo" />
+                  )}
+
+                  <StructuredValue
+                    value={Object.fromEntries(
+                      Object.entries(item || {}).filter(
+                        ([key]) =>
+                          ![
+                            "id",
+                            "question",
+                            "statement",
+                            "transformation",
+                            "title",
+                            "answer",
+                            "why",
+                            "consequences",
+                          ].includes(key),
+                      ),
+                    )}
+                    depth={1}
+                  />
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {Object.keys(remainingContent).length > 0 && (
+        <GenericObjectStep content={remainingContent} />
+      )}
+
+      {content.attention && (
+        <InfoBox title="انتبه" tone="rose" icon={AlertTriangle}>
+          <MathText>{content.attention}</MathText>
+        </InfoBox>
+      )}
+
+      {content.takeaway && (
+        <StepTakeaway>{content.takeaway}</StepTakeaway>
+      )}
+    </div>
+  );
+}
+
+
+function BacMethodStep({ content = {} }) {
+  const algorithm = Array.isArray(content.algorithm)
+    ? content.algorithm.filter(Boolean)
+    : content.algorithm
+      ? [content.algorithm]
+      : [];
+
+  const templates = Array.isArray(content.answer_templates)
+    ? content.answer_templates.filter(Boolean)
+    : content.answer_templates
+      ? [content.answer_templates]
+      : [];
+
+  const manuallyRenderedKeys = new Set([
+    "teacher",
+    "algorithm",
+    "answer_templates",
+    "takeaway",
+    "attention",
+  ]);
+
+  const remainingContent = Object.fromEntries(
+    Object.entries(content).filter(
+      ([key, value]) =>
+        !manuallyRenderedKeys.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    ),
+  );
+
+  return (
+    <div className="space-y-5">
+      {content.teacher && (
+        <section className="rounded-[26px] border border-amber-200 bg-gradient-to-l from-amber-50 via-white to-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center gap-2 text-amber-800">
+            <GraduationCap size={19} />
+            <h3 className="font-black">منهجية الحل في البكالوريا</h3>
+          </div>
+          <MathText className="font-semibold leading-8 text-slate-700">
+            {content.teacher}
+          </MathText>
+        </section>
+      )}
+
+      {algorithm.length > 0 && (
+        <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center gap-2 text-indigo-700">
+            <Route size={19} />
+            <h3 className="font-black text-slate-950">الخطة خطوة بخطوة</h3>
+          </div>
+
+          <div className="space-y-3">
+            {algorithm.map((item, index) => (
+              <div
+                key={`bac-method-${index}`}
+                className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+              >
+                <span className="flex h-8 min-w-8 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-2 text-sm font-black text-white">
+                  {index + 1}
+                </span>
+                <MathText className="min-w-0 flex-1 font-semibold text-slate-700">
+                  {getDisplayText(item)}
+                </MathText>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {templates.length > 0 && (
+        <RevealBox label="صياغات جاهزة للإجابة" tone="emerald">
+          <BulletList items={templates} tone="emerald" />
+        </RevealBox>
+      )}
+
+      {Object.keys(remainingContent).length > 0 && (
+        <GenericObjectStep content={remainingContent} />
+      )}
+
+      {content.attention && (
+        <InfoBox title="انتبه" tone="rose" icon={AlertTriangle}>
+          <MathText>{content.attention}</MathText>
+        </InfoBox>
+      )}
+
+      {content.takeaway && (
+        <StepTakeaway>{content.takeaway}</StepTakeaway>
+      )}
+    </div>
+  );
+}
+
 function StepBody({ step }) {
   const originalContent = step?.content || {};
   const { displayContent: content, lawGuides } =
@@ -14199,6 +17017,19 @@ function StepBody({ step }) {
     case "comparison":
       renderedStep = <ComparisonStep content={content} />;
       break;
+    case "classification":
+      renderedStep = <ClassificationStep content={content} />;
+      break;
+    case "check":
+      renderedStep = <CheckStep content={content} />;
+      break;
+    case "application":
+      renderedStep = <ApplicationStep content={content} />;
+      break;
+    case "bac_method":
+    case "exam_method":
+      renderedStep = <BacMethodStep content={content} />;
+      break;
     case "common_mistakes":
       renderedStep = <CommonMistakesStep content={content} />;
       break;
@@ -14208,6 +17039,15 @@ function StepBody({ step }) {
       break;
     case "summary":
       renderedStep = <SummaryStep content={content} />;
+      break;
+    case "classification_drill":
+      renderedStep = <ClassificationDrillStep content={content} />;
+      break;
+    case "branch_guidance":
+      renderedStep = <BranchGuidanceStep content={content} />;
+      break;
+    case "decision_tree":
+      renderedStep = <DecisionTreeStep content={content} />;
       break;
     default:
       renderedStep = <GenericObjectStep content={content} />;
@@ -14276,6 +17116,9 @@ const STEP_META = {
   explicit_method: { label: "الحد العام", icon: Zap, accent: "from-indigo-500 to-blue-500" },
   recursive_method: { label: "العلاقة التراجعية", icon: Route, accent: "from-emerald-500 to-teal-500" },
   comparison: { label: "مقارنة", icon: ListChecks, accent: "from-slate-600 to-slate-900" },
+  classification: { label: "تصنيف", icon: ListChecks, accent: "from-indigo-500 to-violet-600" },
+  check: { label: "تحقق", icon: CheckCircle2, accent: "from-emerald-500 to-teal-600" },
+  application: { label: "تطبيق", icon: Target, accent: "from-blue-500 to-indigo-600" },
   bac_connection: { label: "البكالوريا", icon: GraduationCap, accent: "from-amber-500 to-rose-500" },
   common_mistakes: { label: "أخطاء شائعة", icon: AlertTriangle, accent: "from-rose-500 to-red-600" },
   mini_quiz: { label: "اختبار سريع", icon: Target, accent: "from-fuchsia-500 to-violet-600" },
@@ -14295,6 +17138,8 @@ const STEP_META = {
   checklist: { label: "قائمة تحقق", icon: CheckCircle2, accent: "from-emerald-500 to-teal-600" },
   strategy: { label: "استراتيجية", icon: Brain, accent: "from-indigo-600 to-slate-900" },
   decision_tree: { label: "شجرة قرار", icon: Route, accent: "from-violet-500 to-indigo-700" },
+  classification_drill: { label: "تدريب على التصنيف", icon: ListChecks, accent: "from-indigo-500 to-violet-600" },
+  branch_guidance: { label: "حسب الشعبة", icon: GraduationCap, accent: "from-sky-500 to-indigo-600" },
   exam_method: { label: "منهجية الامتحان", icon: GraduationCap, accent: "from-amber-500 to-rose-600" },
   comprehensive_flow: { label: "تسلسل شامل", icon: Route, accent: "from-cyan-600 to-indigo-700" },
   self_check: { label: "مراجعة ذاتية", icon: CheckCircle2, accent: "from-emerald-500 to-indigo-600" },
@@ -15050,15 +17895,12 @@ function LessonStepCard({
    * سابقًا كان LessonStepCard يعيد عرض الرسم والتنبيه والخلاصة
    * بعد أن تكون قد ظهرت داخل StepBody، لذلك كانت العناصر تتكرر.
    */
-  const fieldsRenderedInsideBody = getExcludedPedagogicalFields(step?.type);
-
   /*
-   * بعض المراحل المتخصصة تعرض takeaway بنفسها.
-   * نعرض StepTakeaway الخارجي فقط عندما لا يكون معروضًا داخل StepBody.
+   * prepareStepContent يستبعد الحقول البيداغوجية من StepBody، لذلك تصبح
+   * PedagogicalBlocks وStepTakeaway المالكين الوحيدين لعرضها في كل الأنواع.
    */
-  const shouldRenderExternalTakeaway =
-    Boolean(step?.content?.takeaway) &&
-    !fieldsRenderedInsideBody.has("takeaway");
+  const fieldsRenderedInsideBody = new Set();
+  const shouldRenderExternalTakeaway = Boolean(step?.content?.takeaway);
 
   return (
     <article
@@ -16462,6 +19304,74 @@ function isRenderableSeriesGraph(value) {
   return Boolean(normalizeGraph(value));
 }
 
+
+function GraphSupplementalInfo({ graph }) {
+  if (!graph || typeof graph !== "object") return null;
+
+  const ignoredKeys = new Set([
+    "id",
+    "title",
+    "graph_title",
+    "description",
+    "caption",
+    "type",
+    "kind",
+    "diagram_type",
+    "graph_type",
+    "series",
+    "data",
+    "function",
+    "curve",
+    "parameter_lines",
+    "lines",
+    "coordinate_system",
+    "coordinateSystem",
+    "settings",
+    "special_points",
+    "annotations",
+    "x_domain",
+    "y_domain",
+    "x_min",
+    "x_max",
+    "y_min",
+    "y_max",
+    "x_label",
+    "y_label",
+    "svg",
+    "raw_svg",
+    "svg_markup",
+    "svg_content",
+    "render_mode",
+    "responsive",
+  ]);
+
+  const entries = Object.entries(graph).filter(
+    ([key, value]) =>
+      !ignoredKeys.has(key) &&
+      !isEmpty(value) &&
+      !looksLikeSvgMarkup(value) &&
+      !isTechnicalPresentationField(key),
+  );
+
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="grid gap-3 border-t border-indigo-100 bg-indigo-50/35 p-4 sm:grid-cols-2">
+      {entries.map(([key, value]) => (
+        <div
+          key={key}
+          className="min-w-0 rounded-2xl border border-indigo-100 bg-white p-3.5"
+        >
+          <p className="mb-1.5 text-[11px] font-black text-indigo-700">
+            {fieldLabel(key)}
+          </p>
+          <StructuredValue value={value} fieldKey={key} depth={1} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CompleteGraphValue({ value }) {
   if (!value || typeof value !== "object") return null;
 
@@ -16472,12 +19382,22 @@ function CompleteGraphValue({ value }) {
    * التعليمية إلى محور بياني فارغ أو غير مناسب.
    */
   if (isSvgGraph(value)) {
-    return <SvgGraphRenderer graph={value} />;
+    return (
+      <div className="overflow-hidden rounded-[28px]">
+        <SvgGraphRenderer graph={value} />
+        <GraphSupplementalInfo graph={value} />
+      </div>
+    );
   }
 
   // الرسوم العددية/المنحنيات المبنية من points أو series.
   if (isRenderableSeriesGraph(value)) {
-    return <GraphRenderer graph={value} />;
+    return (
+      <div className="overflow-hidden rounded-[30px]">
+        <GraphRenderer graph={value} />
+        <GraphSupplementalInfo graph={value} />
+      </div>
+    );
   }
 
   return null;
@@ -16532,6 +19452,7 @@ function buildLessonMetadata(lesson) {
     estimated_minutes: lesson?.estimated_minutes,
     difficulty: lesson?.difficulty,
     content_status: lesson?.content_status,
+    math_format: lesson?.math_format,
   };
 
   return Object.fromEntries(
@@ -16709,6 +19630,217 @@ function EmptyLessonCard() {
    Main component
 ========================================================= */
 
+
+const INTRO_VISIBLE_FIELDS = new Set([
+  "lesson_intro",
+  "lesson_goal",
+  "prerequisites",
+  "prerequisites_title",
+  "learning_outcomes",
+  "estimated_duration",
+  "estimated_minutes",
+  "difficulty",
+  "title",
+  "axis_title",
+  "chapter_title",
+]);
+
+const LESSON_METADATA_FIELDS = new Set([
+  "schema_version",
+  "version",
+  "language",
+  "direction",
+  "math_format",
+  "chapter_code",
+  "chapter_title",
+  "axis_tag",
+  "axis_title",
+  "axis_id",
+  "estimated_duration",
+  "estimated_minutes",
+  "difficulty",
+  "content_status",
+  "source_note",
+]);
+
+function buildCompleteLessonMetadata(data, lesson, axis) {
+  const rootSource =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? data
+      : {};
+
+  const rawAxis =
+    rootSource?.axis && typeof rootSource.axis === "object"
+      ? rootSource.axis
+      : {};
+
+  const rootMetadata = Object.fromEntries(
+    Object.entries(rootSource).filter(
+      ([key, value]) =>
+        ![
+          "content",
+          "axis",
+          "lesson",
+          "answer",
+          "learning_path",
+          "final_assessment",
+          "success",
+          "error",
+          "errors",
+          "message",
+          "detail",
+          "re_explain_history",
+          "re_explanations",
+          "re_explanation_history",
+          "explanation_history",
+          "history",
+        ].includes(key) &&
+        !isEmpty(value),
+    ),
+  );
+
+  const axisMetadata = Object.fromEntries(
+    Object.entries(rawAxis || {}).filter(
+      ([key, value]) =>
+        key !== "content" &&
+        !isEmpty(value) &&
+        ![
+          "re_explain_history",
+          "re_explanations",
+          "re_explanation_history",
+        ].includes(key),
+    ),
+  );
+
+  // عندما تكون البيانات JSON مباشرة وليست داخل data.axis،
+  // نضيف خصائص المحور العليا (tag/title/order/branches...) أيضًا.
+  const directAxisMetadata =
+    !rootSource?.axis && rootSource?.content
+      ? Object.fromEntries(
+          Object.entries(rootSource).filter(
+            ([key, value]) =>
+              key !== "content" &&
+              !isEmpty(value),
+          ),
+        )
+      : {};
+
+  const lessonMetadata = Object.fromEntries(
+    Object.entries(lesson || {}).filter(
+      ([key, value]) =>
+        LESSON_METADATA_FIELDS.has(key) &&
+        !isEmpty(value),
+    ),
+  );
+
+  const result = {};
+
+  const mergedAxisMetadata = {
+    ...directAxisMetadata,
+    ...rootMetadata,
+    ...axisMetadata,
+  };
+
+  if (Object.keys(mergedAxisMetadata).length > 0) {
+    result["بيانات المحور"] = mergedAxisMetadata;
+  }
+
+  if (Object.keys(lessonMetadata).length > 0) {
+    result["بيانات الدرس"] = lessonMetadata;
+  }
+
+  if (axis && typeof axis === "object") {
+    const normalizedAxisMetadata = Object.fromEntries(
+      Object.entries(axis).filter(
+        ([key, value]) =>
+          key !== "content" &&
+          !isEmpty(value),
+      ),
+    );
+
+    if (
+      Object.keys(normalizedAxisMetadata).length > 0 &&
+      !result["بيانات المحور"]
+    ) {
+      result["بيانات المحور"] = normalizedAxisMetadata;
+    }
+  }
+
+  return result;
+}
+
+function buildAdditionalLessonPages(data, lesson, axis) {
+  if (!lesson || typeof lesson !== "object") return [];
+
+  const excluded = new Set([
+    "learning_path",
+    "final_assessment",
+    "lesson_intro",
+    "lesson_goal",
+    "prerequisites",
+    "prerequisites_title",
+    "learning_outcomes",
+    "estimated_duration",
+    "estimated_minutes",
+    "difficulty",
+    "title",
+    "axis_title",
+    "axis_tag",
+    "axis_id",
+    "chapter_title",
+    "chapter_code",
+    "language",
+    "direction",
+    "schema_version",
+    "version",
+    "math_format",
+    "content_status",
+    "source_note",
+    "re_explain_history",
+    "re_explanations",
+    "re_explanation_history",
+  ]);
+
+  const pages = Object.entries(lesson)
+    .filter(
+      ([key, value]) =>
+        !excluded.has(key) &&
+        !isEmpty(value) &&
+        !isTechnicalPresentationField(key) &&
+        !looksLikeSvgMarkup(value),
+    )
+    .map(([sectionKey, content], index) => {
+      const meta = getTopLevelPageMeta(sectionKey);
+      return {
+        id: `top-level-${sectionKey}-${index}`,
+        type: "top_level_section",
+        pageRole: "top_level_section",
+        sectionKey,
+        title: meta.title || fieldLabel(sectionKey) || "معلومات إضافية",
+        label: meta.label || "معلومات",
+        icon: meta.icon || BookOpen,
+        content,
+      };
+    });
+
+  const metadata = buildCompleteLessonMetadata(data, lesson, axis);
+
+  if (Object.keys(metadata).length > 0) {
+    pages.push({
+      id: "lesson-all-metadata",
+      type: "top_level_section",
+      pageRole: "top_level_section",
+      sectionKey: "lesson_metadata",
+      title: "معلومات الدرس والبيانات",
+      label: "المعلومات",
+      icon: ListChecks,
+      content: metadata,
+    });
+  }
+
+  return pages;
+}
+
 function LessonCourseAnswer({
   data,
   axisId,
@@ -16772,51 +19904,24 @@ function LessonCourseAnswer({
   const pages = useMemo(() => {
     if (!lesson) return [];
 
-    // نعرض مقدمة الدرس ثم learning_path فقط.
-    // إذا وُجد التقويم النهائي داخل learning_path نتوقف عنده،
-    // ولا نعرض أي مرحلة تأتي بعده.
-    const finalAssessmentIndex = learningPath.findIndex(
-      (step) => step?.type === "final_assessment",
-    );
-
-    const visibleLearningPath =
-      finalAssessmentIndex >= 0
-        ? learningPath.slice(0, finalAssessmentIndex + 1)
-        : learningPath;
-
-    const result = [
-      {
-        id: "lesson-intro",
-        type: "lesson_intro",
-        title: "مقدمة الدرس",
-        label: "البداية",
-        icon: Sparkles,
-      },
-      ...visibleLearningPath.map((step, index) => ({
-        ...step,
-        id: step.id || `step-${index + 1}`,
-        label: STEP_META[step.type]?.label || "شرح",
-        icon: STEP_META[step.type]?.icon || BookOpen,
-      })),
-    ];
-
-    // إذا لم يكن التقويم النهائي موجودًا داخل learning_path،
-    // نضيف التقويم النهائي المستقل كآخر بطاقة في الدرس.
-    if (finalAssessmentIndex === -1 && lesson.final_assessment) {
-      result.push({
-        id: "standalone-final-assessment",
-        type: "final_assessment",
-        pageRole: "standalone_final_assessment",
-        title:
-          lesson.final_assessment?.title ||
-          "التقييم الختامي",
-        label: "التقييم",
-        icon: Trophy,
-        content: lesson.final_assessment,
-      });
-    }
-
-    return result;
+    /*
+     * قاعدة العرض النهائية:
+     * - نعرض فقط العناصر الموجودة فعليًا داخل lesson.learning_path.
+     * - لا ننشئ صفحات من lesson_intro أو lesson_goal أو metadata أو أي حقل علوي آخر.
+     * - لا نضيف final_assessment من خارج learning_path.
+     * - إذا كان final_assessment موجودًا داخل learning_path فسيظهر طبيعيًا كأي مرحلة أخرى.
+     *
+     * بهذه القاعدة يصبح عدد البطاقات في الواجهة مطابقًا 100% لعدد مراحل learning_path.
+     */
+    return learningPath.map((step, index) => ({
+      ...step,
+      id: step?.id || `step-${index + 1}`,
+      label:
+        STEP_META[step?.type]?.label ||
+        fieldLabel(step?.type) ||
+        `المرحلة ${index + 1}`,
+      icon: STEP_META[step?.type]?.icon || BookOpen,
+    }));
   }, [lesson, learningPath]);
 
   if (!lesson) return null;

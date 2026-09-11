@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CircleHelp,
   Eye,
   EyeOff,
   GraduationCap,
@@ -120,9 +119,31 @@ function getVisualSource(value) {
     }
   }
 
-  // media/... أو static/... أو uploads/... إلخ.
+  // توحيد المسار النسبي.
   const normalizedPath = source.startsWith("/") ? source : `/${source}`;
 
+  /*
+   * ملفات دروس العلوم موجودة داخل:
+   * Front/bac_frontend/public/science/...
+   *
+   * ملفات public في Vite تُخدَّم من أصل الواجهة الأمامية مباشرة،
+   * لذلك /science/... يجب ألا يُحوَّل إلى خادم Django.
+   *
+   * مثال:
+   * /science/protein-synthesis/axis-01/autoradiography_micrograph.png
+   * يصبح:
+   * http://localhost:5173/science/protein-synthesis/axis-01/autoradiography_micrograph.png
+   */
+  if (
+    normalizedPath === "/science" ||
+    normalizedPath.startsWith("/science/")
+  ) {
+    return `${window.location.origin}${normalizedPath}`;
+  }
+
+  /*
+   * باقي المسارات النسبية مثل /media/... تبقى على خادم Django.
+   */
   return `${BACKEND_ORIGIN}${normalizedPath}`;
 }
 
@@ -143,7 +164,10 @@ function getSimpleSolutionUrl(questionId) {
 }
 
 function hasText(value) {
-  return typeof value === "string" && value.trim().length > 0;
+  if (value === null || value === undefined || value === false) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number" || typeof value === "bigint") return true;
+  return toDisplayString(value).trim().length > 0;
 }
 
 function containsArabic(value) {
@@ -249,28 +273,62 @@ function cn(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
-function toDisplayString(value) {
-  if (value === null || value === undefined) return "";
+function toDisplayString(value, seen = new WeakSet()) {
+  if (value === null || value === undefined || value === false) return "";
 
   if (
     typeof value === "string" ||
-    typeof value === "number"
+    typeof value === "number" ||
+    typeof value === "bigint"
   ) {
     return String(value);
   }
 
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toDisplayString(item, seen))
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join("\\n");
+  }
+
   if (typeof value === "object") {
-    return String(
-      value.text ??
-      value.content ??
-      value.title ??
-      value.description ??
-      value.explanation ??
-      value.result ??
-      value.answer ??
-      value.value ??
-      ""
-    );
+    if (seen.has(value)) return "";
+    seen.add(value);
+
+    const preferredKeys = [
+      "text",
+      "content",
+      "title",
+      "description",
+      "explanation",
+      "detailed_explanation",
+      "result",
+      "final_result",
+      "final_answer",
+      "answer",
+      "formula",
+      "equation",
+      "math",
+      "value",
+      "label",
+      "meaning",
+    ];
+
+    for (const key of preferredKeys) {
+      if (value[key] !== null && value[key] !== undefined) {
+        const rendered = toDisplayString(value[key], seen).trim();
+        if (rendered) return rendered;
+      }
+    }
+
+    // بعض استجابات الـ API تعيد كائنًا بسيطًا بلا مفاتيح موحدة.
+    // بدلاً من إظهار [object Object]، نجمع القيم النصية المفيدة فقط.
+    return Object.values(value)
+      .map((item) => toDisplayString(item, seen))
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join("\\n");
   }
 
   return String(value);
@@ -311,12 +369,18 @@ function decodeBrokenText(value) {
     // نطبّق الإصلاح هنا مبكرًا حتى تستفيد منه كل أماكن العرض.
     .replace(/\\?leftrightarrow\s*(?=[A-Za-z0-9_\\{(])/gi, "\\leftrightarrow ")
     .replace(/\\?(?:longrightarrow|rightarrow|arrow)\s*(?=[A-Za-z0-9_\\{(])/gi, "\\rightarrow ")
+    // أهم إصلاح للصيغ القادمة مثل x\\to4 أو f(x)\\to9.
+    // نضيف مسافة بعد الأمر حتى يتعرف MathJax عليه كأمر مستقل.
+    .replace(/\\to\s*(?=[A-Za-z0-9_\\{(\[+\-]|$)/gi, "\\to ")
     .replace(/\r\n?/g, "\n")
     .replace(/\\r\\n/g, "\n")
     // نحول \\n المكتوبة حرفيًا إلى سطر فقط عندما لا تكون بداية أمر مثل \\neq.
     .replace(/\\n(?=\s|[0-9\u0600-\u06FF([{]|$)/g, "\n")
     .replace(/\\t(?=\s|[0-9\u0600-\u06FF([{]|$)/g, " ")
     .replace(/\u000c\s*rac/gi, "\\frac")
+    // إذا وصل JSON بصيغة x\to4 غير مهروبة جيدًا فقد تتحول \\t إلى Tab.
+    // نعيد بناء \\to قبل تنظيف المسافات.
+    .replace(/\u0009\s*o(?=[A-Za-z0-9_\\{(\[+\-]|$)/gi, "\\to ")
     .replace(/\u0009\s*imes/gi, "\\times")
     .replace(/\u0008\s*egin/gi, "\\begin")
     .replace(/\u0007\s*lpha/gi, "\\alpha")
@@ -413,6 +477,7 @@ function repairLatexCommands(value) {
     // أسهم مكتوبة كنص عادي أو ملتصقة بالصيغة التالية.
     .replace(/\\?leftrightarrow\s*(?=[A-Za-z0-9_\\{(]|$)/gi, "\\leftrightarrow ")
     .replace(/\\?(?:longrightarrow|rightarrow|arrow)\s*(?=[A-Za-z0-9_\\{(]|$)/gi, "\\rightarrow ")
+    .replace(/\\to\s*(?=[A-Za-z0-9_\\{(\[+\-]|$)/gi, "\\to ")
     .replace(/(^|[^A-Za-z\\])Rightarrow(?=$|[^A-Za-z])/g, "$1\\Rightarrow")
     .replace(/(^|[^A-Za-z\\])Leftrightarrow(?=$|[^A-Za-z])/g, "$1\\Leftrightarrow")
     // توحيد كتابة الشحنات والأسس البسيطة مثل I^- و e-.
@@ -478,6 +543,7 @@ function normalizeMathFormula(value) {
     // حماية أخيرة قبل إرسال الصيغة إلى MathJax.
     .replace(/\\?leftrightarrow\s*(?=[A-Za-z0-9_\\{(]|$)/gi, "\\leftrightarrow ")
     .replace(/\\?(?:longrightarrow|rightarrow|arrow)\s*(?=[A-Za-z0-9_\\{(]|$)/gi, "\\rightarrow ")
+    .replace(/\\to\s*(?=[A-Za-z0-9_\\{(\[+\-]|$)/gi, "\\to ")
     .replace(/\\\(|\\\)|\\\[|\\\]/g, "")
     .replace(/^\$+|\$+$/g, "")
     .replace(/\$+/g, "")
@@ -530,7 +596,7 @@ function looksLikeMathFragment(value) {
   if (!compact) return false;
 
   return (
-    /\\(?:frac|dfrac|tfrac|sqrt|sum|prod|lim|infty|cdot|times|div|leq?|geq?|neq|approx|simeq|sim|pm|mp|to|rightarrow|longrightarrow|leftrightarrow|Rightarrow|Leftrightarrow|mathbb|mathrm|text|operatorname|forall|exists|boxed)\b/.test(text) ||
+    /\\(?:frac|dfrac|tfrac|sqrt|sum|prod|lim|infty|cdot|times|div|leq?|geq?|neq|approx|simeq|sim|pm|mp|to|rightarrow|longrightarrow|leftrightarrow|Rightarrow|Leftrightarrow|mathbb|mathrm|text|operatorname|forall|exists|boxed)(?=$|[^A-Za-z])/.test(text) ||
     /[A-Za-z](?:_\{?[^}\s]+\}?|\^\{?[^}\s]+\}?)/.test(text) ||
     /[A-Za-z0-9})\]]\s*(?:=|<|>|\\leq|\\geq|\\neq)\s*[A-Za-z0-9({\\+-]/.test(text) ||
     /^[A-Za-z](?:'|_\{?[^}\s]+\}?)?\s*=/.test(text) ||
@@ -661,6 +727,9 @@ function cleanPlainTextSegment(value) {
   return String(value || "")
     .replace(/\\?leftrightarrow\s*(?=[A-Za-z0-9_\\{(]|$)/gi, " ↔ ")
     .replace(/\\?(?:longrightarrow|rightarrow|arrow)\s*(?=[A-Za-z0-9_\\{(]|$)/gi, " → ")
+    .replace(/\\to\s*(?=[A-Za-z0-9_\\{(\[+\-]|$)/gi, " → ")
+    .replace(/\\Rightarrow\s*/g, " ⇒ ")
+    .replace(/\\Leftrightarrow\s*/g, " ⇔ ")
     .replace(/\\+[()[\]]/g, "")
     .replace(/\\+([A-Za-z])(?=_(?:\{|[A-Za-z0-9]))/g, "$1")
     .replace(/\\+(?=[{}])/g, "")
@@ -759,17 +828,29 @@ function MathTextParser({
   display = false,
   dir = "rtl",
   as: Component,
+  compact = false,
 }) {
   const lines = splitRenderableLines(text);
   if (!lines.length) return null;
 
-  const Tag = Component || (lines.length > 1 ? "div" : "span");
+  /*
+   * كان الـ renderer القديم يستعمل <span> للحالة ذات السطر الواحد،
+   * ثم يضع داخله <div>. هذا HTML غير صالح وقد يسبب قفزات ومساحات
+   * غريبة بعد hydration أو عند إعادة MathJax للـ typesetting.
+   * نستعمل حاوية block افتراضيًا ونحافظ على as فقط عند الحاجة.
+   */
+  const Tag = Component || "div";
 
   return (
     <Tag
       dir={dir}
       className={cn(
-        lines.length > 1 ? "block space-y-2" : "whitespace-pre-wrap break-words",
+        "min-w-0 max-w-full",
+        lines.length > 1
+          ? compact
+            ? "space-y-0.5"
+            : "space-y-1.5"
+          : "whitespace-pre-wrap break-words",
         className,
       )}
       style={{
@@ -782,8 +863,9 @@ function MathTextParser({
     >
       {lines.map((line, lineIndex) => {
         const formulaOnly = shouldUseDisplayMath(line);
+        const useDisplayMath = formulaOnly || (display && !containsArabic(line));
 
-        if (formulaOnly || (display && !containsArabic(line))) {
+        if (useDisplayMath) {
           const formula = normalizeMathFormula(line);
           if (!formula) return null;
 
@@ -791,7 +873,10 @@ function MathTextParser({
             <div
               key={`display-${lineIndex}`}
               dir="ltr"
-              className="w-full max-w-full overflow-x-auto overscroll-x-contain py-1 text-center"
+              className={cn(
+                "bac-math-display w-full max-w-full overflow-x-auto overscroll-x-contain text-center",
+                compact ? "py-0" : "py-0.5",
+              )}
               style={{ direction: "ltr", unicodeBidi: "isolate" }}
             >
               <MathJax dynamic hideUntilTypeset="first">
@@ -805,7 +890,7 @@ function MathTextParser({
           <div
             key={`line-${lineIndex}`}
             dir={dir}
-            className="min-w-0 whitespace-pre-wrap break-words"
+            className="min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
             style={{ direction: dir, unicodeBidi: "plaintext" }}
           >
             <InlineMathSegments value={line} dir={dir} />
@@ -884,7 +969,13 @@ function parseAIResponse(value) {
   }
 }
 
-export default function BacExercisesList({ data }) {
+export default function BacExercisesList({
+  data,
+  onTutorExerciseChange,
+  onTutorQuestionChange,
+  onTutorStepChange,
+  onTutorViewStateChange,
+}) {
   const { token } = useContext(UserContext);
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -922,6 +1013,55 @@ export default function BacExercisesList({ data }) {
   }, [data]);
 
   const currentQuestion = questions[currentIndex] || null;
+
+  useEffect(() => {
+    if (!currentQuestion) {
+      onTutorExerciseChange?.(null);
+      onTutorQuestionChange?.(null);
+      onTutorStepChange?.(null);
+      return;
+    }
+
+    const text =
+      currentQuestion.standalone_text ||
+      currentQuestion.displayed_text ||
+      currentQuestion.text ||
+      "";
+
+    const contextPayload = {
+      kind: "axis_question",
+      id: currentQuestion.id,
+      code: currentQuestion.code || "",
+      title:
+        currentQuestion.title ||
+        `السؤال ${currentQuestion.number || currentIndex + 1}`,
+      text,
+      difficulty: currentQuestion.difficulty || "",
+      skill: currentQuestion.skill || "",
+      year: currentQuestion.year ?? null,
+      axis_tags: currentQuestion.axis_tags || [],
+    };
+
+    onTutorExerciseChange?.(contextPayload);
+    onTutorQuestionChange?.({
+      id: currentQuestion.id,
+      code: currentQuestion.code || "",
+      number:
+        currentQuestion.number ??
+        currentQuestion.display_order ??
+        currentIndex + 1,
+      title: currentQuestion.title || "",
+      text,
+      skill: currentQuestion.skill || "",
+    });
+    onTutorStepChange?.(null);
+  }, [
+    currentQuestion,
+    currentIndex,
+    onTutorExerciseChange,
+    onTutorQuestionChange,
+    onTutorStepChange,
+  ]);
 
   const currentGraphData = normalizeObject(
     currentQuestion?.graph_data,
@@ -972,6 +1112,19 @@ export default function BacExercisesList({ data }) {
 
   const isSimpleExplanationVisible =
     Boolean(visibleSimpleExplanations[questionKey]);
+
+  useEffect(() => {
+    onTutorViewStateChange?.({
+      solution_visible: isStoredSolutionVisible,
+      alternative_solution_visible: false,
+      visible_hints: 0,
+      showing_reexplanation: isSimpleExplanationVisible,
+    });
+  }, [
+    isStoredSolutionVisible,
+    isSimpleExplanationVisible,
+    onTutorViewStateChange,
+  ]);
 
   const isLoading = loadingQuestionId === questionKey;
 
@@ -1210,6 +1363,23 @@ export default function BacExercisesList({ data }) {
           overflow: visible !important;
         }
 
+        /* MathJax يضيف افتراضيًا هوامش كبيرة للمعادلات display.
+           تقليلها يمنع الفراغات العمودية الضخمة خصوصًا في النتيجة النهائية. */
+        .bac-responsive-root mjx-container[jax="CHTML"][display="true"] {
+          max-width: 100% !important;
+          margin: 0.28rem 0 !important;
+          overflow-x: auto;
+          overflow-y: hidden;
+        }
+
+        .bac-responsive-root .bac-final-answer mjx-container[jax="CHTML"][display="true"] {
+          margin: 0 !important;
+        }
+
+        .bac-responsive-root .bac-final-answer .bac-math-display {
+          scrollbar-width: thin;
+        }
+
         @media (max-width: 359px) {
           .bac-responsive-root button {
             touch-action: manipulation;
@@ -1223,7 +1393,15 @@ export default function BacExercisesList({ data }) {
           total={questions.length}
         />
 
-        <article className="overflow-hidden rounded-2xl sm:rounded-[32px] border border-slate-200/80 bg-white shadow-[0_20px_70px_-38px_rgba(15,23,42,0.4)]">
+        <article
+          data-tutor-context
+          data-tutor-exercise-kind="axis_question"
+          data-tutor-exercise-id={currentQuestion?.id ?? ""}
+          data-tutor-question-id={currentQuestion?.id ?? ""}
+          data-tutor-question-number={currentQuestion?.number ?? currentIndex + 1}
+          data-tutor-title={currentQuestion?.title || `السؤال ${currentIndex + 1}`}
+          className="overflow-hidden rounded-2xl sm:rounded-[32px] border border-slate-200/80 bg-white shadow-[0_20px_70px_-38px_rgba(15,23,42,0.4)]"
+        >
           <ExerciseNavigation
             currentIndex={currentIndex}
             total={questions.length}
@@ -1298,7 +1476,7 @@ function ExercisesHeader({ axis, currentIndex, total }) {
     <header className="mb-5 overflow-hidden rounded-2xl sm:rounded-[30px] border border-blue-100 bg-white shadow-sm">
       <div className="bg-gradient-to-l from-blue-600 via-indigo-600 to-violet-600 px-4 py-5 text-white sm:px-7 sm:py-7">
         <div className="flex min-w-0 items-start gap-3 sm:gap-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15 p-2.5 backdrop-blur sm:h-13 sm:w-13 sm:rounded-2xl sm:p-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/15 p-2.5 backdrop-blur sm:h-14 sm:w-14 sm:rounded-2xl sm:p-3">
             <GraduationCap size={29} />
           </div>
 
@@ -3771,6 +3949,57 @@ function AIHelpCard({
   );
 }
 
+function normalizeFinalAnswerText(value) {
+  let text = cleanSolutionMathText(toDisplayString(value));
+  if (!text) return "";
+
+  text = repairMathDelimiters(text)
+    // لا نترك حرف العطف في سطر مستقل؛ هذا كان سببًا مباشرًا
+    // في ظهور: x\\to4 / و / f(x)\\to9 على ثلاثة أسطر متباعدة.
+    .replace(/\n+\s*(و|أو|ثم)\s*\n+/g, " $1 ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return text;
+}
+
+function FinalAnswerCard({
+  answer,
+  label = "النتيجة النهائية",
+  className = "",
+}) {
+  const text = normalizeFinalAnswerText(answer);
+  if (!text) return null;
+
+  return (
+    <div
+      className={cn(
+        "bac-final-answer overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-l from-emerald-50 via-teal-50/60 to-white shadow-[0_12px_36px_-28px_rgba(5,150,105,0.55)]",
+        className,
+      )}
+      dir="rtl"
+    >
+      <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:px-5">
+        <div className="flex shrink-0 items-center gap-2.5 text-emerald-800">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm">
+            <CheckCircle2 size={19} strokeWidth={2.6} />
+          </span>
+          <p className="text-sm font-black sm:text-[15px]">{label}</p>
+        </div>
+
+        <div className="min-w-0 flex-1 rounded-xl border border-emerald-100 bg-white/90 px-3.5 py-2.5 shadow-sm sm:px-4 sm:py-3">
+          <MathTextParser
+            text={text}
+            compact
+            className="text-[15px] font-black leading-7 text-slate-950 sm:text-[17px] sm:leading-8"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StoredSolution({ solution }) {
   const normalizedSolution = normalizeObject(solution);
   const simpleSolution = getStoredSimpleSolution(normalizedSolution);
@@ -3790,8 +4019,14 @@ function StoredSolution({ solution }) {
 
   const finalAnswer =
     normalizedSolution.final_answer ||
+    normalizedSolution.final_math ||
+    normalizedSolution.answer ||
+    normalizedSolution.result ||
+    normalizedSolution.conclusion ||
     simpleSolution.final_answer ||
-    simpleSolution.answer;
+    simpleSolution.final_math ||
+    simpleSolution.answer ||
+    simpleSolution.result;
 
   return (
     <section className="mt-7 overflow-hidden rounded-2xl border border-emerald-100 bg-white shadow-sm" dir="rtl">
@@ -3845,18 +4080,11 @@ function StoredSolution({ solution }) {
         ) : null}
 
         {finalAnswer && (
-          <div className="mt-7 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 sm:px-5">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 size={20} className="mt-1 shrink-0 text-emerald-600" />
-              <div className="min-w-0 flex-1">
-                <p className="mb-1.5 text-xs font-black text-emerald-700">النتيجة النهائية</p>
-                <MathTextParser
-                  text={finalAnswer}
-                  className="text-base font-black leading-9 text-slate-950 sm:text-[17px]"
-                />
-              </div>
-            </div>
-          </div>
+          <FinalAnswerCard
+            answer={finalAnswer}
+            label="النتيجة النهائية"
+            className="mt-7"
+          />
         )}
       </div>
     </section>
@@ -3888,17 +4116,14 @@ function SimpleStoredSolution({ solution }) {
       )}
 
       {finalAnswer && (
-        <div className="rounded-2xl bg-emerald-50 px-4 py-4">
-          <p className="mb-1 text-xs font-black text-emerald-700">الجواب النهائي</p>
-          <MathTextParser text={finalAnswer} className="font-black leading-9 text-slate-950" />
-        </div>
+        <FinalAnswerCard answer={finalAnswer} label="الجواب النهائي" />
       )}
     </div>
   );
 }
 
 function isMeaninglessSolutionText(value) {
-  const text = String(value ?? "")
+  const text = toDisplayString(value)
     .replace(/\u200B|\u200C|\u200D|\uFEFF/g, "")
     .replace(/\\(?:,|;|!|qquad\b|quad\b)/g, " ")
     .replace(/[\s\-–—_=.:؛،]+/g, "")
@@ -3908,7 +4133,7 @@ function isMeaninglessSolutionText(value) {
 }
 
 function cleanSolutionMathText(value) {
-  let text = String(value ?? "")
+  let text = toDisplayString(value)
     .replace(/\\r\\n|\\n/g, "\n")
     .replace(/\r\n?/g, "\n")
     // إصلاح متغيرات مختلطة بالعربية داخل LaTeX مثل t_نهاية.
@@ -4034,7 +4259,14 @@ function StoredSolutionStep({ step, index, isLast = false }) {
   if (!hasContent) return null;
 
   return (
-    <div className="relative flex gap-4 pb-7 last:pb-0 sm:gap-5">
+    <div
+      data-tutor-context
+      data-tutor-step-id={normalizedStep.id ?? normalizedStep.step_id ?? number}
+      data-tutor-step-number={number}
+      data-tutor-step-title={title || `الخطوة ${number}`}
+      data-tutor-step-type="solution_step"
+      className="relative flex gap-4 pb-7 last:pb-0 sm:gap-5"
+    >
       {/* مسار الخطوات */}
       <div className="relative flex w-9 shrink-0 justify-center">
         {!isLast && (
@@ -4301,13 +4533,10 @@ function SimpleExplanation({
         )}
 
         {normalizedExplanation?.final_answer && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 sm:p-5">
-            <div className="mb-2 flex items-center gap-2 font-black text-emerald-800">
-              <CheckCircle2 size={19} />
-              الجواب النهائي
-            </div>
-            <MathBox text={normalizedExplanation.final_answer} variant="green" />
-          </div>
+          <FinalAnswerCard
+            answer={normalizedExplanation.final_answer}
+            label="الجواب النهائي"
+          />
         )}
 
         {normalizedExplanation?.verification && (
@@ -4386,67 +4615,6 @@ function ErrorMessage({
         />
         إعادة المحاولة
       </button>
-    </div>
-  );
-}
-
-function MathBox({
-  text,
-  className = "",
-  variant = "default",
-}) {
-  const variants = {
-    default: "border-slate-200 bg-slate-50 text-slate-900",
-    green: "border-emerald-200 bg-white text-emerald-950",
-    amber: "border-amber-200 bg-white text-amber-950",
-  };
-
-  if (!hasText(text)) return null;
-
-  const lines = splitRenderableLines(text);
-  if (!lines.length) return null;
-
-  const formulaOnlyBox = lines.every((line) => shouldUseDisplayMath(line));
-
-  return (
-    <div
-      dir={formulaOnlyBox ? "ltr" : "rtl"}
-      className={cn(
-        "overflow-hidden rounded-2xl border p-4",
-        variants[variant] || variants.default,
-        className,
-      )}
-      style={{
-        direction: formulaOnlyBox ? "ltr" : "rtl",
-        unicodeBidi: "isolate",
-      }}
-    >
-      <div className="space-y-3">
-        {lines.map((line, index) => {
-          const formulaOnly = shouldUseDisplayMath(line);
-
-          return (
-            <div
-              key={`math-box-line-${index}`}
-              className={cn(
-                "min-w-0",
-                formulaOnly
-                  ? "overflow-x-auto rounded-xl bg-white/60 px-3 py-2 text-center"
-                  : "text-right",
-              )}
-            >
-              <MathTextParser
-                text={line}
-                display={formulaOnly}
-                className={cn(
-                  "font-semibold leading-9",
-                  formulaOnly ? "text-lg" : "text-base sm:text-lg",
-                )}
-              />
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 525" role="img" aria-label="الشكل 3: التركيب الأول RL">
+<rect width="100%" height="100%" fill="white"/>
+
+<defs>
+  <marker id="arr3" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#111827"/>
+  </marker>
+</defs>
+
+<!-- generator -->
+<circle cx="430" cy="105" r="48" fill="white" stroke="#111827" stroke-width="4"/>
+<path d="M145 105 H382 M478 105 H755 V365" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="430" y="38" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">E</text>
+<text x="393" y="91" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">−</text>
+<text x="463" y="91" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">+</text>
+
+<!-- ground at left -->
+<path d="M145 105 V365" stroke="#111827" stroke-width="4"/>
+<line x1="115" y1="365" x2="175" y2="365" stroke="#111827" stroke-width="3"/>
+<line x1="125" y1="378" x2="165" y2="378" stroke="#111827" stroke-width="3"/>
+<line x1="135" y1="391" x2="155" y2="391" stroke="#111827" stroke-width="3"/>
+
+<!-- R2 -->
+<path d="M145 315 H205" stroke="#111827" stroke-width="4"/>
+<rect x="205" y="282" width="125" height="66" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="267" y="325" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">R₂</text>
+
+<!-- y1 -->
+<circle cx="350" cy="315" r="6" fill="#111827"/>
+<path d="M330 315 H350" stroke="#111827" stroke-width="4"/>
+<line x1="350" y1="315" x2="350" y2="405" stroke="#111827" stroke-width="3" marker-end="url(#arr3)"/>
+<text x="365" y="415" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">y₁</text>
+
+<!-- coil L,r -->
+<path d="M350 315 H385" stroke="#111827" stroke-width="4"/>
+<path d="M385 315
+ c18 -30 36 -30 54 0
+ c18 30 36 30 54 0
+ c18 -30 36 -30 54 0
+ c18 30 36 30 54 0" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="495" y="275" text-anchor="middle" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">(L , r)</text>
+
+<!-- y2 -->
+<circle cx="625" cy="315" r="6" fill="#111827"/>
+<path d="M601 315 H625" stroke="#111827" stroke-width="4"/>
+<line x1="625" y1="315" x2="625" y2="405" stroke="#111827" stroke-width="3" marker-end="url(#arr3)"/>
+<text x="640" y="415" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">y₂</text>
+
+<!-- R1 -->
+<path d="M625 315 H655" stroke="#111827" stroke-width="4"/>
+<rect x="655" y="282" width="90" height="66" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="700" y="325" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">R₁</text>
+
+<!-- switch -->
+<path d="M745 315 H780" stroke="#111827" stroke-width="4"/>
+<circle cx="780" cy="315" r="7" fill="#111827"/>
+<circle cx="830" cy="315" r="7" fill="#111827"/>
+<line x1="780" y1="315" x2="823" y2="287" stroke="#111827" stroke-width="4"/>
+<text x="795" y="270" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">K</text>
+<path d="M830 315 V105 H755" stroke="#111827" stroke-width="4" fill="none"/>
+
+<text x="450" y="500" text-anchor="middle" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الشكل 3</text>
+
+</svg>

@@ -1,6 +1,7 @@
 // src/layouts/AppLayout.jsx
 
 import {
+  useContext,
   useEffect,
   useState,
 } from "react";
@@ -15,6 +16,10 @@ import {
 
 import Sidebar from "../components/Sidebar";
 
+import {
+  UserContext,
+} from "../Utils/UserContext";
+
 export default function AppLayout({
   children,
 }) {
@@ -22,6 +27,12 @@ export default function AppLayout({
     id_subjects,
     id_chapter,
   } = useParams();
+
+  const {
+    current_axis,
+  } =
+    useContext(UserContext) ||
+    {};
 
   const [
     collapsed,
@@ -32,6 +43,27 @@ export default function AppLayout({
     mobileSidebarOpen,
     setMobileSidebarOpen,
   ] = useState(false);
+
+  /*
+   * لا نعرض رقم الفصل كعنوان.
+   * العنوان الحقيقي يصل من Sidebar بعد قراءة الـ API.
+   */
+  const [
+    currentUnit,
+    setCurrentUnit,
+  ] = useState({
+    id: id_chapter,
+    title: "الوحدة الحالية",
+    description: "",
+  });
+
+  useEffect(() => {
+    setCurrentUnit({
+      id: id_chapter,
+      title: "الوحدة الحالية",
+      description: "",
+    });
+  }, [id_chapter]);
 
   /*
    * إغلاق القائمة على الهاتف باستعمال Escape.
@@ -113,6 +145,12 @@ export default function AppLayout({
     };
   }, []);
 
+  const axisTitle =
+    current_axis?.title ||
+    current_axis?.name ||
+    current_axis?.axis_title ||
+    "";
+
   return (
     <div
       dir="rtl"
@@ -143,6 +181,9 @@ export default function AppLayout({
           setMobileSidebarOpen(
             false,
           )
+        }
+        onUnitChange={
+          setCurrentUnit
         }
       />
 
@@ -188,7 +229,7 @@ export default function AppLayout({
                 true,
               )
             }
-            aria-label="فتح قائمة الدرس"
+            aria-label="فتح قائمة الوحدة"
             className="
               flex
               h-10
@@ -224,8 +265,22 @@ export default function AppLayout({
               min-[380px]:px-3
             "
           >
-            <h1
+            <p
               className="
+                text-[10px]
+                font-black
+                text-blue-500
+              "
+            >
+              الوحدة الحالية
+            </p>
+
+            <h1
+              title={
+                currentUnit?.title
+              }
+              className="
+                mt-0.5
                 truncate
                 text-sm
                 font-black
@@ -234,10 +289,12 @@ export default function AppLayout({
                 sm:text-base
               "
             >
-              الدرس التعليمي
+              {currentUnit?.title ||
+                "الوحدة الحالية"}
             </h1>
 
             <p
+              title={axisTitle}
               className="
                 mt-0.5
                 hidden
@@ -246,12 +303,13 @@ export default function AppLayout({
                 font-semibold
                 text-slate-400
 
-                min-[360px]:block
+                min-[390px]:block
 
                 sm:text-xs
               "
             >
-              اختر المحور من القائمة الجانبية
+              {axisTitle ||
+                "اختر المحور من القائمة الجانبية"}
             </p>
           </div>
 

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" role="img" aria-label="جدول قيم L وR للتجارب الثلاث">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<rect x="120" y="80" width="650" height="260" fill="white" stroke="#111827" stroke-width="3"/>
+<line x1="260" y1="80" x2="260" y2="340" stroke="#111827" stroke-width="2"/>
+<line x1="430" y1="80" x2="430" y2="340" stroke="#111827" stroke-width="2"/>
+<line x1="600" y1="80" x2="600" y2="340" stroke="#111827" stroke-width="2"/>
+<line x1="120" y1="165" x2="770" y2="165" stroke="#111827" stroke-width="2"/>
+<line x1="120" y1="250" x2="770" y2="250" stroke="#111827" stroke-width="2"/>
+<text x="345" y="135" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">التجربة 1</text>
+<text x="515" y="135" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">التجربة 2</text>
+<text x="685" y="135" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">التجربة 3</text>
+<text x="190" y="220" text-anchor="middle" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">L (mH)</text>
+<text x="345" y="220" text-anchor="middle" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">30</text>
+<text x="515" y="220" text-anchor="middle" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">20</text>
+<text x="685" y="220" text-anchor="middle" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">40</text>
+<text x="190" y="305" text-anchor="middle" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">R (Ω)</text>
+<text x="345" y="305" text-anchor="middle" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">290</text>
+<text x="515" y="305" text-anchor="middle" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">190</text>
+<text x="685" y="305" text-anchor="middle" font-size="25" font-family="DejaVu Sans,Arial,sans-serif">190</text>
+
+</svg>

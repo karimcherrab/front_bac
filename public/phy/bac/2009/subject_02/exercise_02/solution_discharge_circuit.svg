@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 500" role="img" aria-label="حل رسم دارة تفريغ المكثفة">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrD" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+  </marker>
+</defs>
+<!-- top capacitor -->
+<path d="M170 130 H345" stroke="#111827" stroke-width="4"/>
+<line x1="345" y1="95" x2="345" y2="165" stroke="#111827" stroke-width="5"/>
+<line x1="375" y1="95" x2="375" y2="165" stroke="#111827" stroke-width="5"/>
+<path d="M375 130 H675 V365 H600" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="360" y="75" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">C</text>
+<text x="330" y="185" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">+</text>
+<text x="378" y="185" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">−</text>
+
+<!-- switch -->
+<circle cx="170" cy="130" r="7" fill="#111827"/>
+<circle cx="130" cy="170" r="7" fill="#111827"/>
+<line x1="170" y1="130" x2="136" y2="164" stroke="#111827" stroke-width="4"/>
+<text x="105" y="145" font-size="27" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">K</text>
+<path d="M130 170 V365 H260" stroke="#111827" stroke-width="4" fill="none"/>
+
+<!-- resistor -->
+<rect x="260" y="337" width="160" height="56" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="340" y="375" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">R</text>
+<path d="M420 365 H600" stroke="#111827" stroke-width="4"/>
+
+<!-- conventional current during discharge clockwise from + plate through R -->
+<line x1="185" y1="405" x2="285" y2="405" stroke="#2563eb" stroke-width="3" marker-end="url(#arrD)"/>
+<text x="235" y="438" text-anchor="middle" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">i</text>
+
+<!-- uR arrow left->right -->
+<line x1="250" y1="435" x2="430" y2="435" stroke="#2563eb" stroke-width="3" marker-end="url(#arrD)"/>
+<text x="340" y="470" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">uR</text>
+
+<!-- uC arrow from right plate to left? uC = Vleft - Vright, arrow right->left -->
+<line x1="420" y1="215" x2="300" y2="215" stroke="#2563eb" stroke-width="3" marker-end="url(#arrD)"/>
+<text x="360" y="248" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">uC</text>
+
+</svg>

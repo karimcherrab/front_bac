@@ -57,7 +57,7 @@ export default function LessonCard({
 
     console.log(
       "اسم المادة داخل LessonCard:",
-      courseName
+       lesson.title
     );
 
     if (onOpen) {

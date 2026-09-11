@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+<defs>
+  <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="black"/>
+  </marker>
+</defs>
+<style>
+  text { font-family: Arial, "DejaVu Sans", sans-serif; font-size: 28px; }
+  .label { font-size: 26px; }
+  .cell { fill: white; stroke: black; stroke-width: 4; }
+  .mem { stroke: black; stroke-width: 4; fill: none; }
+  .protein { stroke: black; stroke-width: 5; fill: white; }
+  .dash { stroke: black; stroke-width: 3; stroke-dasharray: 8 8; fill: none; }
+</style>
+<text x="600" y="55" text-anchor="middle" font-size="34" font-weight="bold">التعرف المزدوج بين LTc والخلية المصابة</text>
+
+<!-- infected target cell -->
+<ellipse class="cell" cx="600" cy="210" rx="260" ry="115"/>
+<ellipse cx="600" cy="210" rx="70" ry="45" fill="none" stroke="black" stroke-width="3"/>
+<text x="600" y="150" text-anchor="middle">خلية مصابة (مستهدفة)</text>
+
+<!-- HLA I + peptide on target -->
+<line class="protein" x1="565" y1="315" x2="565" y2="385"/>
+<line class="protein" x1="635" y1="315" x2="635" y2="385"/>
+<line class="protein" x1="565" y1="350" x2="635" y2="350"/>
+<rect x="585" y="375" width="30" height="24" fill="white" stroke="black" stroke-width="3"/>
+<text x="435" y="372" class="label">HLA I</text>
+<text x="400" y="410" class="label">ببتيد مستضدي</text>
+<line x1="520" y1="365" x2="570" y2="360" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<line x1="530" y1="405" x2="590" y2="390" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+
+<!-- LTc -->
+<ellipse class="cell" cx="600" cy="555" rx="250" ry="115"/>
+<ellipse cx="600" cy="565" rx="65" ry="42" fill="none" stroke="black" stroke-width="3"/>
+<text x="600" y="625" text-anchor="middle">خلية LTc</text>
+
+<!-- TCR -->
+<path d="M585 445 L585 410 M615 445 L615 410 M585 420 L565 400 M615 420 L635 400" class="protein"/>
+<text x="700" y="450" class="label">TCR</text>
+<line x1="685" y1="440" x2="620" y2="425" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+
+<!-- CD8 -->
+<line class="protein" x1="700" y1="450" x2="700" y2="400"/>
+<line class="protein" x1="720" y1="450" x2="720" y2="405"/>
+<line x1="710" y1="405" x2="645" y2="365" stroke="black" stroke-width="3"/>
+<text x="760" y="420" class="label">CD8</text>
+
+<!-- granules/perforin -->
+<circle cx="480" cy="520" r="18" fill="white" stroke="black" stroke-width="3"/>
+<circle cx="520" cy="500" r="18" fill="white" stroke="black" stroke-width="3"/>
+<circle cx="555" cy="515" r="18" fill="white" stroke="black" stroke-width="3"/>
+<text x="335" y="530" class="label">حويصلات البرفورين</text>
+
+<!-- recognition indicator -->
+<path d="M600 405 L600 392" stroke="black" stroke-width="4" marker-end="url(#arrow)"/>
+<text x="855" y="350" class="label">تكامل نوعي</text>
+<path d="M840 355 C760 360,700 375,640 405" class="dash" marker-end="url(#arrow)"/>
+</svg>

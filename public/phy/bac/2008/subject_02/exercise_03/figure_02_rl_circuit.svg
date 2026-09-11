@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 530" role="img" aria-label="الشكل 2: دارة RL">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrRL" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#111827"/>
+  </marker>
+</defs>
+<!-- nodes A B C -->
+<path d="M145 120 H230" stroke="#111827" stroke-width="4"/>
+<rect x="230" y="92" width="120" height="56" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="290" y="130" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">R</text>
+<path d="M350 120 H430" stroke="#111827" stroke-width="4"/>
+
+<!-- inductor -->
+<path d="M430 120
+ c18 -38 36 -38 54 0
+ c18 38 36 38 54 0
+ c18 -38 36 -38 54 0
+ c18 38 36 38 54 0
+ c18 -38 36 -38 54 0" stroke="#111827" stroke-width="4" fill="none"/>
+<path d="M700 120 H755 V385" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="565" y="70" text-anchor="middle" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">L , r</text>
+
+<text x="132" y="93" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">A</text>
+<text x="415" y="93" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">B</text>
+<text x="740" y="93" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">C</text>
+
+<!-- bottom -->
+<path d="M145 120 V385 H295" stroke="#111827" stroke-width="4" fill="none"/>
+<circle cx="295" cy="385" r="7" fill="#111827"/>
+<circle cx="355" cy="385" r="7" fill="#111827"/>
+<line x1="295" y1="385" x2="348" y2="350" stroke="#111827" stroke-width="4"/>
+<text x="310" y="335" font-size="27" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">K</text>
+<path d="M355 385 H495" stroke="#111827" stroke-width="4"/>
+
+<!-- source -->
+<circle cx="565" cy="385" r="55" fill="white" stroke="#111827" stroke-width="4"/>
+<line x1="495" y1="385" x2="510" y2="385" stroke="#111827" stroke-width="4"/>
+<line x1="620" y1="385" x2="755" y2="385" stroke="#111827" stroke-width="4"/>
+<line x1="530" y1="425" x2="610" y2="425" stroke="#111827" stroke-width="3" marker-end="url(#arrRL)"/>
+<text x="565" y="372" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">E</text>
+
+<!-- current at C upward -->
+<line x1="790" y1="340" x2="790" y2="185" stroke="#111827" stroke-width="3" marker-end="url(#arrRL)"/>
+<text x="817" y="270" font-size="25" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">i</text>
+
+<!-- source labels uBA, uCB -->
+<line x1="225" y1="190" x2="420" y2="190" stroke="#111827" stroke-width="3" marker-end="url(#arrRL)"/>
+<text x="322" y="220" text-anchor="middle" font-size="22" font-family="DejaVu Sans,Arial,sans-serif">uBA</text>
+<line x1="700" y1="190" x2="445" y2="190" stroke="#111827" stroke-width="3" marker-end="url(#arrRL)"/>
+<text x="573" y="220" text-anchor="middle" font-size="22" font-family="DejaVu Sans,Arial,sans-serif">uCB</text>
+
+<text x="450" y="505" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الشكل 2</text>
+
+</svg>

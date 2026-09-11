@@ -1,17 +1,17 @@
 // src/components/dashboard/DashboardTopbar.jsx
 
 import {
-  Bell,
   ChevronDown,
+  LogOut,
   Menu,
   Moon,
-  Search,
   X,
 } from "lucide-react";
 
 import {
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -26,16 +26,14 @@ import {
   UserContext,
 } from "../../Utils/UserContext";
 
+import Logo from "../Logo";
+
 
 const navigationItems = [
   {
     label: "الرئيسية",
     path: "/home",
   },
-  // {
-  //   label: "الدروس",
-  //   path: "/subjects",
-  // },
   {
     label: "بكالوريا تجيريبية",
     path: "/bac",
@@ -51,17 +49,108 @@ const navigationItems = [
 ];
 
 
+const AUTH_STORAGE_KEYS = [
+  "access_token",
+  "refresh_token",
+  "access",
+  "refresh",
+  "token",
+  "auth_token",
+  "authToken",
+  "user",
+  "currentUser",
+  "auth_user",
+];
+
+
+function removeAuthCookie(name) {
+  // حذف بالطريقة العادية
+  Cookies.remove(name);
+
+  // أغلب Cookies الخاصة بالمصادقة تكون على المسار /
+  Cookies.remove(name, {
+    path: "/",
+  });
+
+  // محاولة إضافية مفيدة عندما تم إنشاء Cookie مع domain صريح.
+  if (typeof window !== "undefined") {
+    const hostname =
+      window.location.hostname;
+
+    if (hostname) {
+      Cookies.remove(name, {
+        path: "/",
+        domain: hostname,
+      });
+
+      // مثال: app.example.com -> .example.com
+      const parts =
+        hostname.split(".");
+
+      if (parts.length >= 2) {
+        const rootDomain =
+          `.${parts.slice(-2).join(".")}`;
+
+        Cookies.remove(name, {
+          path: "/",
+          domain: rootDomain,
+        });
+      }
+    }
+  }
+}
+
+
+function clearAuthStorage() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  AUTH_STORAGE_KEYS.forEach(
+    (key) => {
+      try {
+        window.localStorage.removeItem(
+          key,
+        );
+      } catch {
+        // تجاهل الخطأ إذا كان localStorage غير متاح.
+      }
+
+      try {
+        window.sessionStorage.removeItem(
+          key,
+        );
+      } catch {
+        // تجاهل الخطأ إذا كان sessionStorage غير متاح.
+      }
+    },
+  );
+}
+
+
 export default function DashboardTopbar() {
+  const authContext =
+    useContext(UserContext) || {};
+
   const {
     user,
-  } = useContext(UserContext);
+    setUser,
+  } = authContext;
 
   const navigate =
     useNavigate();
 
+  const userMenuRef =
+    useRef(null);
+
   const [
     mobileOpen,
     setMobileOpen,
+  ] = useState(false);
+
+  const [
+    userMenuOpen,
+    setUserMenuOpen,
   ] = useState(false);
 
   const username =
@@ -77,9 +166,13 @@ export default function DashboardTopbar() {
     "ط";
 
 
+  /* =========================================================
+     MOBILE MENU
+  ========================================================= */
+
   useEffect(() => {
     if (!mobileOpen) {
-      return;
+      return undefined;
     }
 
     const handleEscape = (
@@ -114,20 +207,96 @@ export default function DashboardTopbar() {
   ]);
 
 
+  /* =========================================================
+     DESKTOP USER DROPDOWN
+  ========================================================= */
+
+  useEffect(() => {
+    if (!userMenuOpen) {
+      return undefined;
+    }
+
+    const handleOutsideClick = (
+      event,
+    ) => {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(
+          event.target,
+        )
+      ) {
+        setUserMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (
+      event,
+    ) => {
+      if (
+        event.key === "Escape"
+      ) {
+        setUserMenuOpen(false);
+      }
+    };
+
+    document.addEventListener(
+      "mousedown",
+      handleOutsideClick,
+    );
+
+    window.addEventListener(
+      "keydown",
+      handleEscape,
+    );
+
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleOutsideClick,
+      );
+
+      window.removeEventListener(
+        "keydown",
+        handleEscape,
+      );
+    };
+  }, [
+    userMenuOpen,
+  ]);
+
+
+  /* =========================================================
+     LOGOUT
+  ========================================================= */
+
   function logout() {
-    Cookies.remove(
+    setMobileOpen(false);
+    setUserMenuOpen(false);
+
+    // Cookies المستخدمة في المشروع حاليًا.
+    removeAuthCookie(
       "access_token",
     );
 
-    Cookies.remove(
+    removeAuthCookie(
       "refresh_token",
     );
 
-    navigate(
+    // تنظيف أي نسخة قديمة من التوكنات في storage.
+    clearAuthStorage();
+
+    // مهم: تنظيف المستخدم الموجود داخل React Context.
+    // typeof يجعل الكود يعمل حتى لو لم يكن setUser موجودًا في Context.
+    if (
+      typeof setUser === "function"
+    ) {
+      setUser(null);
+    }
+
+    // replace يمنع الرجوع إلى الصفحة المحمية بزر Back،
+    // وإعادة تحميل الصفحة تنظف أي state مصادقة بقي في الذاكرة.
+    window.location.replace(
       "/login",
-      {
-        replace: true,
-      },
     );
   }
 
@@ -192,95 +361,34 @@ export default function DashboardTopbar() {
             onClick={() =>
               navigate("/home")
             }
+            aria-label="العودة إلى الصفحة الرئيسية"
+            title="الصفحة الرئيسية"
             className="
               group
-
               flex
               shrink-0
-
               items-center
-
-              gap-3.5
-
+              rounded-[20px]
+              border
+              border-transparent
+              px-2
+              py-2
               transition
+              duration-200
+
+              hover:border-slate-100
+              hover:bg-slate-50
+
+              active:scale-[0.98]
             "
           >
-            <div
+            <Logo
+              variant="light"
               className="
-                flex
-
-                h-[54px]
-                w-[54px]
-
-                items-center
-                justify-center
-
-                rounded-[18px]
-
-                bg-gradient-to-br
-                from-violet-600
-                to-blue-600
-
-                text-[21px]
-                font-black
-                text-white
-
-                shadow-[0_10px_28px_rgba(99,102,241,0.22)]
-
-                transition-transform
-                duration-200
-
-                group-hover:-translate-y-0.5
-
-                sm:h-[58px]
-                sm:w-[58px]
-
-                lg:h-[62px]
-                lg:w-[62px]
-                lg:text-[24px]
+                gap-3
+                sm:gap-3.5
               "
-            >
-              M
-            </div>
-
-            <div
-              className="
-                hidden
-                text-right
-
-                sm:block
-              "
-            >
-              <h1
-                className="
-                  text-[20px]
-                  font-black
-
-                  tracking-tight
-
-                  text-slate-950
-
-                  lg:text-[23px]
-                "
-              >
-                MathMaster
-              </h1>
-
-              <p
-                className="
-                  mt-1
-
-                  text-[10px]
-                  font-medium
-
-                  text-slate-400
-
-                  lg:text-[11px]
-                "
-              >
-                منصة التعلم الذكي
-              </p>
-            </div>
+            />
           </button>
 
 
@@ -402,113 +510,6 @@ export default function DashboardTopbar() {
             "
           >
 
-            {/* Search */}
-
-            <button
-              type="button"
-              aria-label="البحث"
-              className="
-                hidden
-
-                h-11
-                w-11
-
-                items-center
-                justify-center
-
-                rounded-[14px]
-
-                text-slate-500
-
-                transition-all
-                duration-200
-
-                hover:bg-violet-50
-                hover:text-violet-600
-
-                sm:flex
-
-                lg:h-12
-                lg:w-12
-              "
-            >
-              <Search
-                size={21}
-              />
-            </button>
-
-
-            {/* Notification */}
-
-            <button
-              type="button"
-              aria-label="الإشعارات"
-              className="
-                relative
-
-                hidden
-
-                h-11
-                w-11
-
-                items-center
-                justify-center
-
-                rounded-[14px]
-
-                text-slate-500
-
-                transition-all
-                duration-200
-
-                hover:bg-violet-50
-                hover:text-violet-600
-
-                sm:flex
-
-                lg:h-12
-                lg:w-12
-              "
-            >
-              <Bell
-                size={21}
-              />
-
-              <span
-                className="
-                  absolute
-
-                  end-0
-                  top-0
-
-                  flex
-
-                  h-[19px]
-                  min-w-[19px]
-
-                  items-center
-                  justify-center
-
-                  rounded-full
-
-                  bg-pink-500
-
-                  px-1
-
-                  text-[9px]
-                  font-black
-
-                  text-white
-
-                  ring-2
-                  ring-white
-                "
-              >
-                3
-              </span>
-            </button>
-
-
             {/* Dark mode */}
 
             <button
@@ -546,122 +547,264 @@ export default function DashboardTopbar() {
 
 
             {/* =================================================
-                USER
+                USER DESKTOP
             ================================================= */}
 
-            <button
-              type="button"
+            <div
+              ref={userMenuRef}
               className="
+                relative
                 hidden
 
-                items-center
-
-                gap-3
-
-                rounded-[18px]
-
-                border
-                border-transparent
-
-                py-2
-                ps-3
-                pe-2
-
-                transition-all
-
-                hover:border-slate-100
-                hover:bg-slate-50
-
-                sm:flex
+                sm:block
               "
             >
-              <div
+              <button
+                type="button"
+                onClick={() =>
+                  setUserMenuOpen(
+                    (current) =>
+                      !current,
+                  )
+                }
+                aria-expanded={
+                  userMenuOpen
+                }
+                aria-haspopup="menu"
                 className="
                   flex
 
-                  h-11
-                  w-11
-
-                  shrink-0
-
                   items-center
-                  justify-center
 
-                  rounded-full
+                  gap-3
 
-                  bg-gradient-to-br
-                  from-violet-500
-                  to-blue-600
+                  rounded-[18px]
 
-                  text-[15px]
-                  font-black
+                  border
+                  border-transparent
 
-                  text-white
+                  py-2
+                  ps-3
+                  pe-2
 
-                  shadow-sm
+                  transition-all
 
-                  lg:h-12
-                  lg:w-12
-                  lg:text-[16px]
+                  hover:border-slate-100
+                  hover:bg-slate-50
                 "
               >
-                {
-                  firstLetter
-                }
-              </div>
-
-              <div
-                className="
-                  hidden
-
-                  min-w-0
-
-                  text-right
-
-                  xl:block
-                "
-              >
-                <p
+                <div
                   className="
-                    max-w-[130px]
+                    flex
 
-                    truncate
+                    h-11
+                    w-11
 
-                    text-[14px]
+                    shrink-0
+
+                    items-center
+                    justify-center
+
+                    rounded-full
+
+                    bg-gradient-to-br
+                    from-violet-500
+                    to-blue-600
+
+                    text-[15px]
                     font-black
 
-                    text-slate-900
+                    text-white
+
+                    shadow-sm
+
+                    lg:h-12
+                    lg:w-12
+                    lg:text-[16px]
                   "
                 >
                   {
-                    username
+                    firstLetter
                   }
-                </p>
+                </div>
 
-                <p
+                <div
                   className="
-                    mt-0.5
+                    hidden
 
-                    text-[10px]
+                    min-w-0
 
-                    text-slate-400
+                    text-right
+
+                    xl:block
                   "
                 >
-                  حساب الطالب
-                </p>
+                  <p
+                    className="
+                      max-w-[130px]
+
+                      truncate
+
+                      text-[14px]
+                      font-black
+
+                      text-slate-900
+                    "
+                  >
+                    {
+                      username
+                    }
+                  </p>
+
+                  <p
+                    className="
+                      mt-0.5
+
+                      text-[10px]
+
+                      text-slate-400
+                    "
+                  >
+                    حساب الطالب
+                  </p>
+                </div>
+
+                <ChevronDown
+                  size={16}
+                  className={`
+                    hidden
+
+                    text-slate-400
+
+                    transition-transform
+                    duration-200
+
+                    xl:block
+
+                    ${
+                      userMenuOpen
+                        ? "rotate-180"
+                        : "rotate-0"
+                    }
+                  `}
+                />
+              </button>
+
+
+              {/* Desktop dropdown */}
+
+              <div
+                role="menu"
+                className={`
+                  absolute
+
+                  left-0
+                  top-[calc(100%+10px)]
+
+                  z-[70]
+
+                  w-[230px]
+
+                  origin-top-left
+
+                  rounded-[20px]
+
+                  border
+                  border-slate-100
+
+                  bg-white
+
+                  p-2
+
+                  shadow-[0_20px_60px_rgba(15,23,42,0.14)]
+
+                  transition-all
+                  duration-200
+
+                  ${
+                    userMenuOpen
+                      ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
+                      : "pointer-events-none -translate-y-1 scale-[0.98] opacity-0"
+                  }
+                `}
+              >
+                <div
+                  className="
+                    border-b
+                    border-slate-100
+
+                    px-3
+                    py-3
+
+                    text-right
+                  "
+                >
+                  <p
+                    className="
+                      truncate
+
+                      text-[13px]
+                      font-black
+
+                      text-slate-900
+                    "
+                  >
+                    {
+                      username
+                    }
+                  </p>
+
+                  <p
+                    className="
+                      mt-1
+
+                      text-[10px]
+
+                      text-slate-400
+                    "
+                  >
+                    حساب الطالب
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={logout}
+                  className="
+                    mt-2
+
+                    flex
+                    h-[48px]
+                    w-full
+
+                    items-center
+                    justify-between
+
+                    rounded-[14px]
+
+                    px-3
+
+                    text-[13px]
+                    font-extrabold
+
+                    text-red-500
+
+                    transition-colors
+
+                    hover:bg-red-50
+                  "
+                >
+                  <span>
+                    تسجيل الخروج
+                  </span>
+
+                  <LogOut
+                    size={18}
+                  />
+                </button>
               </div>
-
-              <ChevronDown
-                size={16}
-                className="
-                  hidden
-
-                  text-slate-400
-
-                  xl:block
-                "
-              />
-            </button>
+            </div>
 
 
             {/* Mobile menu */}
@@ -817,68 +960,25 @@ export default function DashboardTopbar() {
                 "/home",
               );
             }}
+            aria-label="العودة إلى الصفحة الرئيسية"
             className="
               flex
+              min-w-0
               items-center
-              gap-3
+              rounded-2xl
+              px-1
+              py-1
+              transition
+
+              hover:bg-slate-50
+
+              active:scale-[0.98]
             "
           >
-            <div
-              className="
-                flex
-
-                h-12
-                w-12
-
-                items-center
-                justify-center
-
-                rounded-[15px]
-
-                bg-gradient-to-br
-                from-violet-600
-                to-blue-600
-
-                text-lg
-                font-black
-
-                text-white
-              "
-            >
-              M
-            </div>
-
-            <div
-              className="
-                text-right
-              "
-            >
-              <span
-                className="
-                  block
-
-                  text-[18px]
-                  font-black
-
-                  text-slate-900
-                "
-              >
-                MathMaster
-              </span>
-
-              <span
-                className="
-                  mt-0.5
-                  block
-
-                  text-[9px]
-
-                  text-slate-400
-                "
-              >
-                منصة التعلم الذكي
-              </span>
-            </div>
+            <Logo
+              variant="light"
+              className="gap-3"
+            />
           </button>
 
 
@@ -1075,8 +1175,15 @@ export default function DashboardTopbar() {
             type="button"
             onClick={logout}
             className="
+              flex
+
               h-[52px]
               w-full
+
+              items-center
+              justify-center
+
+              gap-2
 
               rounded-[16px]
 
@@ -1092,7 +1199,13 @@ export default function DashboardTopbar() {
               hover:bg-red-100
             "
           >
-            تسجيل الخروج
+            <LogOut
+              size={18}
+            />
+
+            <span>
+              تسجيل الخروج
+            </span>
           </button>
         </div>
 

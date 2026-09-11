@@ -76,6 +76,8 @@ export default function MathCoursePage() {
   ] = useState(0);
 
   useEffect(() => {
+      console.log(" matière  :", courseData);
+
     const controller =
       new AbortController();
 
@@ -376,6 +378,14 @@ export default function MathCoursePage() {
 
   console.log("Nom matière envoyé :", courseData.name);
 
+
+    console.log("Nom matière 1 :", courseData.name);
+        console.log("Nom matière 1 :", courseData.name);
+
+            console.log("Nom matière 1 :", courseData.id);
+            console.log("Nom matière 1 :", courseData.title);
+
+
   navigate(
     `/subjects/${id_subjects}/lesson/${chapter.id}`,
     {
@@ -667,6 +677,7 @@ export default function MathCoursePage() {
               course={
                 mathCourse
               }
+              courseData = {courseData}
             />
 
             {/* Chapters title */}

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+<style>
+  text { font-family: sans-serif; font-size: 28px; direction: rtl; unicode-bidi: plaintext; }
+  .box { fill: white; stroke: black; stroke-width: 3; rx: 18; ry: 18; }
+  .arrow { stroke: black; stroke-width: 3; fill: none; marker-end: url(#a); }
+  .small { font-size: 24px; }
+  .title { font-size: 34px; font-weight: bold; }
+</style>
+<defs>
+  <marker id="a" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+    <path d="M0,0 L12,6 L0,12 z" fill="black"/>
+  </marker>
+</defs>
+<text x="700" y="55" text-anchor="middle" class="title">مراحل الاستجابة المناعية الخلطية المؤدية إلى إقصاء المستضد Z</text>
+
+<rect class="box" x="520" y="100" width="360" height="90"/>
+<text x="700" y="155" text-anchor="middle">المستضد Z</text>
+
+<rect class="box" x="70" y="260" width="390" height="120"/>
+<text x="265" y="305" text-anchor="middle">خلية بلعمية كبيرة CPA</text>
+<text x="265" y="345" text-anchor="middle" class="small">عرض محدد المستضد عبر CMH II</text>
+
+<rect class="box" x="510" y="260" width="380" height="120"/>
+<text x="700" y="305" text-anchor="middle">LB نوعية</text>
+<text x="700" y="345" text-anchor="middle" class="small">انتقاء مباشر بواسطة BCR</text>
+
+<rect class="box" x="950" y="260" width="380" height="120"/>
+<text x="1140" y="305" text-anchor="middle">LT4 نوعية</text>
+<text x="1140" y="345" text-anchor="middle" class="small">تعرف معقد المستضد + CMH II</text>
+
+<path class="arrow" d="M600 190 C480 220,390 225,300 260"/>
+<path class="arrow" d="M700 190 L700 260"/>
+<path class="arrow" d="M800 190 C930 220,1030 225,1130 260"/>
+
+<rect class="box" x="960" y="455" width="360" height="105"/>
+<text x="1140" y="500" text-anchor="middle">تنشيط LT4 بواسطة IL1</text>
+<text x="1140" y="535" text-anchor="middle" class="small">ثم تمايزها إلى LTh</text>
+<path class="arrow" d="M1140 380 L1140 455"/>
+
+<rect class="box" x="515" y="455" width="370" height="105"/>
+<text x="700" y="500" text-anchor="middle">تنشيط LB بواسطة IL2</text>
+<text x="700" y="535" text-anchor="middle" class="small">المفرز من LTh</text>
+<path class="arrow" d="M995 510 C930 510,920 510,885 510"/>
+<path class="arrow" d="M700 380 L700 455"/>
+
+<rect class="box" x="450" y="630" width="500" height="110"/>
+<text x="700" y="675" text-anchor="middle">تكاثر وتمايز LB</text>
+<text x="700" y="715" text-anchor="middle" class="small">خلايا بلازمية LBp + خلايا ذاكرة LBm</text>
+<path class="arrow" d="M700 560 L700 630"/>
+
+<rect class="box" x="70" y="770" width="360" height="90"/>
+<text x="250" y="825" text-anchor="middle">أجسام مضادة نوعية</text>
+
+<rect class="box" x="520" y="770" width="360" height="90"/>
+<text x="700" y="825" text-anchor="middle">معقد مناعي</text>
+
+<rect class="box" x="970" y="770" width="360" height="90"/>
+<text x="1150" y="825" text-anchor="middle">بلعمة وإقصاء المستضد</text>
+
+<path class="arrow" d="M520 690 C400 720,320 745,250 770"/>
+<path class="arrow" d="M430 815 L520 815"/>
+<path class="arrow" d="M880 815 L970 815"/>
+<path class="arrow" d="M650 190 C520 430,430 650,430 815" style="stroke-dasharray:10,10"/>
+<text x="395" y="585" text-anchor="middle" class="small">ارتباط نوعي</text>
+</svg>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 510" role="img" aria-label="الجدول 1">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<rect x="95" y="80" width="710" height="330" fill="white" stroke="#111827" stroke-width="3"/>
+<line x1="295" y1="80" x2="295" y2="410" stroke="#111827" stroke-width="2"/>
+<line x1="465" y1="80" x2="465" y2="410" stroke="#111827" stroke-width="2"/>
+<line x1="635" y1="80" x2="635" y2="410" stroke="#111827" stroke-width="2"/>
+<line x1="95" y1="165" x2="805" y2="165" stroke="#111827" stroke-width="2"/>
+<line x1="95" y1="260" x2="805" y2="260" stroke="#111827" stroke-width="2"/>
+<text x="195" y="132" text-anchor="middle" font-size="26" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">t(s)</text>
+<text x="380" y="132" text-anchor="middle" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">0</text>
+<text x="550" y="132" text-anchor="middle" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">τ</text>
+<text x="720" y="132" text-anchor="middle" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">10τ</text>
+<text x="195" y="220" text-anchor="middle" font-size="26" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">i(A)</text>
+<text x="195" y="325" text-anchor="middle" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">إضاءة المصباح</text>
+<text x="450" y="475" text-anchor="middle" font-size="24" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الجدول 1</text>
+
+</svg>

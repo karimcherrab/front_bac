@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-label="حل رسم دارة RL واتجاهات التيار والتوتر ومدخل راسم الاهتزاز">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrRL" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#111827"/></marker>
+</defs>
+<path d="M170 110 H340" stroke="#111827" stroke-width="4"/>
+<circle cx="340" cy="110" r="7" fill="#111827"/><circle cx="380" cy="110" r="7" fill="#111827"/>
+<line x1="340" y1="110" x2="375" y2="82" stroke="#111827" stroke-width="4"/>
+<text x="348" y="66" font-size="26" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">K</text>
+<path d="M380 110 H700 V365 H620" stroke="#111827" stroke-width="4" fill="none"/>
+<rect x="670" y="185" width="60" height="110" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="700" y="248" text-anchor="middle" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">R₀</text>
+<path d="M620 365
+         c-18 -45 -38 -45 -56 0
+         c-18 45 -38 45 -56 0
+         c-18 -45 -38 -45 -56 0
+         c-18 45 -38 45 -56 0
+         c-18 -45 -38 -45 -56 0
+         c-18 45 -38 45 -56 0" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="450" y="425" text-anchor="middle" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">(L,r)</text>
+<path d="M284 365 H170" stroke="#111827" stroke-width="4"/>
+<circle cx="170" cy="238" r="58" fill="white" stroke="#111827" stroke-width="4"/>
+<line x1="170" y1="110" x2="170" y2="180" stroke="#111827" stroke-width="4"/>
+<line x1="170" y1="296" x2="170" y2="365" stroke="#111827" stroke-width="4"/>
+<line x1="132" y1="288" x2="132" y2="190" stroke="#111827" stroke-width="3" marker-end="url(#arrRL)"/>
+<text x="107" y="245" font-size="30" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">E</text>
+<!-- current -->
+<line x1="420" y1="82" x2="555" y2="82" stroke="#111827" stroke-width="3" marker-end="url(#arrRL)"/>
+<text x="488" y="58" font-size="25" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">i</text>
+<!-- voltages -->
+<line x1="765" y1="290" x2="765" y2="185" stroke="#111827" stroke-width="3" marker-end="url(#arrRL)"/>
+<text x="798" y="245" font-size="23" font-family="DejaVu Sans,Arial,sans-serif">uR₀</text>
+<line x1="305" y1="330" x2="605" y2="330" stroke="#111827" stroke-width="3" marker-end="url(#arrRL)"/>
+<text x="455" y="312" font-size="23" font-family="DejaVu Sans,Arial,sans-serif">uᵦ</text>
+<!-- oscilloscope -->
+<circle cx="620" cy="365" r="7" fill="#2563eb"/>
+<line x1="620" y1="365" x2="790" y2="365" stroke="#2563eb" stroke-width="2.5"/>
+<text x="814" y="372" font-size="25" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">Y</text>
+<circle cx="284" cy="365" r="7" fill="#2563eb"/>
+<line x1="284" y1="365" x2="284" y2="455" stroke="#2563eb" stroke-width="2.5"/>
+<line x1="250" y1="455" x2="318" y2="455" stroke="#2563eb" stroke-width="3"/>
+<line x1="260" y1="468" x2="308" y2="468" stroke="#2563eb" stroke-width="3"/>
+<line x1="270" y1="481" x2="298" y2="481" stroke="#2563eb" stroke-width="3"/>
+
+</svg>

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 585" role="img" aria-label="الشكل 1: دارة RC في الوضع 1 وRL في الوضع 2">
+<rect width="100%" height="100%" fill="white"/>
+
+<defs>
+  <marker id="a1702" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#111827"/>
+  </marker>
+</defs>
+
+<!-- central source -->
+<circle cx="435" cy="285" r="55" fill="white" stroke="#111827" stroke-width="4"/>
+<line x1="435" y1="160" x2="435" y2="230" stroke="#111827" stroke-width="4"/>
+<line x1="435" y1="340" x2="435" y2="455" stroke="#111827" stroke-width="4"/>
+<text x="405" y="225" font-size="26" font-family="DejaVu Sans,Arial,sans-serif">+</text>
+<text x="390" y="295" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">E</text>
+
+<!-- switch top -->
+<circle cx="365" cy="115" r="7" fill="#111827"/>
+<circle cx="505" cy="115" r="7" fill="#111827"/>
+<circle cx="435" cy="160" r="7" fill="#111827"/>
+<line x1="435" y1="160" x2="372" y2="120" stroke="#111827" stroke-width="4"/>
+<text x="350" y="82" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">1</text>
+<text x="496" y="82" font-size="24" font-family="DejaVu Sans,Arial,sans-serif">2</text>
+<text x="425" y="95" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">K</text>
+
+<!-- left RC branch -->
+<path d="M365 115 H205 V195" stroke="#111827" stroke-width="4" fill="none"/>
+<line x1="165" y1="195" x2="245" y2="195" stroke="#111827" stroke-width="5"/>
+<line x1="165" y1="225" x2="245" y2="225" stroke="#111827" stroke-width="5"/>
+<text x="125" y="220" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">C</text>
+<path d="M205 225 V270" stroke="#111827" stroke-width="4"/>
+<rect x="172" y="270" width="66" height="115" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="260" y="335" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">R₁</text>
+<path d="M205 385 V455 H435" stroke="#111827" stroke-width="4" fill="none"/>
+
+<!-- right RL branch -->
+<path d="M505 115 H675 V205" stroke="#111827" stroke-width="4" fill="none"/>
+<rect x="642" y="205" width="66" height="105" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="730" y="265" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">R₂</text>
+<path d="M675 310 V335" stroke="#111827" stroke-width="4"/>
+<path d="M675 335
+ c-38 18 -38 36 0 54
+ c38 18 38 36 0 54
+ c-38 18 -38 36 0 54" stroke="#111827" stroke-width="4" fill="none"/>
+<text x="725" y="425" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">L</text>
+<path d="M675 497 V525 H435 V455" stroke="#111827" stroke-width="4" fill="none"/>
+
+<text x="430" y="565" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الشكل 1</text>
+
+
+<defs>
+  <marker id="blue1702" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+  </marker>
+</defs>
+<line x1="330" y1="80" x2="245" y2="80" stroke="#2563eb" stroke-width="3" marker-end="url(#blue1702)"/>
+<text x="285" y="58" font-size="22" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">i (الوضع 1)</text>
+<line x1="130" y1="240" x2="130" y2="175" stroke="#2563eb" stroke-width="3" marker-end="url(#blue1702)"/>
+<text x="85" y="210" font-size="21" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">uC</text>
+<line x1="270" y1="385" x2="270" y2="270" stroke="#2563eb" stroke-width="3" marker-end="url(#blue1702)"/>
+<text x="290" y="333" font-size="21" font-family="DejaVu Sans,Arial,sans-serif" fill="#2563eb">uR₁</text>
+</svg>

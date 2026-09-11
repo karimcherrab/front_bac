@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="820" viewBox="0 0 1500 820">
+  <rect width="100%" height="100%" fill="white"/>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#111"/>
+    </marker>
+    <style>
+      .t { font-family: "Noto Sans Arabic", "DejaVu Sans", sans-serif; fill:#111; font-size:30px; }
+      .ts { font-family: "Noto Sans Arabic", "DejaVu Sans", sans-serif; fill:#111; font-size:25px; }
+      .h { font-family: "Noto Sans Arabic", "DejaVu Sans", sans-serif; fill:#111; font-size:34px; font-weight:700; }
+      .box { fill:#fff; stroke:#111; stroke-width:3; rx:18; ry:18; }
+      .line { stroke:#111; stroke-width:4; fill:none; marker-end:url(#arrow); }
+      .thin { stroke:#111; stroke-width:3; fill:none; }
+    </style>
+  </defs>
+
+  <text x="750" y="52" text-anchor="middle" class="h" direction="rtl">آلية التعرف على الخلية السرطانية وتخريبها</text>
+
+  <!-- cancer cell -->
+  <circle cx="210" cy="385" r="130" fill="#fff" stroke="#111" stroke-width="5"/>
+  <path d="M95 330 q35 -55 70 0 q35 55 70 0 q35 -55 70 0" class="thin"/>
+  <text x="210" y="395" text-anchor="middle" class="t" direction="rtl">خلية سرطانية</text>
+  <text x="210" y="440" text-anchor="middle" class="ts" direction="rtl">محدد مستضدي سرطاني</text>
+
+  <!-- MHC display -->
+  <rect x="390" y="190" width="230" height="105" class="box"/>
+  <text x="505" y="235" text-anchor="middle" class="t">CMH II</text>
+  <text x="505" y="270" text-anchor="middle" class="ts" direction="rtl">+ محدد مستضدي</text>
+
+  <rect x="390" y="475" width="230" height="105" class="box"/>
+  <text x="505" y="520" text-anchor="middle" class="t">CMH I</text>
+  <text x="505" y="555" text-anchor="middle" class="ts" direction="rtl">+ محدد مستضدي</text>
+
+  <path d="M320 330 C360 285,360 255,390 245" class="line"/>
+  <path d="M320 440 C360 485,360 515,390 525" class="line"/>
+
+  <!-- T4/T8 -->
+  <rect x="700" y="150" width="185" height="110" class="box"/>
+  <text x="792" y="205" text-anchor="middle" class="h">T4</text>
+  <text x="792" y="240" text-anchor="middle" class="ts" direction="rtl">تنشيط</text>
+
+  <rect x="700" y="505" width="185" height="110" class="box"/>
+  <text x="792" y="560" text-anchor="middle" class="h">T8</text>
+  <text x="792" y="595" text-anchor="middle" class="ts" direction="rtl">تنشيط</text>
+
+  <path d="M620 242 L700 205" class="line"/>
+  <path d="M620 530 L700 560" class="line"/>
+
+  <text x="660" y="350" class="t">IL1</text>
+  <path d="M650 365 L742 260" class="line"/>
+  <path d="M650 385 L742 505" class="line"/>
+
+  <!-- IL2 -->
+  <rect x="930" y="215" width="180" height="95" class="box"/>
+  <text x="1020" y="272" text-anchor="middle" class="h">IL2</text>
+  <path d="M885 205 L930 250" class="line"/>
+
+  <path d="M1020 310 C1010 390,950 470,885 540" class="line"/>
+  <text x="1030" y="400" class="ts" direction="rtl">تكاثر + تمايز</text>
+
+  <!-- LTc -->
+  <rect x="1145" y="475" width="185" height="110" class="box"/>
+  <text x="1237" y="535" text-anchor="middle" class="h">LTc</text>
+  <text x="1237" y="570" text-anchor="middle" class="ts" direction="rtl">خلية قاتلة</text>
+  <path d="M885 560 L1145 535" class="line"/>
+
+  <!-- perforin and destruction -->
+  <rect x="1140" y="250" width="210" height="100" class="box"/>
+  <text x="1245" y="305" text-anchor="middle" class="t" direction="rtl">البرفورين</text>
+  <path d="M1237 475 L1245 350" class="line"/>
+
+  <circle cx="1430" cy="300" r="55" fill="#fff" stroke="#111" stroke-width="4"/>
+  <path d="M1400 260 l20 25 l-20 25 l25 20 l25-20 l20 25" class="thin"/>
+  <text x="1430" y="385" text-anchor="middle" class="ts" direction="rtl">تخريب الغشاء</text>
+  <text x="1430" y="418" text-anchor="middle" class="ts" direction="rtl">ثم موت الخلية</text>
+  <path d="M1350 300 L1370 300" class="line"/>
+
+  <text x="750" y="755" text-anchor="middle" class="ts" direction="rtl">
+    حسب عناصر التصحيح الرسمي: عرض المحدد عبر CMH، تنشيط T4 وT8 بوساطة IL1، إفراز IL2، تمايز T8 إلى LTc، ثم إفراز البرفورين.
+  </text>
+</svg>

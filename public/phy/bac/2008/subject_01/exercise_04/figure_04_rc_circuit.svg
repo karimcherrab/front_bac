@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 530" role="img" aria-label="الشكل 4: دارة شحن مكثفة مع راسم الاهتزاز">
+  <rect width="100%" height="100%" fill="white"/>
+  
+<defs>
+  <marker id="arrRC" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#111827"/>
+  </marker>
+</defs>
+
+<!-- source -->
+<circle cx="165" cy="260" r="55" fill="white" stroke="#111827" stroke-width="4"/>
+<line x1="165" y1="120" x2="165" y2="205" stroke="#111827" stroke-width="4"/>
+<line x1="165" y1="315" x2="165" y2="400" stroke="#111827" stroke-width="4"/>
+<line x1="125" y1="315" x2="125" y2="205" stroke="#111827" stroke-width="3" marker-end="url(#arrRC)"/>
+<text x="92" y="270" font-size="30" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">E</text>
+
+<!-- top wire and resistor -->
+<path d="M165 120 H295" stroke="#111827" stroke-width="4"/>
+<rect x="295" y="92" width="115" height="56" fill="white" stroke="#111827" stroke-width="4"/>
+<text x="352" y="130" text-anchor="middle" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">R</text>
+<path d="M410 120 H675" stroke="#111827" stroke-width="4"/>
+<line x1="675" y1="120" x2="715" y2="120" stroke="#111827" stroke-width="4" marker-end="url(#arrRC)"/>
+<text x="735" y="128" font-size="28" font-family="DejaVu Sans,Arial,sans-serif">Y</text>
+
+<!-- capacitor -->
+<line x1="575" y1="120" x2="575" y2="230" stroke="#111827" stroke-width="4"/>
+<line x1="525" y1="230" x2="625" y2="230" stroke="#111827" stroke-width="5"/>
+<line x1="525" y1="260" x2="625" y2="260" stroke="#111827" stroke-width="5"/>
+<line x1="575" y1="260" x2="575" y2="400" stroke="#111827" stroke-width="4"/>
+<text x="640" y="253" font-size="29" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">C</text>
+
+<!-- bottom switch -->
+<path d="M165 400 H330" stroke="#111827" stroke-width="4"/>
+<circle cx="330" cy="400" r="7" fill="#111827"/>
+<circle cx="390" cy="400" r="7" fill="#111827"/>
+<line x1="330" y1="400" x2="383" y2="365" stroke="#111827" stroke-width="4"/>
+<text x="346" y="350" font-size="28" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">K</text>
+<path d="M390 400 H575" stroke="#111827" stroke-width="4"/>
+
+<!-- oscilloscope ground M -->
+<line x1="575" y1="400" x2="715" y2="400" stroke="#111827" stroke-width="3"/>
+<line x1="685" y1="400" x2="685" y2="430" stroke="#111827" stroke-width="3"/>
+<line x1="655" y1="430" x2="715" y2="430" stroke="#111827" stroke-width="3"/>
+<line x1="665" y1="444" x2="705" y2="444" stroke="#111827" stroke-width="3"/>
+<line x1="676" y1="458" x2="694" y2="458" stroke="#111827" stroke-width="3"/>
+<text x="735" y="409" font-size="27" font-family="DejaVu Sans,Arial,sans-serif">M</text>
+
+<!-- current arrow -->
+<line x1="215" y1="82" x2="300" y2="82" stroke="#111827" stroke-width="3" marker-end="url(#arrRC)"/>
+<text x="257" y="60" font-size="25" font-family="DejaVu Sans,Arial,sans-serif" font-style="italic">i</text>
+
+<text x="450" y="505" text-anchor="middle" font-size="23" font-family="DejaVu Sans,Arial,sans-serif" direction="rtl">الشكل 4</text>
+
+</svg>
