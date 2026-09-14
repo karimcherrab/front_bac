@@ -11,6 +11,10 @@ import {
 import axios from "axios";
 
 import {
+  useNavigate,
+} from "react-router-dom";
+
+import {
   Atom,
   Beaker,
   Binary,
@@ -67,6 +71,8 @@ const iconMap = {
 };
 
 export default function SubjectsPage() {
+  const navigate = useNavigate();
+
   const {
     token,
     logout,
@@ -479,6 +485,17 @@ export default function SubjectsPage() {
             </div>
           </div>
 
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <button
+              type="button"
+              onClick={() =>
+                navigate("/pricing")
+              }
+              className="flex h-11 items-center justify-center rounded-xl bg-violet-600 px-5 text-sm font-black text-white shadow-sm transition hover:bg-violet-700"
+            >
+              العروض والأسعار
+            </button>
+
           {!loading &&
             !error && (
               <div
@@ -529,6 +546,7 @@ export default function SubjectsPage() {
                 </span>
               </div>
             )}
+          </div>
         </header>
 
         {/* Categories */}

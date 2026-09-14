@@ -1,5 +1,3 @@
-// src/layouts/DashboardLayout.jsx
-
 import DashboardTopbar from "../components/dashboard/DashboardTopbar";
 
 export default function DashboardLayout({

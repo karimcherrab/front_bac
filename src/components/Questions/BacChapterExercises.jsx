@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
   AlertCircle,
@@ -78,6 +78,12 @@ function resolvePublicAssetPath(value) {
 const STEP_REEXPLANATION_URL =
   `${API_BASE_URL}/api/bac/exercises/re-explain-step/`;
 
+const BAC_EXERCISE_PAGE_SIZE = 8;
+
+function getBacExerciseDetailUrl(exerciseId) {
+  return `${API_BASE_URL}/api/bac/exercises/${exerciseId}/`;
+}
+
 const MATHJAX_CONFIG = {
   loader: { load: ["input/tex", "output/chtml"] },
   tex: {
@@ -135,8 +141,184 @@ function normalizeDocumentReferences(...candidates) {
     });
 }
 
+function parseJsonObjectCandidate(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") return {};
+
+  const text = value.trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) return {};
+
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Certains serializers Django renvoient le JSON BAC sous une enveloppe:
+ * { id, ..., content: { statement, statement_figures, questions, ... } }
+ * ou content peut même être une chaîne JSON.
+ * Cette fonction remonte les champs pédagogiques au premier niveau sans
+ * supprimer les métadonnées de la base (id, code, etc.).
+ */
+function unwrapExerciseEnvelope(exercise) {
+  const wrapper = asObject(exercise);
+
+  const nestedCandidates = [
+    parseJsonObjectCandidate(wrapper.content),
+    parseJsonObjectCandidate(wrapper.data),
+    parseJsonObjectCandidate(wrapper.payload),
+    parseJsonObjectCandidate(wrapper.json_data),
+    parseJsonObjectCandidate(wrapper.exercise_data),
+    parseJsonObjectCandidate(wrapper.exercise),
+  ].filter((candidate) => Object.keys(candidate).length > 0);
+
+  if (nestedCandidates.length === 0) return wrapper;
+
+  // Les données internes donnent statement/questions/figures.
+  // Les champs du wrapper restent prioritaires pour id/code et métadonnées DB.
+  return {
+    ...nestedCandidates.reduce((acc, candidate) => ({ ...acc, ...candidate }), {}),
+    ...wrapper,
+  };
+}
+
+/**
+ * Normalise toutes les variantes utilisées par les anciens/nouveaux JSON BAC.
+ * Le point important ici est statement_figures (schema 5.0-physics-bac-unified).
+ * On crée aussi les alias statement_graphs/figures pour que tout le reste du
+ * composant puisse continuer à fonctionner sans modifier les fichiers JSON.
+ */
+function normalizeBacExerciseMedia(exercise) {
+  const wrapped = asObject(exercise);
+  const item = unwrapExerciseEnvelope(wrapped);
+  const normalizedRaw = asObject(
+    asObject(item.raw_ai_response).normalized_exercise
+  );
+
+  const candidates = [
+    item,
+    wrapped,
+    parseJsonObjectCandidate(wrapped.content),
+    parseJsonObjectCandidate(wrapped.data),
+    parseJsonObjectCandidate(wrapped.payload),
+    parseJsonObjectCandidate(wrapped.json_data),
+    parseJsonObjectCandidate(wrapped.exercise_data),
+    parseJsonObjectCandidate(wrapped.exercise),
+    normalizedRaw,
+  ];
+
+  /*
+   * IMPORTANT:
+   * statement_figures et solution.figures sont deux espaces différents.
+   * On ne doit JAMAIS promouvoir automatiquement une figure générique vers
+   * l'énoncé si cette même figure existe dans une solution.
+   */
+  const solutionFigureKeys = collectExerciseSolutionFigureKeys({
+    ...item,
+    content: wrapped.content ?? item.content,
+  });
+
+  const documents = normalizeDocumentReferences(
+    ...candidates.flatMap((candidate) => [
+      candidate?.document_references,
+      candidate?.documents,
+    ])
+  );
+
+  // Sources explicitement réservées à l'énoncé.
+  const explicitStatementFigures = normalizeGraphCollection(
+    ...candidates.flatMap((candidate) => [
+      candidate?.statement_figures,
+      candidate?.statementFigures,
+      candidate?.statement_graphs,
+      candidate?.statementGraphs,
+      candidate?.statement_figure,
+      candidate?.statementFigure,
+      candidate?.statement_graph_data,
+      candidate?.statementGraphData,
+    ])
+  ).filter(
+    (graph) =>
+      graph &&
+      !isSolutionFigure(graph) &&
+      !solutionFigureKeys.has(getFigureStableKey(graph))
+  );
+
+  /*
+   * Compatibilité anciens JSON:
+   * figures / graph_data peuvent parfois contenir le graphe de l'énoncé.
+   * On ne les utilise comme fallback QUE si aucune collection d'énoncé
+   * explicite n'existe, et après exclusion des figures de correction.
+   */
+  const genericFigures = normalizeGraphCollection(
+    ...candidates.flatMap((candidate) => [
+      candidate?.figures,
+      candidate?.figure,
+      candidate?.graph_data,
+    ])
+  );
+
+  const legacyStatementFallback =
+    explicitStatementFigures.length === 0
+      ? genericFigures.filter(
+          (graph) =>
+            graph &&
+            !isSolutionFigure(graph) &&
+            !solutionFigureKeys.has(getFigureStableKey(graph))
+        )
+      : [];
+
+  const allStatementMedia = normalizeGraphCollection(
+    documents,
+    explicitStatementFigures,
+    legacyStatementFallback
+  ).filter(
+    (graph) =>
+      graph &&
+      !isSolutionFigure(graph) &&
+      !solutionFigureKeys.has(getFigureStableKey(graph))
+  );
+
+  return {
+    ...item,
+
+    // On garde content pour les anciens accès.
+    content: wrapped.content ?? item.content,
+
+    document_references: normalizeDocumentReferences(
+      item.document_references,
+      documents
+    ),
+
+    // Source de vérité pour l'énoncé.
+    statement_figures: allStatementMedia,
+
+    // Alias historique, mais uniquement avec les médias de l'énoncé.
+    statement_graphs: allStatementMedia,
+
+    /*
+     * Très important:
+     * ne plus injecter allStatementMedia dans figures.
+     * figures reste la collection générique originale; cela évite les
+     * contaminations statement <-> solution.
+     */
+    figures: normalizeGraphCollection(
+      item.figures,
+      genericFigures
+    ),
+  };
+}
+
 function normalizeGeneratedExercise(exercise, index = 0) {
-  const item = asObject(exercise);
+  const item = unwrapExerciseEnvelope(exercise);
   const normalizedRaw = asObject(
     asObject(item.raw_ai_response).normalized_exercise
   );
@@ -155,7 +337,10 @@ function normalizeGeneratedExercise(exercise, index = 0) {
     );
 
   if (!isGeneratedShape) {
-    return { ...item, document_references: documentReferences };
+    return normalizeBacExerciseMedia({
+      ...item,
+      document_references: documentReferences,
+    });
   }
 
   const generatedQuestion = {
@@ -179,7 +364,7 @@ function normalizeGeneratedExercise(exercise, index = 0) {
     },
   };
 
-  return {
+  return normalizeBacExerciseMedia({
     ...item,
     id: item.id ?? `generated-exercise-${index + 1}`,
     code: item.code || `generated-exercise-${item.id ?? index + 1}`,
@@ -190,7 +375,7 @@ function normalizeGeneratedExercise(exercise, index = 0) {
     figures: normalizeGraphCollection(item.figures, documentReferences),
     is_generated: true,
     is_active: item.is_active !== false,
-  };
+  });
 }
 
 
@@ -219,7 +404,7 @@ function normalizeAxisExercisePayload(payload) {
     return {
       ...source,
       exercises: source.exercises.map((exercise, index) =>
-        normalizeGeneratedExercise(exercise, index)
+        normalizeBacExerciseMedia(normalizeGeneratedExercise(exercise, index))
       ),
       chapter: source.chapter || {
         code: source.chapter_code || source.axis?.tag || "",
@@ -294,12 +479,25 @@ function normalizeAxisExercisePayload(payload) {
       statement: source.statement || "",
       document_references: normalizeDocumentReferences(
         source.document_references,
+        source.documents,
         asObject(source.raw_ai_response).normalized_exercise?.document_references
       ),
+      statement_figures: normalizeGraphCollection(
+        source.statement_figures,
+        source.statement_graphs,
+        asObject(source.raw_ai_response).normalized_exercise?.statement_figures
+      ).filter(isStatementFigure),
+      statement_graphs: normalizeGraphCollection(
+        source.statement_graphs,
+        source.statement_figures,
+        asObject(source.raw_ai_response).normalized_exercise?.statement_figures
+      ).filter(isStatementFigure),
       figures: normalizeGraphCollection(
         source.figures,
+        source.statement_figures,
         normalizeDocumentReferences(
           source.document_references,
+          source.documents,
           asObject(source.raw_ai_response).normalized_exercise?.document_references
         )
       ),
@@ -341,7 +539,7 @@ function normalizeAxisExercisePayload(payload) {
                 source.chapter_title || source.chapter_code
               ),
       },
-      exercises: [exercise],
+      exercises: [normalizeBacExerciseMedia(exercise)],
     };
   }
 
@@ -351,7 +549,7 @@ function normalizeAxisExercisePayload(payload) {
    * Chaque question représente ici un exercice autonome.
    */
   if (Array.isArray(source.questions)) {
-    const exercises = source.questions.map((question, index) => ({
+    const exercises = source.questions.map((question, index) => normalizeBacExerciseMedia({
       id: question?.id ?? `${source.tag || "axis"}-${index + 1}`,
       code: question?.id ?? `${source.tag || "axis"}-${index + 1}`,
       title: question?.title || `التمرين ${index + 1}`,
@@ -886,7 +1084,12 @@ function getQuestionLabelFromId(question) {
 }
 
 function getQuestionDisplayLabel(question, fallbackNumber) {
-  // Atomic BAC JSON can provide the exact official label explicitly.
+  // Schema V5: label est la source de vérité pour la numérotation officielle.
+  if (hasText(String(question?.label ?? ""))) {
+    return normalizeQuestionLabel(question.label);
+  }
+
+  // Compatibilité avec les fichiers atomiques précédents.
   if (hasText(String(question?.display_label ?? ""))) {
     return normalizeQuestionLabel(question.display_label);
   }
@@ -1224,16 +1427,22 @@ function getStatementWithoutExerciseHeading(exercise) {
   if (!raw.trim()) return "";
 
   const lines = raw.split("\n");
-  const firstNonEmptyIndex = lines.findIndex((line) => hasText(line));
+  let nonEmptySeen = 0;
 
-  if (
-    firstNonEmptyIndex >= 0 &&
-    isRedundantStatementHeading(lines[firstNonEmptyIndex], exercise)
-  ) {
-    lines.splice(firstNonEmptyIndex, 1);
-  }
+  const cleanedLines = lines.filter((line) => {
+    if (!hasText(line)) return true;
 
-  return normalizeDisplayText(lines.join("\n"));
+    nonEmptySeen += 1;
+
+    // يسمح بوجود «الجزء الثاني» قبل عنوان التمرين الرسمي.
+    if (nonEmptySeen <= 8 && isRedundantStatementHeading(line, exercise)) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return normalizeDisplayText(cleanedLines.join("\n"));
 }
 
 function getStatementQuestionCoverage(statement, questions) {
@@ -1415,7 +1624,7 @@ function getStatementDisplayText(exercise, questions) {
       return;
     }
 
-    if (index <= 1 && isRedundantStatementHeading(trimmed, exercise)) {
+    if (index <= 8 && isRedundantStatementHeading(trimmed, exercise)) {
       previousNonEmptySourceLine = trimmed;
       return;
     }
@@ -1582,20 +1791,23 @@ function extractArabicNamedPartPrefix(value) {
 
 function extractOfficialExerciseHeading(exercise) {
   const rawStatement = String(exercise?.statement ?? "").replace(/\r\n?/g, "\n");
-  const firstNonEmptyLine = rawStatement
+
+  // بعض مواضيع البكالوريا تبدأ بـ «الجزء الأول/الثاني» ثم يأتي
+  // عنوان التمرين في السطر التالي. البحث في أول الأسطر يمنع تكرار
+  // «التمرين ... (نقاط)» داخل الورقة ويمنع تراكبه بصريًا مع رأس الصفحة.
+  const firstLines = rawStatement
     .split("\n")
     .map((line) => normalizeDisplayText(line))
-    .find(Boolean);
+    .filter(Boolean)
+    .slice(0, 8);
 
-  if (
-    firstNonEmptyLine &&
-    /^(?:التمرين|تمرين)\b/u.test(firstNonEmptyLine) &&
-    /(?:نقط|نقطة|نقاط)/u.test(firstNonEmptyLine)
-  ) {
-    return firstNonEmptyLine;
-  }
-
-  return "";
+  return (
+    firstLines.find(
+      (line) =>
+        /^(?:التمرين|تمرين)\b/u.test(line) &&
+        /(?:نقط|نقطة|نقاط)/u.test(line)
+    ) || ""
+  );
 }
 
 function extractExercisePointsLabel(exercise) {
@@ -1788,7 +2000,17 @@ function getQuestionNamedSectionMeta(question) {
 }
 
 function questionExplanationKey(exercise, question, questionIndex) {
-  const questionPart = question?.id ?? questionIndex;
+  // Chaque sous-question virtuelle doit avoir son propre état UI.
+  // Sinon 1-أ, 1-ب, 1-ج partagent tous le même bouton/explication.
+  const questionPart =
+    question?._presentation_key ||
+    [
+      question?.id ?? question?.question_id ?? questionIndex,
+      question?.display_label || question?.number || "",
+    ]
+      .filter((value) => value !== undefined && value !== null && String(value).trim() !== "")
+      .join("-");
+
   return `${exercise?.id ?? exercise?.code ?? "exercise"}-${questionPart}`;
 }
 
@@ -1983,56 +2205,15 @@ function StructuredRichLine({ value, showBullet = false }) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
 
-  const mixed = splitExplanationAndFormula(raw);
-
-  if (mixed) {
-    return (
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-start gap-2">
-          {showBullet && (
-            <span className="mt-[0.95rem] h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500" />
-          )}
-
-          <div className="min-w-0 flex-1">
-            <MathText
-              block
-              className="font-semibold leading-8 text-slate-950 sm:leading-9"
-            >
-              {mixed.explanation}
-            </MathText>
-
-            <StandaloneFormula value={mixed.formula} />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (looksLikeFormulaFragment(raw) && countArabicCharacters(raw) <= 2) {
-    return (
-      <div className="min-w-0">
-        {showBullet ? (
-          <div className="flex min-w-0 items-start gap-2">
-            <span className="mt-[1.25rem] h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500" />
-            <div className="min-w-0 flex-1">
-              <StandaloneFormula value={raw} />
-            </div>
-          </div>
-        ) : (
-          <StandaloneFormula value={raw} />
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div className="flex min-w-0 items-start gap-2">
+    <div className="flex min-w-0 max-w-full items-start gap-2">
       {showBullet && (
         <span className="mt-[1rem] h-1.5 w-1.5 shrink-0 rounded-full bg-slate-500" />
       )}
+
       <MathText
         block
-        className="min-w-0 flex-1 font-semibold leading-8 text-slate-950 sm:leading-9"
+        className="min-w-0 max-w-full flex-1 font-semibold leading-8 text-slate-950 sm:leading-9"
       >
         {raw}
       </MathText>
@@ -2638,22 +2819,23 @@ function repairLatexDelimiters(value) {
     const token = source.slice(index, index + 2);
 
     if (token === "\\[" || token === "\\(") {
-      stack.push({ token, outputIndex: output.length });
+      stack.push({
+        token,
+        outputIndex: output.length,
+      });
       output += token;
       index += 1;
       continue;
     }
 
     if (token === "\\]" || token === "\\)") {
-      const expectedOpen = token === "\\]" ? "\\[" : "\\(";
       const lastOpen = stack[stack.length - 1];
 
-      if (lastOpen?.token === expectedOpen) {
+      if (lastOpen) {
         stack.pop();
-        output += token;
+        output += lastOpen.token === "\\[" ? "\\]" : "\\)";
       }
 
-      // delimiter إغلاق يتيم: لا نعرضه كنص.
       index += 1;
       continue;
     }
@@ -2661,12 +2843,10 @@ function repairLatexDelimiters(value) {
     output += source[index];
   }
 
-  // نحذف delimiters الفتح التي لم تجد إغلاقًا مطابقًا.
-  [...stack]
-    .sort((a, b) => b.outputIndex - a.outputIndex)
-    .forEach(({ outputIndex }) => {
-      output = output.slice(0, outputIndex) + output.slice(outputIndex + 2);
-    });
+  while (stack.length > 0) {
+    const lastOpen = stack.pop();
+    output += lastOpen.token === "\\[" ? "\\]" : "\\)";
+  }
 
   return output;
 }
@@ -2684,7 +2864,7 @@ function normalizeEscapedLatex(value) {
      * dfrac{1}{2} أو cdot أو sqrt{x}
      */
     .replace(
-      /(^|[^\\A-Za-z])(?=(?:dfrac|tfrac|frac|sqrt|cdot|times|leq|geq|neq|infty|rightarrow|leftarrow|Delta|alpha|beta|gamma|theta|lambda|mu|pi|omega|mathrm|mathbf|mathbb|mathcal|overline|underline)\b)/g,
+      /(^|[^\\A-Za-z])(?=(?:dfrac|tfrac|frac|sqrt|cdot|times|leq|geq|neq|infty|rightarrow|leftarrow|Delta|alpha|beta|gamma|theta|lambda|mu|pi|omega|mathrm|mathbf|mathbb|mathcal|overline|underline|approx)\b)/g,
       "$1\\"
     )
 
@@ -2695,7 +2875,7 @@ function normalizeEscapedLatex(value) {
     .replace(/\\\s+([()[\]])/g, "\\$1")
 
     .replace(
-      /\\{2,}(?=(?:displaystyle|textstyle|scriptstyle|frac|dfrac|tfrac|sqrt|alpha|beta|gamma|Delta|delta|lambda|mu|pi|theta|omega|times|cdot|cdots|ldots|dots|leq|le|geq|ge|neq|in|notin|infty|to|rightarrow|leftarrow|sum|prod|lim|forall|exists|left|right|begin|end|text|mathrm|mathbf|mathbb|mathcal|overline|underline|quad|qquad|,|;|!|:|vert|lvert|rvert|pm|mp)\b)/g,
+      /\\{2,}(?=(?:displaystyle|textstyle|scriptstyle|frac|dfrac|tfrac|sqrt|alpha|beta|gamma|Delta|delta|lambda|mu|pi|theta|omega|times|cdot|cdots|ldots|dots|leq|le|geq|ge|neq|in|notin|infty|to|rightarrow|leftarrow|sum|prod|lim|forall|exists|left|right|begin|end|text|mathrm|mathbf|mathbb|mathcal|overline|underline|quad|qquad|,|;|!|:|vert|lvert|rvert|pm|mp|approx)\b)/g,
       "\\"
     )
     .replace(/\$\$([\s\S]*?)\$\$/g, "\\[$1\\]")
@@ -2715,7 +2895,7 @@ function normalizeEscapedLatex(value) {
 }
 
 const ARABIC_RE = /[\u0600-\u06ff]/;
-const LATEX_COMMAND_RE = /\\(?:displaystyle|textstyle|scriptstyle|frac|dfrac|tfrac|sqrt|alpha|beta|gamma|Delta|delta|lambda|mu|pi|theta|omega|times|cdot|cdots|ldots|dots|leq|le|geq|ge|neq|in|notin|infty|to|rightarrow|leftarrow|sum|prod|lim|forall|exists|left|right|begin|end|mathrm|mathbf|mathbb|mathcal|overline|underline|quad|qquad|vert|lvert|rvert|pm|mp)\b/;
+const LATEX_COMMAND_RE = /\\(?:displaystyle|textstyle|scriptstyle|frac|dfrac|tfrac|sqrt|alpha|beta|gamma|Delta|delta|lambda|mu|pi|theta|omega|times|cdot|cdots|ldots|dots|leq|le|geq|ge|neq|in|notin|infty|to|rightarrow|leftarrow|sum|prod|lim|forall|exists|left|right|begin|end|mathrm|mathbf|mathbb|mathcal|overline|underline|quad|qquad|vert|lvert|rvert|pm|mp|approx)\b/;
 
 function repairLatexBraces(value) {
   const source = String(value ?? "");
@@ -2832,7 +3012,69 @@ function prepareMathForRender(value, display = false) {
 }
 
 function SafeMathOutput({ value, display = false }) {
-  const prepared = prepareMathForRender(value, display);
+  const raw = normalizeEscapedLatex(value);
+
+  /*
+   * طبقة أمان أخيرة:
+   * إذا وصلت العربية هنا فهذا يعني أن JSON وضع نصًا عربيًا داخل
+   * \text{} أو \boxed{} في Math mode. لا نرسله إلى MathJax.
+   */
+  if (ARABIC_RE.test(raw)) {
+    const pieces = splitArabicInsideMath(raw);
+
+    return (
+      <span
+        dir="rtl"
+        className="inline max-w-full"
+        style={{ direction: "rtl", unicodeBidi: "isolate" }}
+      >
+        {pieces.map((piece, index) => {
+          if (piece.type === "text") {
+            return (
+              <span
+                key={`safe-text-${index}`}
+                dir="rtl"
+                style={{ direction: "rtl", unicodeBidi: "isolate" }}
+              >
+                {piece.value}
+              </span>
+            );
+          }
+
+          const nested = prepareMathForRender(piece.value, false);
+
+          if (!nested.valid || ARABIC_RE.test(nested.content)) {
+            return (
+              <span
+                key={`safe-fallback-${index}`}
+                dir="ltr"
+                style={{ direction: "ltr", unicodeBidi: "isolate" }}
+              >
+                {nested.fallback || latexToReadableText(piece.value)}
+              </span>
+            );
+          }
+
+          return (
+            <bdi
+              key={`safe-math-${index}`}
+              dir="ltr"
+              className="mx-1 inline-block align-middle"
+              style={{ direction: "ltr", unicodeBidi: "isolate" }}
+            >
+              <MathJax dynamic hideUntilTypeset="first" inline>
+                <span dir="ltr">
+                  {nested.content}
+                </span>
+              </MathJax>
+            </bdi>
+          );
+        })}
+      </span>
+    );
+  }
+
+  const prepared = prepareMathForRender(raw, display);
 
   if (!prepared.valid) {
     return (
@@ -2857,12 +3099,17 @@ function isLikelyMath(value) {
 
   return (
     LATEX_COMMAND_RE.test(candidate) ||
-    /[=<>+\-*/^_{}∈∉≤≥∞∪∩]/.test(candidate) ||
+    /[=<>+\-*/^_{}∈∉≤≥∞∪∩≈]/.test(candidate) ||
     /[A-Za-z]\s*\([^)]*\)/.test(candidate) ||
+    // Vc, cV, 2x, x_f, H3O+, Ca2+ ...
+    /^(?=.*(?:[A-Za-z]|\d))(?=.*(?:[A-Za-z]\d|\d[A-Za-z]|[A-Za-z]{2,}|[_^])).+$/.test(candidate) ||
+    // قيم مع وحدات شائعة: 20.0 mL, 5 mol, 12 V ...
+    /^[-+]?\d+(?:[.,]\d+)?\s*(?:mL|L|mol|mmol|s|min|h|V|mV|A|mA|Ω|ohm|Pa|kPa|N|J|W|Hz|m|cm|mm|kg|g|°C|K)(?:\b|$)/i.test(candidate) ||
     /(?:^|\s)[A-Za-z](?:_[A-Za-z0-9{}+\-]+|\^[A-Za-z0-9{}+\-]+)?(?:\s|$)/.test(candidate) ||
     /^\s*(?:[A-Za-z]|\d)+(?:\s*[,;:]\s*(?:[A-Za-z]|\d)+)*\s*$/.test(candidate)
   );
 }
+
 
 function extractBalancedGroup(text, startIndex) {
   if (text[startIndex] !== "{") return null;
@@ -2920,6 +3167,13 @@ function splitArabicTextCommands(raw) {
 
 function splitLooseCandidate(rawValue) {
   const raw = String(rawValue ?? "");
+
+  // إذا كانت القطعة كاملة رياضية ولا تحتوي عربية، لا نترك المتصفح
+  // يعيد ترتيبها بقواعد RTL. هذا يصلح مثل: Vc - 2x و 2x_f - cV.
+  if (!ARABIC_RE.test(raw) && isLikelyMath(raw.trim())) {
+    return [{ type: "inline", value: `\\(${raw.trim()}\\)` }];
+  }
+
   const segments = [];
   let buffer = "";
   let mode = "text";
@@ -3026,35 +3280,243 @@ function mergeAdjacentSegments(segments) {
   }, []);
 }
 
+
+/**
+ * بعض ملفات الحلول تحتوي خطأ مهمًا من هذا النوع:
+ *
+ *   \(\boxed{المتفاعل المحدد هو S_2O_8^{2-}}\)
+ *
+ * MathJax ليس مناسبًا لعرض جملة عربية كاملة داخل وضع الرياضيات،
+ * فيقلب ترتيب الحروف والكلمات كما ظهر في الواجهة.
+ *
+ * القاعدة هنا:
+ * - إذا كانت القطعة الرياضية لا تحتوي عربية => MathJax عادي.
+ * - إذا احتوت عربية => نفك أغلفة \text{} / \boxed{} ونفصل
+ *   العربية عن الصيغة، بحيث العربية تبقى HTML RTL والصيغة فقط MathJax LTR.
+ */
+function unwrapArabicMathDecorators(value) {
+  let source = String(value ?? "");
+
+  /*
+   * النسخة السابقة كانت تستعمل Regex من النوع ([^{}]*).
+   * هذا يفشل مباشرة مع:
+   *
+   *   \boxed{المتفاعل المحدد هو S_2O_8^{2-}}
+   *
+   * لأن الأس  ^{2-} يحتوي أقواسًا داخلية.
+   *
+   * هنا نستعمل قارئ أقواس متوازن، لذلك نفك الغلاف الخارجي
+   * حتى لو احتوى داخله frac / exponent / nested braces.
+   */
+  const removableCommands = new Set([
+    "boxed",
+    "text",
+    "mbox",
+    "textrm",
+    "textbf",
+    "textit",
+    "mathrm",
+    "mathbf",
+    "mathit",
+    "mathsf",
+    "operatorname",
+  ]);
+
+  const unwrapPass = (input) => {
+    let output = "";
+    let changed = false;
+
+    for (let index = 0; index < input.length; index += 1) {
+      if (input[index] !== "\\") {
+        output += input[index];
+        continue;
+      }
+
+      const commandMatch = input.slice(index).match(/^\\([A-Za-z]+)\s*\{/);
+
+      if (!commandMatch) {
+        output += input[index];
+        continue;
+      }
+
+      const command = commandMatch[1];
+      if (!removableCommands.has(command)) {
+        output += input[index];
+        continue;
+      }
+
+      const openingBraceIndex =
+        index + commandMatch[0].lastIndexOf("{");
+
+      let depth = 0;
+      let closingBraceIndex = -1;
+
+      for (
+        let cursor = openingBraceIndex;
+        cursor < input.length;
+        cursor += 1
+      ) {
+        if (input[cursor] === "{") {
+          depth += 1;
+        } else if (input[cursor] === "}") {
+          depth -= 1;
+
+          if (depth === 0) {
+            closingBraceIndex = cursor;
+            break;
+          }
+        }
+      }
+
+      // command غير مكتمل: لا نترك اسمه ظاهرًا في الواجهة.
+      if (closingBraceIndex < 0) {
+        changed = true;
+        index = openingBraceIndex;
+        continue;
+      }
+
+      const content = input.slice(
+        openingBraceIndex + 1,
+        closingBraceIndex
+      );
+
+      /*
+       * نفك هذه الأغلفة فقط عندما تكون مرتبطة بنص عربي.
+       * بهذا لا نكسر \boxed{x=1} العادي في تمارين الرياضيات.
+       */
+      if (ARABIC_RE.test(content)) {
+        output += content;
+        index = closingBraceIndex;
+        changed = true;
+        continue;
+      }
+
+      output += input.slice(index, closingBraceIndex + 1);
+      index = closingBraceIndex;
+    }
+
+    return { value: output, changed };
+  };
+
+  for (let pass = 0; pass < 8; pass += 1) {
+    const result = unwrapPass(source);
+    source = result.value;
+
+    if (!result.changed) break;
+  }
+
+  /*
+   * تنظيف دفاعي للحالات القديمة/المعطوبة مثل:
+   *   \boxed المتفاعل...
+   * أو بقايا command بعد بيانات غير متوازنة.
+   */
+  source = source
+    .replace(
+      /\\(?:boxed|text|mbox|textrm|textbf|textit|mathrm|mathbf|mathit|mathsf|operatorname)\b\s*/g,
+      ""
+    )
+    .replace(/^\s*\{\s*/u, "")
+    .replace(/\s*\}\s*$/u, "")
+    .trim();
+
+  return source;
+}
+
+function splitArabicInsideMath(rawMath) {
+  const raw = String(rawMath ?? "").trim();
+  if (!raw) return [];
+
+  const isDisplay = raw.startsWith("\\[");
+
+  let inside =
+    (raw.startsWith("\\[") && raw.endsWith("\\]")) ||
+    (raw.startsWith("\\(") && raw.endsWith("\\)"))
+      ? raw.slice(2, -2).trim()
+      : raw;
+
+  inside = unwrapArabicMathDecorators(inside);
+
+  if (!inside) return [];
+
+  if (!ARABIC_RE.test(inside)) {
+    return [
+      {
+        type: isDisplay ? "display" : "inline",
+        value: raw,
+      },
+    ];
+  }
+
+  /*
+   * بعد إزالة \boxed / \text لا نرسل السطر العربي كله إلى MathJax.
+   *
+   * splitLooseCandidate الموجود أصلًا يعرف الصيغ الكيميائية مثل:
+   *   S_2O_8^{2-}
+   *   I^-
+   *   x_f
+   *   C_1V_1
+   *
+   * وإذا بقي command غريب كنص، نحذفه دفاعيًا بدل إظهاره للمستخدم.
+   */
+  const cleaned = inside
+    .replace(/\\(?:boxed|text|mbox)\b\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const pieces = splitLooseCandidate(cleaned);
+
+  return mergeAdjacentSegments(
+    pieces
+      .map((piece) => {
+        const value = String(piece?.value ?? "").trim();
+        if (!value) return null;
+
+        if (piece.type === "inline" || piece.type === "display") {
+          return {
+            type: "inline",
+            value,
+          };
+        }
+
+        return {
+          type: "text",
+          value,
+        };
+      })
+      .filter(Boolean)
+  );
+}
+
 function splitMathSegments(value) {
   const text = normalizeEscapedLatex(value);
+  if (!text) return [];
+
   const segments = [];
   const explicitRegex = /(\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))/g;
+
   let cursor = 0;
   let match;
 
-  const pushLooseText = (part) => {
-    splitArabicTextCommands(part).forEach((piece) => {
-      if (piece.type === "text") {
-        segments.push(piece);
-        return;
-      }
-      segments.push(...splitLooseCandidate(piece.value));
-    });
-  };
-
   while ((match = explicitRegex.exec(text)) !== null) {
     if (match.index > cursor) {
-      pushLooseText(text.slice(cursor, match.index));
+      const before = text.slice(cursor, match.index);
+
+      if (before) {
+        segments.push({
+          type: "text",
+          value: before,
+        });
+      }
     }
 
-    const inside = match[0].slice(2, -2);
-    if (ARABIC_RE.test(inside)) {
-      pushLooseText(inside);
+    const rawMath = match[0];
+
+    if (ARABIC_RE.test(rawMath)) {
+      segments.push(...splitArabicInsideMath(rawMath));
     } else {
       segments.push({
-        type: match[0].startsWith("\\[") ? "display" : "inline",
-        value: match[0],
+        type: rawMath.startsWith("\\[") ? "display" : "inline",
+        value: rawMath,
       });
     }
 
@@ -3062,7 +3524,14 @@ function splitMathSegments(value) {
   }
 
   if (cursor < text.length) {
-    pushLooseText(text.slice(cursor));
+    const tail = text.slice(cursor);
+
+    if (tail) {
+      segments.push({
+        type: "text",
+        value: tail,
+      });
+    }
   }
 
   return mergeAdjacentSegments(segments);
@@ -3077,30 +3546,21 @@ function MathText({ children, className = "", block = false }) {
 
   const Tag = block ? "div" : "span";
 
-  /*
-   * الحل الصحيح للنص المختلط عربي + LaTeX:
-   * 1) لا نرسل الجملة العربية كاملة إلى MathJax، لأن MathJax قد يعامل
-   *    الحروف العربية كرموز رياضية فتظهر متقطعة أو معكوسة.
-   * 2) لا نستعمل unicodeBidi: plaintext على الحاوية، لأنه قد يغيّر
-   *    ترتيب المقاطع العربية والرياضية.
-   * 3) كل معادلة توضع داخل bdi مستقل باتجاه LTR، بينما النص العربي
-   *    يبقى RTL. بهذا نحافظ على ترتيب الجملة وعلى اتصال الحروف العربية.
-   */
   return (
     <Tag
       dir="rtl"
       className={cn(
-        "math-content text-right",
+        "math-content min-w-0 max-w-full text-right",
         block
-          ? "block w-full max-w-full whitespace-pre-wrap break-words leading-[2.4rem]"
-          : "inline whitespace-pre-wrap break-words",
+          ? "block w-full whitespace-pre-line break-words leading-[2.15rem]"
+          : "inline break-words",
         className
       )}
       style={{
         direction: "rtl",
-        unicodeBidi: "isolate",
-        textAlign: "right",
-        overflowWrap: "anywhere",
+        unicodeBidi: "plaintext",
+        overflowWrap: "break-word",
+        wordBreak: "normal",
       }}
     >
       {segments.map((segment, index) => {
@@ -3108,10 +3568,12 @@ function MathText({ children, className = "", block = false }) {
           return (
             <span
               key={`text-${index}`}
-              dir="rtl"
+              dir={ARABIC_RE.test(String(segment.value ?? "")) ? "rtl" : "auto"}
               style={{
-                direction: "rtl",
                 unicodeBidi: "isolate",
+                direction: ARABIC_RE.test(String(segment.value ?? ""))
+                  ? "rtl"
+                  : "auto",
               }}
             >
               {segment.value}
@@ -3121,27 +3583,42 @@ function MathText({ children, className = "", block = false }) {
 
         const isDisplay = segment.type === "display";
 
+        if (isDisplay) {
+          return (
+            <span
+              key={`math-${index}`}
+              dir="ltr"
+              className="my-2 block w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden px-1 py-1 text-center [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              style={{
+                direction: "ltr",
+                unicodeBidi: "isolate",
+              }}
+            >
+              <span className="inline-block min-w-0 max-w-full">
+                <SafeMathOutput value={segment.value} display />
+              </span>
+            </span>
+          );
+        }
+
         return (
           <bdi
             key={`math-${index}`}
             dir="ltr"
-            className={cn(
-              isDisplay
-                ? "my-4 block w-full max-w-full overflow-x-auto py-1 text-center"
-                : "mx-1 inline-block max-w-full align-middle"
-            )}
+            className="mx-1 inline-block max-w-full align-middle"
             style={{
               direction: "ltr",
               unicodeBidi: "isolate",
             }}
           >
-            <SafeMathOutput value={segment.value} display={isDisplay} />
+            <SafeMathOutput value={segment.value} display={false} />
           </bdi>
         );
       })}
     </Tag>
   );
 }
+
 
 
 function MathLTR({ children, className = "", block = false }) {
@@ -3153,6 +3630,7 @@ function MathLTR({ children, className = "", block = false }) {
   const shouldDisplay = block || isDisplayWrapped;
 
   let content = raw;
+
   if (!isDisplayWrapped && !isInlineWrapped) {
     content = shouldDisplay ? `\\[${raw}\\]` : `\\(${raw}\\)`;
   }
@@ -3164,7 +3642,7 @@ function MathLTR({ children, className = "", block = false }) {
       dir="ltr"
       className={cn(
         shouldDisplay
-          ? "block w-full max-w-full overflow-x-auto text-center"
+          ? "block w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden text-center [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           : "inline-block max-w-full align-middle",
         className
       )}
@@ -3174,7 +3652,9 @@ function MathLTR({ children, className = "", block = false }) {
         textAlign: shouldDisplay ? "center" : "inherit",
       }}
     >
-      <SafeMathOutput value={content} display={shouldDisplay} />
+      <span className={shouldDisplay ? "inline-block min-w-0 max-w-full" : ""}>
+        <SafeMathOutput value={content} display={shouldDisplay} />
+      </span>
     </Tag>
   );
 }
@@ -3227,6 +3707,10 @@ function parseAIResponse(value) {
 }
 
 function questionKey(exercise, question, index) {
+  if (hasText(question?._presentation_key)) {
+    return String(question._presentation_key);
+  }
+
   return `${exercise?.id ?? exercise?.code ?? "exercise"}-${
     question?.id ?? index
   }`;
@@ -3303,31 +3787,240 @@ function isSolutionFigure(graph) {
   return ["solution", "answer", "correction"].includes(usage);
 }
 
+function getFigureStableKey(graph) {
+  const item = asObject(graph);
+
+  if (hasText(String(item.id ?? ""))) {
+    return `id:${String(item.id).trim()}`;
+  }
+
+  if (hasText(String(item.figure_id ?? ""))) {
+    return `figure_id:${String(item.figure_id).trim()}`;
+  }
+
+  if (hasText(String(item.code ?? ""))) {
+    return `code:${String(item.code).trim()}`;
+  }
+
+  const path = String(
+    item.path ||
+      item.src ||
+      item.url ||
+      item.image_path ||
+      ""
+  ).trim();
+
+  if (path) return `path:${path}`;
+
+  if (hasText(item.svg)) {
+    return `svg:${item.svg}`;
+  }
+
+  if (Array.isArray(item.series) && item.series.length > 0) {
+    return `series:${JSON.stringify(item.series)}`;
+  }
+
+  if (hasText(item.diagram_type)) {
+    return `diagram:${item.diagram_type}:${item.title || ""}`;
+  }
+
+  return "";
+}
+
+function addGraphKeys(target, graphs) {
+  normalizeGraphCollection(graphs).forEach((graph) => {
+    const key = getFigureStableKey(graph);
+    if (key) target.add(key);
+  });
+}
+
+function collectQuestionSolutionFigureKeys(question) {
+  const keys = new Set();
+  const solution = asObject(question?.solution);
+
+  // Médias stockés directement dans solution.
+  addGraphKeys(keys, [
+    solution?.graphs,
+    solution?.graph_data_list,
+    solution?.figures,
+    solution?.solution_figures,
+    solution?.graph_data,
+    solution?.graph,
+    solution?.figure,
+  ]);
+
+  // Médias stockés dans chaque étape de correction.
+  normalizeSteps(solution?.steps).forEach((step) => {
+    addGraphKeys(keys, [
+      step?.graphs,
+      step?.graph_data_list,
+      step?.figures,
+      step?.graph_data,
+      step?.graph,
+      step?.diagram,
+      step?.figure,
+    ]);
+  });
+
+  // Certains anciens fichiers mettent aussi des figures de correction ici.
+  addGraphKeys(
+    keys,
+    normalizeGraphCollection(
+      question?.solution_figures,
+      question?.solution_graphs
+    )
+  );
+
+  return keys;
+}
+
+function collectExerciseSolutionFigureKeys(exercise) {
+  const keys = new Set();
+  const wrapper = asObject(exercise);
+  const item = unwrapExerciseEnvelope(wrapper);
+  const normalizedRaw = asObject(
+    asObject(item?.raw_ai_response).normalized_exercise
+  );
+
+  const candidates = [
+    item,
+    wrapper,
+    parseJsonObjectCandidate(wrapper.content),
+    parseJsonObjectCandidate(wrapper.data),
+    parseJsonObjectCandidate(wrapper.payload),
+    parseJsonObjectCandidate(wrapper.json_data),
+    parseJsonObjectCandidate(wrapper.exercise_data),
+    parseJsonObjectCandidate(wrapper.exercise),
+    normalizedRaw,
+  ];
+
+  // Collections explicitement marquées comme correction.
+  candidates.forEach((candidate) => {
+    addGraphKeys(keys, [
+      candidate?.solution_figures,
+      candidate?.solutionFigures,
+      candidate?.solution_graphs,
+      candidate?.solutionGraphs,
+    ]);
+
+    // figures génériques explicitement usage="solution".
+    addGraphKeys(
+      keys,
+      normalizeGraphCollection(
+        candidate?.figures,
+        candidate?.figure,
+        candidate?.graph_data
+      ).filter(isSolutionFigure)
+    );
+  });
+
+  // Tout média physiquement imbriqué dans question.solution est une correction,
+  // même si l'ancien JSON n'avait pas usage:"solution".
+  candidates.forEach((candidate) => {
+    asArray(candidate?.questions).forEach((question) => {
+      collectQuestionSolutionFigureKeys(question).forEach((key) =>
+        keys.add(key)
+      );
+    });
+  });
+
+  return keys;
+}
+
+function isRenderableGraph(graph) {
+  return Boolean(
+    graph &&
+      typeof graph === "object" &&
+      (
+        hasText(graph?.svg) ||
+        hasText(graph?.path) ||
+        hasText(graph?.src) ||
+        hasText(graph?.url) ||
+        hasText(graph?.image_path) ||
+        Array.isArray(graph?.series) ||
+        hasText(graph?.diagram_type) ||
+        graph?.react_data?.renderer
+      )
+  );
+}
+
 function getExerciseStatementGraphs(exercise) {
+  const wrapper = asObject(exercise);
+  const item = unwrapExerciseEnvelope(wrapper);
+  const rawNormalized = asObject(
+    asObject(item?.raw_ai_response).normalized_exercise
+  );
+
+  const candidates = [
+    item,
+    wrapper,
+    parseJsonObjectCandidate(wrapper.content),
+    parseJsonObjectCandidate(wrapper.data),
+    parseJsonObjectCandidate(wrapper.payload),
+    parseJsonObjectCandidate(wrapper.json_data),
+    parseJsonObjectCandidate(wrapper.exercise_data),
+    parseJsonObjectCandidate(wrapper.exercise),
+    rawNormalized,
+  ];
+
+  const solutionFigureKeys = collectExerciseSolutionFigureKeys({
+    ...item,
+    content: wrapper.content ?? item.content,
+  });
+
+  const documents = normalizeDocumentReferences(
+    ...candidates.flatMap((candidate) => [
+      candidate?.document_references,
+      candidate?.documents,
+    ])
+  );
+
+  /*
+   * 1) On prend d'abord UNIQUEMENT les champs explicitement réservés
+   *    à l'énoncé.
+   */
+  const explicitStatementGraphs = normalizeGraphCollection(
+    documents,
+    ...candidates.flatMap((candidate) => [
+      candidate?.statement_figures,
+      candidate?.statementFigures,
+      candidate?.statement_graphs,
+      candidate?.statementGraphs,
+      candidate?.statement_graph_data,
+      candidate?.statementGraphData,
+      candidate?.statement_figure,
+      candidate?.statementFigure,
+    ])
+  ).filter(
+    (graph) =>
+      isRenderableGraph(graph) &&
+      !isSolutionFigure(graph) &&
+      !solutionFigureKeys.has(getFigureStableKey(graph))
+  );
+
+  if (explicitStatementGraphs.length > 0) {
+    return explicitStatementGraphs;
+  }
+
+  /*
+   * 2) Compatibilité avec les très anciens JSON qui n'avaient que
+   *    figures / graph_data.
+   *
+   *    Ce fallback n'est utilisé QUE s'il n'existe aucun statement_figures/
+   *    statement_graphs, et toute figure retrouvée dans solution est exclue.
+   */
   return normalizeGraphCollection(
-    normalizeDocumentReferences(
-      exercise?.document_references,
-      exercise?.content?.document_references,
-      asObject(exercise?.raw_ai_response).normalized_exercise?.document_references
-    ),
-    exercise?.statement_graphs,
-    exercise?.content?.statement_graphs,
-
-    // structure des nouveaux JSON BAC.
-    // IMPORTANT: on ne garde ici que les documents de l'énoncé.
-    asArray(exercise?.figures).filter(isStatementFigure),
-    asArray(exercise?.content?.figures).filter(isStatementFigure),
-
-    // compatibilité avec les anciens fichiers
-    exercise?.graph_data,
-    exercise?.content?.graph_data,
-    exercise?.statement_graph_data,
-    exercise?.content?.statement_graph_data,
-    exercise?.statement_figure,
-    exercise?.content?.statement_figure,
-    exercise?.figure,
-    exercise?.content?.figure
-  ).filter(isStatementFigure);
+    ...candidates.flatMap((candidate) => [
+      candidate?.figures,
+      candidate?.graph_data,
+      candidate?.figure,
+    ])
+  ).filter(
+    (graph) =>
+      isRenderableGraph(graph) &&
+      !isSolutionFigure(graph) &&
+      !solutionFigureKeys.has(getFigureStableKey(graph))
+  );
 }
 
 function getExerciseSolutionGraphs(exercise) {
@@ -3340,19 +4033,49 @@ function getExerciseSolutionGraphs(exercise) {
 }
 
 function getQuestionStatementGraphs(question) {
+  const wrapper = asObject(question);
+  const item = unwrapExerciseEnvelope(wrapper);
+
+  const candidates = [
+    item,
+    wrapper,
+    parseJsonObjectCandidate(wrapper.content),
+    parseJsonObjectCandidate(wrapper.data),
+  ];
+
+  const solutionFigureKeys = collectQuestionSolutionFigureKeys(item);
+
+  // Priorité absolue aux champs explicitement réservés à l'énoncé/question.
+  const explicit = normalizeGraphCollection(
+    ...candidates.flatMap((candidate) => [
+      candidate?.statement_figures,
+      candidate?.statementFigures,
+      candidate?.statement_graphs,
+      candidate?.statementGraphs,
+      candidate?.statement_graph_data,
+      candidate?.statement_figure,
+    ])
+  ).filter(
+    (graph) =>
+      isRenderableGraph(graph) &&
+      !isSolutionFigure(graph) &&
+      !solutionFigureKeys.has(getFigureStableKey(graph))
+  );
+
+  if (explicit.length > 0) return explicit;
+
+  // Fallback ancien format, en excluant tout ce qui vient de la solution.
   return normalizeGraphCollection(
-    question?.graph_data,
-    question?.content?.graph_data,
-    question?.statement_graphs,
-    question?.content?.statement_graphs,
-    question?.figures,
-    question?.content?.figures,
-    question?.statement_graph_data,
-    question?.content?.statement_graph_data,
-    question?.statement_figure,
-    question?.content?.statement_figure,
-    question?.figure,
-    question?.content?.figure
+    ...candidates.flatMap((candidate) => [
+      candidate?.figures,
+      candidate?.graph_data,
+      candidate?.figure,
+    ])
+  ).filter(
+    (graph) =>
+      isRenderableGraph(graph) &&
+      !isSolutionFigure(graph) &&
+      !solutionFigureKeys.has(getFigureStableKey(graph))
   );
 }
 
@@ -3654,10 +4377,16 @@ export default function BacChapterExercises({
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [selectedBranch, setSelectedBranch] = useState("all");
   const [selectedYear, setSelectedYear] = useState("all");
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+
+  const [exerciseDetails, setExerciseDetails] = useState({});
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const detailRequestsRef = useRef(new Set());
 
   const [showFullSolution, setShowFullSolution] = useState(false);
   const [stepExplanations, setStepExplanations] = useState({});
@@ -3667,10 +4396,24 @@ export default function BacChapterExercises({
   const [stepHistories, setStepHistories] = useState({});
   const [loadingSavedExplanations, setLoadingSavedExplanations] = useState(false);
 
-  const fetchExercises = async () => {
+  /*
+   * Pour la banque BAC réelle on utilise maintenant deux niveaux:
+   * 1) une liste légère et paginée (sans content/questions/solutions),
+   * 2) le détail lourd d'UN exercice seulement, chargé à la demande puis mis en cache.
+   *
+   * Les endpoints personnalisés/axes générés gardent l'ancien comportement afin
+   * de ne pas casser les autres pages qui réutilisent ce composant.
+   */
+  const usesPagedBacApi = !endpoint && !axisId;
+
+  const fetchExercises = async ({ page = 1, append = false } = {}) => {
     try {
-      setLoading(true);
-      setError("");
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setError("");
+      }
 
       const requestUrl = endpoint || (
         axisId
@@ -3678,30 +4421,93 @@ export default function BacChapterExercises({
           : `${API_BASE_URL}/api/bac/exercises/chapter/${chapterId}/`
       );
 
-      const response = await axios.get(
-        requestUrl,
-        {
-          headers: token
-            ? {
-                Authorization: `Bearer ${token}`,
-              }
-            : {},
+      const params = {};
+
+      if (usesPagedBacApi) {
+        params.page = page;
+        params.page_size = BAC_EXERCISE_PAGE_SIZE;
+
+        if (selectedBranch !== "all") {
+          params.branch_code = selectedBranch;
         }
-      );
-      setData(normalizeAxisExercisePayload(response.data));
-      setCurrentExerciseIndex(0);
-      setShowFullSolution(false);
+
+        if (selectedYear !== "all") {
+          params.year = selectedYear;
+        }
+      }
+
+      const response = await axios.get(requestUrl, {
+        params,
+        headers: token
+          ? {
+              Authorization: `Bearer ${token}`,
+            }
+          : {},
+        timeout: 30000,
+      });
+
+      const normalized = normalizeAxisExercisePayload(response.data);
+
+      if (usesPagedBacApi && append) {
+        setData((previous) => {
+          const oldItems = asArray(previous?.exercises);
+          const newItems = asArray(normalized?.exercises);
+          const byId = new Map();
+
+          [...oldItems, ...newItems].forEach((item) => {
+            const key = String(item?.id ?? item?.code ?? "");
+            if (!key) return;
+            byId.set(key, item);
+          });
+
+          return {
+            ...previous,
+            ...normalized,
+            exercises: [...byId.values()],
+          };
+        });
+      } else {
+        setData(normalized);
+        setCurrentExerciseIndex(0);
+        setShowFullSolution(false);
+      }
+
+      return true;
     } catch (requestError) {
       console.error("Bac chapter exercises error:", requestError);
-      setError(getErrorMessage(requestError));
+
+      if (!append) {
+        setError(getErrorMessage(requestError));
+      }
+
+      return false;
     } finally {
-      setLoading(false);
+      if (append) {
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
+  // Ancien mode: un seul chargement complet.
   useEffect(() => {
-    fetchExercises();
+    if (usesPagedBacApi) return;
+    fetchExercises({ page: 1, append: false });
   }, [chapterId, axisId, endpoint, token]);
+
+  // Banque BAC: chaque changement de filtre recharge seulement la première page.
+  useEffect(() => {
+    if (!usesPagedBacApi) return;
+    fetchExercises({ page: 1, append: false });
+  }, [chapterId, token, selectedBranch, selectedYear]);
+
+  // Un changement réel de source invalide le cache de détails.
+  useEffect(() => {
+    setExerciseDetails({});
+    setDetailError("");
+    detailRequestsRef.current.clear();
+  }, [chapterId, axisId, endpoint]);
 
   const allExercises = useMemo(
     () =>
@@ -3712,6 +4518,13 @@ export default function BacChapterExercises({
   );
 
   const branches = useMemo(() => {
+    if (usesPagedBacApi && asArray(data?.available_branches).length > 0) {
+      return asArray(data.available_branches).map((branch) => ({
+        ...branch,
+        code: String(branch?.code ?? "").trim().toLowerCase(),
+      }));
+    }
+
     const branchMap = new Map();
 
     allExercises.forEach((exercise) => {
@@ -3725,52 +4538,220 @@ export default function BacChapterExercises({
     return [...branchMap.values()].sort((branchA, branchB) =>
       branchA.name.localeCompare(branchB.name, "ar")
     );
-  }, [allExercises]);
+  }, [allExercises, data?.available_branches, usesPagedBacApi]);
 
-  const branchFilteredExercises = useMemo(
-    () =>
-      allExercises.filter((exercise) =>
-        exerciseBelongsToBranch(exercise, selectedBranch)
+  const branchFilteredExercises = useMemo(() => {
+    if (usesPagedBacApi) return allExercises;
+
+    return allExercises.filter((exercise) =>
+      exerciseBelongsToBranch(exercise, selectedBranch)
+    );
+  }, [allExercises, selectedBranch, usesPagedBacApi]);
+
+  const years = useMemo(() => {
+    if (usesPagedBacApi && asArray(data?.available_years).length > 0) {
+      return asArray(data.available_years);
+    }
+
+    return [
+      ...new Set(
+        branchFilteredExercises
+          .map((exercise) => exercise?.year)
+          .filter(Boolean)
       ),
-    [allExercises, selectedBranch]
-  );
-
-  const years = useMemo(
-    () =>
-      [
-        ...new Set(
-          branchFilteredExercises
-            .map((exercise) => exercise?.year)
-            .filter(Boolean)
-        ),
-      ].sort((a, b) => b - a),
-    [branchFilteredExercises]
-  );
+    ].sort((a, b) => b - a);
+  }, [branchFilteredExercises, data?.available_years, usesPagedBacApi]);
 
   const exercises = useMemo(() => {
+    if (usesPagedBacApi) return allExercises;
     if (selectedYear === "all") return branchFilteredExercises;
 
     return branchFilteredExercises.filter(
       (exercise) => String(exercise?.year) === String(selectedYear)
     );
-  }, [branchFilteredExercises, selectedYear]);
+  }, [
+    allExercises,
+    branchFilteredExercises,
+    selectedYear,
+    usesPagedBacApi,
+  ]);
 
   useEffect(() => {
+    if (usesPagedBacApi) return;
+
     if (
       selectedYear !== "all" &&
       !years.some((year) => String(year) === String(selectedYear))
     ) {
       setSelectedYear("all");
     }
-  }, [selectedBranch, selectedYear, years]);
+  }, [selectedBranch, selectedYear, years, usesPagedBacApi]);
 
   useEffect(() => {
     setCurrentExerciseIndex(0);
     setShowFullSolution(false);
+    setDetailError("");
   }, [selectedBranch, selectedYear]);
 
-  const currentExercise = exercises[currentExerciseIndex] || null;
+  const pagination = asObject(data?.pagination);
+
+  const totalExerciseCount = usesPagedBacApi
+    ? Number(pagination?.total_count ?? data?.count ?? exercises.length)
+    : exercises.length;
+
+  const allBranchesCount = usesPagedBacApi
+    ? Number(data?.all_branches_count ?? totalExerciseCount)
+    : allExercises.length;
+
+  const chapterTotalCount = usesPagedBacApi
+    ? Number(data?.chapter_total_count ?? totalExerciseCount)
+    : allExercises.length;
+
+  const currentExerciseSummary = exercises[currentExerciseIndex] || null;
+
+  const currentExercise = usesPagedBacApi
+    ? currentExerciseSummary?.id
+      ? exerciseDetails[String(currentExerciseSummary.id)] || null
+      : null
+    : currentExerciseSummary;
+
+  const loadExerciseDetail = async (
+    exerciseId,
+    { silent = false } = {}
+  ) => {
+    if (!usesPagedBacApi || !exerciseId) return null;
+
+    const cacheKey = String(exerciseId);
+
+    if (exerciseDetails[cacheKey]) {
+      return exerciseDetails[cacheKey];
+    }
+
+    if (detailRequestsRef.current.has(cacheKey)) {
+      return null;
+    }
+
+    detailRequestsRef.current.add(cacheKey);
+
+    if (!silent) {
+      setDetailLoading(true);
+      setDetailError("");
+    }
+
+    try {
+      const response = await axios.get(
+        getBacExerciseDetailUrl(exerciseId),
+        {
+          headers: token
+            ? {
+                Authorization: `Bearer ${token}`,
+              }
+            : {},
+          timeout: 30000,
+        }
+      );
+
+      const normalized = normalizeAxisExercisePayload(response.data);
+      const detail = asArray(normalized?.exercises)[0] || null;
+
+      if (!detail) {
+        throw new Error("EMPTY_EXERCISE_DETAIL");
+      }
+
+      setExerciseDetails((previous) => ({
+        ...previous,
+        [cacheKey]: detail,
+      }));
+
+      return detail;
+    } catch (requestError) {
+      console.error("Bac exercise detail error:", requestError);
+
+      if (!silent) {
+        setDetailError(
+          getErrorMessage(
+            requestError,
+            "تحميل تفاصيل التمرين"
+          )
+        );
+      }
+
+      return null;
+    } finally {
+      detailRequestsRef.current.delete(cacheKey);
+      if (!silent) {
+        setDetailLoading(false);
+      }
+    }
+  };
+
+  // Charger uniquement l'exercice visible.
+  useEffect(() => {
+    if (!usesPagedBacApi || !currentExerciseSummary?.id) return;
+
+    const cacheKey = String(currentExerciseSummary.id);
+    if (exerciseDetails[cacheKey]) {
+      setDetailError("");
+      return;
+    }
+
+    loadExerciseDetail(currentExerciseSummary.id);
+  }, [
+    currentExerciseSummary?.id,
+    usesPagedBacApi,
+    token,
+  ]);
+
+  // Précharger silencieusement le détail de l'exercice suivant après le courant.
+  useEffect(() => {
+    if (!usesPagedBacApi || !currentExercise?.id) return undefined;
+
+    const nextSummary = exercises[currentExerciseIndex + 1];
+    if (!nextSummary?.id) return undefined;
+
+    const nextKey = String(nextSummary.id);
+    if (exerciseDetails[nextKey]) return undefined;
+
+    const timer = window.setTimeout(() => {
+      loadExerciseDetail(nextSummary.id, { silent: true });
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    currentExercise?.id,
+    currentExerciseIndex,
+    exercises.length,
+    usesPagedBacApi,
+  ]);
+
+  // Quand on approche de la fin du lot, charger le lot de résumés suivant.
+  useEffect(() => {
+    if (!usesPagedBacApi) return;
+    if (!pagination?.has_next || !pagination?.next_page || loadingMore) return;
+    if (exercises.length === 0) return;
+
+    const remainingLoaded = exercises.length - 1 - currentExerciseIndex;
+    if (remainingLoaded > 2) return;
+
+    fetchExercises({
+      page: pagination.next_page,
+      append: true,
+    });
+  }, [
+    currentExerciseIndex,
+    exercises.length,
+    pagination?.has_next,
+    pagination?.next_page,
+    loadingMore,
+    usesPagedBacApi,
+  ]);
+
   const questions = asArray(currentExercise?.questions);
+
+  const presentationQuestions = useMemo(
+    () => getSolutionPresentationQuestions(questions),
+    [questions]
+  );
 
   useEffect(() => {
     if (!currentExercise) {
@@ -3821,14 +4802,36 @@ export default function BacChapterExercises({
   const goPrevious = () => {
     setCurrentExerciseIndex((previous) => Math.max(previous - 1, 0));
     setShowFullSolution(false);
+    setDetailError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const goNext = () => {
-    setCurrentExerciseIndex((previous) =>
-      Math.min(previous + 1, exercises.length - 1)
-    );
+  const goNext = async () => {
     setShowFullSolution(false);
+    setDetailError("");
+
+    if (currentExerciseIndex < exercises.length - 1) {
+      setCurrentExerciseIndex((previous) => previous + 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    if (
+      usesPagedBacApi &&
+      pagination?.has_next &&
+      pagination?.next_page &&
+      !loadingMore
+    ) {
+      const loaded = await fetchExercises({
+        page: pagination.next_page,
+        append: true,
+      });
+
+      if (loaded) {
+        setCurrentExerciseIndex((previous) => previous + 1);
+      }
+    }
+
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -3942,7 +4945,7 @@ export default function BacChapterExercises({
     if (!token) {
       setStepErrors((previous) => ({
         ...previous,
-        [key]: "يجب تسجيل الدخول للحصول على شرح مبسط.",
+        [key]: "يجب تسجيل الدخول للحصول على شرح مبسط للحل.",
       }));
       return;
     }
@@ -3964,27 +4967,96 @@ export default function BacChapterExercises({
         return next;
       });
 
-      const response = await axios.post(
-        STEP_REEXPLANATION_URL,
-        {
-          exercise_id: Number(exercise?.id),
-          question_id: String(question.id),
-
-          // يبقى هذا الحقل فقط للتوافق مع serializer القديم.
-          // الـbackend المعدل أدناه لا يستعمله لاختيار خطوة.
-          step_number: 1,
-
-          request_type: "very_simple",
-          force_regenerate: Boolean(forceRegenerate),
+      const requestConfig = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
         },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 120000,
+        timeout: 120000,
+      };
+
+      const legacyPayload = {
+        exercise_id: Number(exercise?.id),
+        question_id: String(question.id),
+        step_number: Number(question?._presentation_first_step_number || 1),
+        request_type: "very_simple",
+        force_regenerate: Boolean(forceRegenerate),
+      };
+
+      const focusedPayload = question?._is_virtual_part
+        ? {
+            ...legacyPayload,
+            // Chaque sous-question (1-أ، 1-ب...) reste indépendante.
+            question_part_label: String(
+              question?.display_label || question?.number || ""
+            ),
+            question_part_text: String(
+              question?.text || question?.standalone_text || ""
+            ),
+          }
+        : legacyPayload;
+
+      // Version enrichie: si le backend accepte ces champs, il reçoit aussi
+      // le corrigé EXACT actuellement affiché et sait que la demande porte
+      // sur le SOLUTION, pas sur l'énoncé. Le fallback ci-dessous garantit
+      // la compatibilité avec l'ancien serializer DRF.
+      const solutionContext = [
+        question?.solution?.strategy,
+        question?.solution?.main_idea,
+        question?.solution?.detailed_explanation,
+        ...normalizeSteps(question?.solution?.steps).flatMap((step) => [
+          step?.title,
+          step?.explanation,
+          step?.latex,
+          step?.calculation,
+          step?.result,
+        ]),
+        question?.solution?.final_answer,
+      ]
+        .filter(hasText)
+        .join("\n");
+
+      const solutionFocusedPayload = {
+        ...focusedPayload,
+        explanation_target: "solution",
+        solution_part_text: solutionContext,
+      };
+
+      let response;
+
+      try {
+        response = await axios.post(
+          STEP_REEXPLANATION_URL,
+          solutionFocusedPayload,
+          requestConfig
+        );
+      } catch (solutionFocusedError) {
+        if (solutionFocusedError?.response?.status === 400) {
+          try {
+            response = await axios.post(
+              STEP_REEXPLANATION_URL,
+              focusedPayload,
+              requestConfig
+            );
+          } catch (focusedRequestError) {
+            // Ancien serializer: il peut refuser question_part_label/text.
+            if (
+              question?._is_virtual_part &&
+              focusedRequestError?.response?.status === 400
+            ) {
+              response = await axios.post(
+                STEP_REEXPLANATION_URL,
+                legacyPayload,
+                requestConfig
+              );
+            } else {
+              throw focusedRequestError;
+            }
+          }
+        } else {
+          throw solutionFocusedError;
         }
-      );
+      }
 
       const parsed = parseAIResponse(
         response.data?.explanation ?? response.data
@@ -4034,7 +5106,7 @@ export default function BacChapterExercises({
         ...previous,
         [key]: getErrorMessage(
           requestError,
-          "إعادة شرح هذا السؤال"
+          "إعادة شرح حل هذا السؤال بطريقة أبسط"
         ),
       }));
     } finally {
@@ -4059,7 +5131,10 @@ export default function BacChapterExercises({
   if (loading) return <LoadingState />;
   if (error) return <ErrorState message={error} onRetry={fetchExercises} />;
 
-  if (allExercises.length === 0) {
+  if (
+    (!usesPagedBacApi && allExercises.length === 0) ||
+    (usesPagedBacApi && chapterTotalCount === 0)
+  ) {
     return (
       <EmptyState
         title="لا توجد تمارين"
@@ -4202,7 +5277,7 @@ export default function BacChapterExercises({
         <ChapterHeader
           chapter={data?.chapter}
           count={exercises.length}
-          totalCount={allExercises.length}
+          totalCount={totalExerciseCount}
           years={years}
           selectedYear={selectedYear}
           onYearChange={setSelectedYear}
@@ -4211,59 +5286,80 @@ export default function BacChapterExercises({
         <BranchSelector
           branches={branches}
           exercises={allExercises}
+          totalCount={allBranchesCount}
           selectedBranch={selectedBranch}
-          onBranchChange={setSelectedBranch}
+          onBranchChange={(branchCode) => {
+            setSelectedBranch(branchCode);
+            setSelectedYear("all");
+          }}
         />
 
-        {currentExercise ? (
+        {currentExerciseSummary ? (
           <>
             <ExerciseNavigation
               currentIndex={currentExerciseIndex}
-              total={exercises.length}
+              total={totalExerciseCount}
               onPrevious={goPrevious}
               onNext={goNext}
+              loadingNext={loadingMore}
             />
 
-            <ExamPaper exercise={currentExercise} questions={questions} />
-
-            <div className="bac-screen-only flex justify-center">
-              <button
-                type="button"
-                onClick={() => setShowFullSolution((previous) => !previous)}
-                className={cn(
-                  "inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition sm:w-auto sm:px-7",
-                  showFullSolution
-                    ? "border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
-                    : "bg-slate-950 text-white shadow-lg shadow-slate-900/15 hover:bg-slate-800"
-                )}
-              >
-                {showFullSolution ? <EyeOff size={19} /> : <Eye size={19} />}
-                {showFullSolution
-                  ? "إخفاء الحل النموذجي الكامل"
-                  : "إظهار الحل النموذجي الكامل"}
-              </button>
-            </div>
-
-            {showFullSolution && (
-              <FullSolutionDocument
-                exercise={currentExercise}
-                questions={questions}
-                stepExplanations={stepExplanations}
-                visibleStepExplanations={visibleStepExplanations}
-                loadingStepKey={loadingStepKey}
-                stepErrors={stepErrors}
-                stepHistories={stepHistories}
-                loadingSavedExplanations={loadingSavedExplanations}
-                onQuestionReExplanation={handleQuestionReExplanation}
-                onSelectSavedExplanation={handleSelectSavedExplanation}
+            {usesPagedBacApi && !currentExercise ? (
+              <ExerciseDetailLoadingState
+                loading={detailLoading}
+                error={detailError}
+                onRetry={() =>
+                  loadExerciseDetail(currentExerciseSummary.id)
+                }
               />
+            ) : (
+              <>
+                <ExamPaper
+                  exercise={currentExercise}
+                  questions={presentationQuestions}
+                  showSolutions={showFullSolution}
+                  stepExplanations={stepExplanations}
+                  visibleStepExplanations={visibleStepExplanations}
+                  loadingStepKey={loadingStepKey}
+                  stepErrors={stepErrors}
+                  stepHistories={stepHistories}
+                  loadingSavedExplanations={loadingSavedExplanations}
+                  onQuestionReExplanation={handleQuestionReExplanation}
+                  onSelectSavedExplanation={handleSelectSavedExplanation}
+                />
+
+                <div className="bac-screen-only flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowFullSolution((previous) => !previous)
+                    }
+                    className={cn(
+                      "inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black transition sm:w-auto sm:px-7",
+                      showFullSolution
+                        ? "border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+                        : "bg-slate-950 text-white shadow-lg shadow-slate-900/15 hover:bg-slate-800"
+                    )}
+                  >
+                    {showFullSolution ? (
+                      <EyeOff size={19} />
+                    ) : (
+                      <Eye size={19} />
+                    )}
+                    {showFullSolution
+                      ? "إخفاء الحلول"
+                      : "إظهار الحلول سؤالًا بسؤال"}
+                  </button>
+                </div>
+              </>
             )}
 
             <ExerciseNavigation
               currentIndex={currentExerciseIndex}
-              total={exercises.length}
+              total={totalExerciseCount}
               onPrevious={goPrevious}
               onNext={goNext}
+              loadingNext={loadingMore}
             />
           </>
         ) : (
@@ -4349,13 +5445,18 @@ function ChapterHeader({
 function BranchSelector({
   branches,
   exercises,
+  totalCount = null,
   selectedBranch,
   onBranchChange,
 }) {
-  const getCount = (branchCode) =>
-    exercises.filter((exercise) =>
-      exerciseBelongsToBranch(exercise, branchCode)
+  const getCount = (branch) => {
+    const serverCount = Number(branch?.exercise_count);
+    if (Number.isFinite(serverCount)) return serverCount;
+
+    return exercises.filter((exercise) =>
+      exerciseBelongsToBranch(exercise, branch?.code)
     ).length;
+  };
 
   if (branches.length === 0) return null;
 
@@ -4372,7 +5473,7 @@ function BranchSelector({
           active={selectedBranch === "all"}
           name="كل الشعب"
           code="all"
-          count={exercises.length}
+          count={Number.isFinite(Number(totalCount)) ? Number(totalCount) : exercises.length}
           onClick={() => onBranchChange("all")}
         />
 
@@ -4382,7 +5483,7 @@ function BranchSelector({
             active={selectedBranch === branch.code}
             name={branch.name || branch.code}
             code={branch.code}
-            count={getCount(branch.code)}
+            count={getCount(branch)}
             onClick={() => onBranchChange(branch.code)}
           />
         ))}
@@ -4487,6 +5588,7 @@ function ExerciseNavigation({
   total,
   onPrevious,
   onNext,
+  loadingNext = false,
 }) {
   return (
     <div className="bac-screen-only mx-auto flex w-full max-w-[1040px] items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-2.5 shadow-sm sm:p-3">
@@ -4514,12 +5616,68 @@ function ExerciseNavigation({
       <button
         type="button"
         onClick={onNext}
-        disabled={currentIndex >= total - 1}
+        disabled={loadingNext || currentIndex >= total - 1}
         className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-3 text-xs font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 sm:px-4 sm:text-sm"
       >
-        التالي
-        <ChevronLeft size={18} />
+        {loadingNext ? (
+          <Loader2 size={17} className="animate-spin" />
+        ) : (
+          <ChevronLeft size={18} />
+        )}
+        {loadingNext ? "تحميل..." : "التالي"}
       </button>
+    </div>
+  );
+}
+
+
+function ExerciseDetailLoadingState({ loading, error, onRetry }) {
+  return (
+    <div className="mx-auto w-full max-w-[1040px] rounded-[1.6rem] border border-slate-200 bg-white px-5 py-14 text-center shadow-sm sm:px-8">
+      {error ? (
+        <>
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-700">
+            <AlertCircle size={23} />
+          </div>
+          <h3 className="mt-4 text-base font-black text-slate-950">
+            تعذر تحميل تفاصيل التمرين
+          </h3>
+          <p className="mx-auto mt-2 max-w-xl text-sm font-semibold leading-7 text-slate-500">
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-black text-white hover:bg-slate-800"
+          >
+            <RefreshCcw size={17} />
+            إعادة المحاولة
+          </button>
+        </>
+      ) : (
+        <>
+          <Loader2
+            size={30}
+            className="mx-auto animate-spin text-blue-700"
+          />
+          <h3 className="mt-4 text-base font-black text-slate-950">
+            تحميل التمرين
+          </h3>
+          <p className="mt-2 text-sm font-semibold text-slate-500">
+            نجلب نص هذا التمرين ورسوماته وحلوله فقط بدل تحميل بنك البكالوريا كاملًا.
+          </p>
+          {!loading && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-700 hover:bg-slate-50"
+            >
+              <RefreshCcw size={17} />
+              تحميل الآن
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -4572,22 +5730,87 @@ function getSourceReferenceFile(exercise) {
   return "";
 }
 
-function ExamPaper({ exercise, questions }) {
+function ExamPaper({
+  exercise,
+  questions,
+  showSolutions = false,
+  stepExplanations,
+  visibleStepExplanations,
+  loadingStepKey,
+  stepErrors,
+  stepHistories,
+  loadingSavedExplanations,
+  onQuestionReExplanation,
+  onSelectSavedExplanation,
+}) {
   const statementGraphs = getExerciseStatementGraphs(exercise);
   const statementSections = getExerciseStatementSections(exercise);
   const statementTables = getExerciseStatementTables(exercise);
   const branches = getExerciseBranches(exercise);
+
+  // IMPORTANT: statement_figures doit être rendu même si le fichier n'est pas
+  // détecté comme canonicalSourceStatement. C'est le cas des JSON V5 physique.
+  const hasStatementMedia =
+    statementGraphs.length > 0 || statementTables.length > 0;
+
+  if (import.meta.env.DEV && exercise) {
+    console.debug("[BAC media]", {
+      code: exercise?.code,
+      schema: exercise?.schema_version,
+      statement_figures_raw: asArray(exercise?.statement_figures).length,
+      statement_graphs_rendered: statementGraphs.length,
+      statement_tables_rendered: statementTables.length,
+    });
+  }
+
+  /*
+   * questions peut déjà être une vue atomique. Pour nettoyer correctement
+   * statement et détecter les anciens fichiers source-faithful, on conserve
+   * aussi la liste des vraies questions source.
+   */
+  const sourceQuestions = getSourceQuestionsFromPresentation(questions);
+  const sourceVisibleQuestions = getVisibleQuestions(
+    exercise,
+    sourceQuestions
+  );
   const visibleQuestions = getVisibleQuestions(exercise, questions);
+
+  const solutionFigureAssignments = useMemo(
+    () => buildSolutionFigureAssignments(exercise, visibleQuestions),
+    [exercise, visibleQuestions]
+  );
+
+  const hasVirtualQuestionParts = visibleQuestions.some(
+    (question) => question?._is_virtual_part
+  );
+
+  const compositeSourceQuestion = hasVirtualQuestionParts
+    ? visibleQuestions.find((question) => question?._source_question)?._source_question
+    : null;
+
+  const compositeFinalAnswer = hasVirtualQuestionParts
+    ? asObject(compositeSourceQuestion?.solution)?.final_answer || ""
+    : "";
+
+  /*
+   * Les introductions communes et les données générales qui étaient
+   * accidentellement stockées dans question.text remontent ici UNE SEULE FOIS
+   * dans le texte de l'exercice. Elles ne sont donc plus répétées dans chaque
+   * question sous un bloc "معطيات هذا الجزء".
+   */
+  const presentationStatementContextBlocks =
+    getPresentationStatementContextBlocks(questions);
 
   const filteredStatementText = getStatementDisplayText(
     exercise,
-    visibleQuestions
+    sourceVisibleQuestions
   );
+
   const originalStatementText = normalizeDisplayText(exercise?.statement);
 
   const canonicalSourceStatement = shouldRenderCanonicalSourceStatement(
     exercise,
-    visibleQuestions
+    sourceVisibleQuestions
   );
 
   const canonicalStatementText =
@@ -4598,11 +5821,16 @@ function ExamPaper({ exercise, questions }) {
    * أما الملفات التي تحفظ المعطيات فقط داخل statement والأسئلة في
    * questions[] فنستعمل النسخة المنظفة ثم نعرض الأسئلة أسفلها.
    */
-  const statementText = canonicalSourceStatement
+  const baseStatementText = canonicalSourceStatement
     ? canonicalStatementText
     : hasText(filteredStatementText)
       ? filteredStatementText
       : originalStatementText;
+
+  const statementText = appendPresentationContextsToStatement(
+    baseStatementText,
+    presentationStatementContextBlocks
+  );
 
   const hasMainStatement = hasText(statementText);
 
@@ -4772,7 +6000,7 @@ function ExamPaper({ exercise, questions }) {
 
     return (
       <li
-        key={question?.id ?? index}
+        key={question?._presentation_key ?? question?.id ?? index}
         data-tutor-context
         data-tutor-exercise-kind="bac_exercise"
         data-tutor-exercise-id={exercise?.id ?? ""}
@@ -4785,22 +6013,15 @@ function ExamPaper({ exercise, questions }) {
         data-tutor-question-title={
           question?.title || `السؤال ${index + 1}`
         }
-        className="min-w-0 break-inside-avoid"
+        className={cn(
+          "min-w-0 break-inside-avoid",
+          question?._presentation_atomic &&
+            "rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5 sm:py-5"
+        )}
       >
         {hasText(getQuestionSectionTitle(question)) && (
           <div className="mb-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm font-black text-blue-950 sm:px-4">
             {getQuestionSectionTitle(question)}
-          </div>
-        )}
-
-        {hasText(getQuestionContextBefore(question)) && (
-          <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50/75 px-3.5 py-3 sm:px-4">
-            <p className="mb-1 text-[10px] font-black text-slate-500">
-              معطيات هذا الجزء
-            </p>
-            <BacStatementText className="text-sm font-semibold leading-8 text-slate-800 sm:text-[0.98rem]">
-              {getQuestionContextBefore(question)}
-            </BacStatementText>
           </div>
         )}
 
@@ -4836,11 +6057,66 @@ function ExamPaper({ exercise, questions }) {
             </BacStatementText>
           </div>
         )}
+
+        {/* عند إظهار الحل: سؤال ثم حله مباشرة، وبعده السؤال التالي. */}
+        {showSolutions && (
+          <div className="mt-5 border-t border-slate-200 pt-5">
+            <div className="mb-3 flex items-center gap-2">
+              <CheckCircle2 size={18} className="text-emerald-700" />
+              <p className="text-sm font-black text-emerald-800">
+                الحل النموذجي للسؤال {getQuestionDisplayLabel(question, index + 1)}
+              </p>
+            </div>
+
+            <StoredSolution
+              exercise={exercise}
+              question={question}
+              questionIndex={index}
+              solution={asObject(question?.solution)}
+              assignedSolutionFigureIds={
+                solutionFigureAssignments.get(index) || new Set()
+              }
+              showReExplanation={true}
+              stepExplanations={stepExplanations}
+              visibleStepExplanations={visibleStepExplanations}
+              loadingStepKey={loadingStepKey}
+              stepErrors={stepErrors}
+              stepHistories={stepHistories}
+              loadingSavedExplanations={loadingSavedExplanations}
+              onQuestionReExplanation={onQuestionReExplanation}
+              onSelectSavedExplanation={onSelectSavedExplanation}
+            />
+          </div>
+        )}
       </li>
     );
   };
 
   const renderStructuredSectionQuestions = (sectionQuestions) => {
+    // Dans la vue pédagogique demandée, chaque question est une carte autonome.
+    // On n'imbrique donc pas 2-أ/2-ب/2-ج sous un grand bloc « 2 ».
+    if (sectionQuestions.some((item) => item?.question?._presentation_atomic)) {
+      return (
+        <ol className="m-0 list-none space-y-3 p-0 sm:space-y-4">
+          {sectionQuestions.map((item) => {
+            const label = getQuestionDisplayLabel(
+              item.question,
+              item.originalIndex + 1
+            );
+
+            return renderQuestionRow(
+              item.question,
+              item.originalIndex,
+              {
+                romanSubQuestion: false,
+                labelOverride: label ? `${label})` : undefined,
+              }
+            );
+          })}
+        </ol>
+      );
+    }
+
     const groups = [];
 
     sectionQuestions.forEach((item) => {
@@ -4958,8 +6234,8 @@ function ExamPaper({ exercise, questions }) {
       className="bac-paper mx-auto w-full min-w-0 max-w-[1080px] overflow-hidden rounded-[1.4rem] border border-slate-200 bg-slate-50/30 shadow-[0_20px_60px_-42px_rgba(15,23,42,0.35)]"
     >
       <header className="border-b border-slate-200 bg-white px-5 pb-4 pt-5 sm:px-8 sm:pb-5 sm:pt-6 lg:px-10">
-        <div className="grid gap-3 md:grid-cols-[1fr_auto_1fr] md:items-start">
-          <div className="order-2 text-right text-[11px] font-bold leading-5 text-slate-700 md:order-1 sm:text-xs sm:leading-6">
+        <div dir="ltr" className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(280px,420px)_minmax(0,1fr)] md:items-start">
+          <div dir="rtl" className="min-w-0 order-2 text-right text-[11px] font-bold leading-5 text-slate-700 md:order-1 sm:text-xs sm:leading-6">
             <p className="font-black text-slate-950">
               الجمهورية الجزائرية الديمقراطية الشعبية
             </p>
@@ -4970,7 +6246,7 @@ function ExamPaper({ exercise, questions }) {
             )}
           </div>
 
-          <div className="order-1 text-center md:order-2 md:min-w-[300px]">
+          <div dir="rtl" className="min-w-0 order-1 text-center md:order-2">
             <p className="text-[10px] font-black tracking-[0.11em] text-slate-500 sm:text-xs">
               امتحان شهادة البكالوريا
             </p>
@@ -4988,7 +6264,7 @@ function ExamPaper({ exercise, questions }) {
             )}
           </div>
 
-          <div className="order-3 text-left text-[11px] font-bold leading-5 text-slate-700 sm:text-xs sm:leading-6">
+          <div dir="rtl" className="min-w-0 order-3 text-right text-[11px] font-bold leading-5 text-slate-700 sm:text-xs sm:leading-6 md:text-left">
             <p>التمرين: {exerciseNumber}</p>
             {pageLabel && <p>الصفحة: {pageLabel}</p>}
             {pointsLabel && !headingIncludesPoints && (
@@ -5009,6 +6285,13 @@ function ExamPaper({ exercise, questions }) {
             </div>
           )}
 
+          {romanMode && hasStatementMedia && (
+            <BacStatementMedia
+              graphs={statementGraphs}
+              tables={statementTables}
+            />
+          )}
+
           {!romanMode && hasMainStatement && (
             <section className="mb-6 min-w-0 overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-4 py-3 sm:px-5">
@@ -5026,7 +6309,7 @@ function ExamPaper({ exercise, questions }) {
                   </div>
                 </div>
 
-                {pointsLabel && (
+                {pointsLabel && !headingIncludesPoints && (
                   <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-black text-slate-700">
                     {pointsLabel}
                   </span>
@@ -5034,22 +6317,25 @@ function ExamPaper({ exercise, questions }) {
               </div>
 
               <div className="px-4 py-4 sm:px-5 sm:py-5 lg:px-6">
-                <BacStatementText
-                  className="text-slate-950"
-                  media={
-                    canonicalSourceStatement ? (
-                      <BacStatementMedia
-                        graphs={statementGraphs}
-                        tables={statementTables}
-                      />
-                    ) : null
-                  }
-                  insertMediaBeforeQuestions={canonicalSourceStatement}
-                >
+                <BacStatementText className="text-slate-950">
                   {statementText}
                 </BacStatementText>
+
+                {hasStatementMedia && (
+                  <BacStatementMedia
+                    graphs={statementGraphs}
+                    tables={statementTables}
+                  />
+                )}
               </div>
             </section>
+          )}
+
+          {!romanMode && !hasMainStatement && hasStatementMedia && (
+            <BacStatementMedia
+              graphs={statementGraphs}
+              tables={statementTables}
+            />
           )}
 
           {!canonicalSourceStatement && statementSections.map((section, index) => {
@@ -5088,33 +6374,6 @@ function ExamPaper({ exercise, questions }) {
               </section>
             );
           })}
-
-          {!canonicalSourceStatement && !romanMode && statementGraphs.length > 0 && (
-            <div className="my-5 space-y-5 break-inside-avoid">
-              {statementGraphs.map((graph, graphIndex) => (
-                <GraphRenderer
-                  key={
-                    graph?.id ??
-                    graph?.path ??
-                    `exercise-statement-graph-${graphIndex}`
-                  }
-                  graph={graph}
-                  compact
-                />
-              ))}
-            </div>
-          )}
-
-          {!canonicalSourceStatement && !romanMode && statementTables.length > 0 && (
-            <div className="my-5 space-y-4 break-inside-avoid">
-              {statementTables.map((table, tableIndex) => (
-                <SmartMathTable
-                  key={`exercise-statement-table-${tableIndex}`}
-                  table={table}
-                />
-              ))}
-            </div>
-          )}
 
           {romanMode && romanSectionOrder.length > 0 && (
             <div className="mt-1 space-y-4 sm:space-y-5">
@@ -5180,35 +6439,6 @@ function ExamPaper({ exercise, questions }) {
                         </div>
                       )}
 
-                      {sectionName === romanSectionOrder[0] &&
-                        statementGraphs.length > 0 && (
-                          <div className="my-4 space-y-4 break-inside-avoid sm:my-5">
-                            {statementGraphs.map((graph, graphIndex) => (
-                              <GraphRenderer
-                                key={
-                                  graph?.id ??
-                                  graph?.path ??
-                                  `exercise-statement-graph-${graphIndex}`
-                                }
-                                graph={graph}
-                                compact
-                              />
-                            ))}
-                          </div>
-                        )}
-
-                      {sectionName === romanSectionOrder[0] &&
-                        statementTables.length > 0 && (
-                          <div className="my-4 space-y-4 break-inside-avoid sm:my-5">
-                            {statementTables.map((table, tableIndex) => (
-                              <SmartMathTable
-                                key={`exercise-statement-table-${tableIndex}`}
-                                table={table}
-                              />
-                            ))}
-                          </div>
-                        )}
-
                       {sectionQuestions.length > 0 &&
                         renderStructuredSectionQuestions(
                           sectionQuestions
@@ -5250,6 +6480,56 @@ function ExamPaper({ exercise, questions }) {
               )}
             </section>
           )}
+
+          {canonicalSourceStatement &&
+            showSolutions &&
+            visibleQuestions.length > 0 && (
+              <section className="mt-6 border-t border-slate-300 pt-5 sm:mt-8 sm:pt-6">
+                <div className="mb-4 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-700 text-white">
+                    <CheckCircle2 size={18} />
+                  </span>
+                  <div>
+                    <p className="text-[11px] font-black text-emerald-600">
+                      التصحيح المنظم
+                    </p>
+                    <h3 className="text-sm font-black text-emerald-950 sm:text-base">
+                      الحل سؤالًا بسؤال
+                    </h3>
+                  </div>
+                </div>
+
+                {renderStructuredSectionQuestions(
+                  visibleQuestions.map((question, originalIndex) => ({
+                    question,
+                    originalIndex,
+                  }))
+                )}
+              </section>
+            )}
+
+          {showSolutions && hasVirtualQuestionParts && hasText(compositeFinalAnswer) && (
+            <section className="mt-6 overflow-hidden rounded-2xl border border-emerald-300 bg-gradient-to-br from-emerald-50 via-white to-teal-50 shadow-sm">
+              <div className="flex items-center gap-3 border-b border-emerald-200 bg-emerald-100/70 px-4 py-3 sm:px-5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-700 text-white">
+                  <CheckCircle2 size={19} />
+                </span>
+                <div>
+                  <p className="text-[11px] font-black text-emerald-600">
+                    بعد إكمال جميع الأسئلة
+                  </p>
+                  <h3 className="text-sm font-black text-emerald-950 sm:text-base">
+                    خلاصة التمرين
+                  </h3>
+                </div>
+              </div>
+              <div className="px-4 py-5 sm:px-6">
+                <MathText block className="font-black leading-10 text-emerald-950 sm:text-lg">
+                  {compositeFinalAnswer}
+                </MathText>
+              </div>
+            </section>
+          )}
         </div>
       </div>
 
@@ -5264,6 +6544,778 @@ function ExamPaper({ exercise, questions }) {
         </footer>
       )}
     </article>
+  );
+}
+
+
+/* ============================================================
+ * Normalisation "question par question" pour les JSON BAC
+ * ------------------------------------------------------------
+ * Certains fichiers historiques gardent:
+ *   - toutes les sous-questions dans questions[0].text ;
+ *   - tout le corrigé dans solution.steps.
+ *
+ * La règle ici est volontairement générale:
+ *   1) le JSON source reste intact ;
+ *   2) React fabrique une vue atomique: 1-أ, 1-ب, 2-أ... ;
+ *   3) les étapes du corrigé portant le même label restent ensemble ;
+ *   4) les introductions communes ("2- ندرس...", "3- بالاعتماد...")
+ *      sont remontées une seule fois dans le texte de l'exercice ;
+ *   5) les données globales placées à la fin ("المعطيات", "يعطى"...)
+ *      sont remontées une seule fois dans le texte de l'exercice ;
+ *   6) les structures أ/ب et أولاً/ثانياً sont prises en charge ;
+ *   7) si la correspondance énoncé/corrigé n'est pas sûre, aucun
+ *      découpage n'est inventé.
+ * ============================================================ */
+
+const BAC_PRESENTATION_PART_LETTERS = [
+  "أ", "ا", "ب", "ج", "د", "ه", "هـ", "و", "ز", "ح", "ط", "ي",
+];
+
+const BAC_PRESENTATION_NAMED_SECTIONS = {
+  "أولاً": "أولاً",
+  "أولا": "أولاً",
+  "اولاً": "أولاً",
+  "اولا": "أولاً",
+  "ثانياً": "ثانياً",
+  "ثانيا": "ثانياً",
+  "ثانيًا": "ثانياً",
+  "ثالثاً": "ثالثاً",
+  "ثالثا": "ثالثاً",
+  "رابعاً": "رابعاً",
+  "رابعا": "رابعاً",
+  "خامساً": "خامساً",
+  "خامسا": "خامساً",
+};
+
+function escapePresentationRegExp(value) {
+  return String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizePresentationPartLetter(value) {
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/ـ/g, "");
+
+  if (raw === "ا") return "أ";
+  if (raw === "ه") return "هـ";
+  return raw;
+}
+
+function normalizePresentationSectionToken(value) {
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/ـ/g, "");
+
+  return (
+    BAC_PRESENTATION_NAMED_SECTIONS[raw] ||
+    normalizePresentationPartLetter(raw)
+  );
+}
+
+function normalizePresentationPartLabel(value) {
+  let raw = String(value ?? "")
+    .trim()
+    .replace(/جـ/g, "ج")
+    .replace(/ـ/g, "");
+
+  if (!raw) return "";
+
+  raw = raw
+    .replace(/^[\[(]+|[\])]+$/g, "")
+    .replace(/\s*(?:\/|\\|–|—|\.|:|：)\s*/g, "-")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .trim();
+
+  if (!raw) return "";
+
+  return raw
+    .split("-")
+    .map((token) => normalizePresentationSectionToken(token))
+    .filter(hasText)
+    .join("-");
+}
+
+function looksLikePresentationPartLabel(value) {
+  const label = normalizePresentationPartLabel(value);
+  if (!label || label.length > 36 || !/\d/u.test(label)) return false;
+
+  const tokens = label.split("-").filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 4) return false;
+
+  return tokens.every((token) => {
+    if (/^\d+$/u.test(token)) return true;
+    if (BAC_PRESENTATION_PART_LETTERS.includes(token)) return true;
+    if (Object.values(BAC_PRESENTATION_NAMED_SECTIONS).includes(token)) return true;
+    return false;
+  });
+}
+
+function getSolutionStepPresentationLabel(step) {
+  const explicit =
+    step?.question_label ||
+    step?.question_number ||
+    step?.part_label ||
+    step?.display_label ||
+    "";
+
+  if (hasText(String(explicit))) {
+    const explicitLabel = normalizePresentationPartLabel(explicit);
+    if (looksLikePresentationPartLabel(explicitLabel)) {
+      return explicitLabel;
+    }
+  }
+
+  const title = normalizeDisplayText(step?.title || "");
+  if (!title) return "";
+
+  /*
+   * Les corrigés détaillés utilisent généralement:
+   *   2-أ — ...
+   *   أ/2 — ...
+   *   أولاً/1-أ — ...
+   */
+  const head = title.split(/\s+[—–]\s+/u)[0]?.trim() || "";
+  const normalizedHead = normalizePresentationPartLabel(head);
+
+  if (looksLikePresentationPartLabel(normalizedHead)) {
+    return normalizedHead;
+  }
+
+  // Fallback conservateur pour les titres "2-أ: ..."
+  const colonHead = title.match(/^(.{1,34}?)[：:]\s+/u);
+  if (colonHead?.[1]) {
+    const colonLabel = normalizePresentationPartLabel(colonHead[1]);
+    if (looksLikePresentationPartLabel(colonLabel)) {
+      return colonLabel;
+    }
+  }
+
+  return "";
+}
+
+function parseCompoundQuestionTextForPresentation(value) {
+  const text = normalizeDisplayText(value);
+  if (!text) {
+    return {
+      parts: [],
+      contextEntries: [],
+    };
+  }
+
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const parts = [];
+  const contextEntries = [];
+
+  let currentSection = "";
+  let currentMajor = "";
+  let currentPart = null;
+  let trailingGlobalContext = false;
+
+  const letterPattern = BAC_PRESENTATION_PART_LETTERS
+    .map(escapePresentationRegExp)
+    .join("|");
+
+  const namedSectionPattern = Object.keys(BAC_PRESENTATION_NAMED_SECTIONS)
+    .sort((a, b) => b.length - a.length)
+    .map(escapePresentationRegExp)
+    .join("|");
+
+  const namedSectionLinePattern = new RegExp(
+    `^\\s*(${namedSectionPattern})\\s*[:：/\\-–—ـ.)]*\\s*(.*)$`,
+    "u"
+  );
+
+  const topLetterSectionOnlyPattern = new RegExp(
+    `^\\s*(${letterPattern})\\s*[/：:\\-–—ـ.)]\\s*$`,
+    "u"
+  );
+
+  const majorPattern = new RegExp(
+    `^\\s*(\\d+)\\s*[/\\-–—ـ.)]\\s*(?:(?:(${letterPattern}))\\s*[/\\-–—ـ.)]\\s*)?(.*)$`,
+    "u"
+  );
+
+  const subPattern = new RegExp(
+    `^\\s*(${letterPattern})\\s*[/\\-–—ـ.)]\\s*(.*)$`,
+    "u"
+  );
+
+  /*
+   * هذه الأسطر ليست سؤالًا مستقلًا. غالبًا هي معطيات عامة كان الملف
+   * القديم قد ألصقها في آخر question.text.
+   */
+  const trailingGlobalContextPattern =
+    /^\s*(?:المعطيات|معطيات|يعطى|تعطى|نعطي)(?:\s|[:：])/u;
+
+  const addContext = (rawValue, sourceOrder, kind = "context") => {
+    const clean = normalizeDisplayText(rawValue);
+    if (!clean) return;
+
+    contextEntries.push({
+      text: clean,
+      sourceOrder,
+      kind,
+    });
+  };
+
+  const appendLine = (line, sourceOrder) => {
+    const clean = String(line ?? "").trim();
+    if (!clean) return;
+
+    if (trailingGlobalContext) {
+      addContext(clean, sourceOrder, "trailing");
+      return;
+    }
+
+    if (currentPart) {
+      currentPart.text = [currentPart.text, clean]
+        .filter(hasText)
+        .join("\n")
+        .trim();
+      return;
+    }
+
+    addContext(clean, sourceOrder, "leading");
+  };
+
+  lines.forEach((line, lineIndex) => {
+    const cleanLine = String(line ?? "").trim();
+    if (!cleanLine) return;
+
+    if (trailingGlobalContextPattern.test(cleanLine)) {
+      trailingGlobalContext = true;
+      currentPart = null;
+      addContext(cleanLine, lineIndex, "trailing");
+      return;
+    }
+
+    if (trailingGlobalContext) {
+      /*
+       * En pratique les données sont en fin de bloc. Ce garde-fou permet
+       * néanmoins de reprendre le parsing si un vrai numéro de question suit.
+       */
+      const resumesQuestion =
+        majorPattern.test(cleanLine) ||
+        subPattern.test(cleanLine) ||
+        namedSectionLinePattern.test(cleanLine);
+
+      if (!resumesQuestion) {
+        addContext(cleanLine, lineIndex, "trailing");
+        return;
+      }
+
+      trailingGlobalContext = false;
+    }
+
+    const namedSectionMatch = cleanLine.match(namedSectionLinePattern);
+    if (namedSectionMatch) {
+      currentSection = normalizePresentationSectionToken(namedSectionMatch[1]);
+      currentMajor = "";
+      currentPart = null;
+
+      const rest = String(namedSectionMatch[2] || "").trim();
+      if (rest) {
+        addContext(rest, lineIndex, "section");
+      }
+      return;
+    }
+
+    const topLetterSectionMatch = cleanLine.match(
+      topLetterSectionOnlyPattern
+    );
+
+    if (topLetterSectionMatch && !currentMajor) {
+      currentSection = normalizePresentationSectionToken(
+        topLetterSectionMatch[1]
+      );
+      currentMajor = "";
+      currentPart = null;
+      return;
+    }
+
+    const majorMatch = cleanLine.match(majorPattern);
+    if (majorMatch) {
+      currentMajor = majorMatch[1];
+
+      const sub = normalizePresentationPartLetter(majorMatch[2]);
+      const base = [currentSection, currentMajor]
+        .filter(hasText)
+        .join("-");
+
+      const label = sub ? `${base}-${sub}` : base;
+
+      currentPart = {
+        label: normalizePresentationPartLabel(label),
+        section: currentSection,
+        major: currentMajor,
+        sub,
+        text: String(majorMatch[3] || "").trim(),
+        sourceOrder: lineIndex,
+      };
+
+      parts.push(currentPart);
+      return;
+    }
+
+    const subMatch = cleanLine.match(subPattern);
+    if (subMatch) {
+      const sub = normalizePresentationPartLetter(subMatch[1]);
+
+      /*
+       * "أ/" au début d'un bloc (sans 1/2 actif) représente une section,
+       * comme dans le sujet 2010: أ/ puis 1/,2/,3/.
+       */
+      if (!currentMajor) {
+        currentSection = normalizePresentationSectionToken(sub);
+        currentPart = null;
+
+        const rest = String(subMatch[2] || "").trim();
+        if (rest) {
+          addContext(rest, lineIndex, "section");
+        }
+        return;
+      }
+
+      const base = [currentSection, currentMajor]
+        .filter(hasText)
+        .join("-");
+
+      currentPart = {
+        label: normalizePresentationPartLabel(`${base}-${sub}`),
+        section: currentSection,
+        major: currentMajor,
+        sub,
+        text: String(subMatch[2] || "").trim(),
+        sourceOrder: lineIndex,
+      };
+
+      parts.push(currentPart);
+      return;
+    }
+
+    appendLine(cleanLine, lineIndex);
+  });
+
+  return {
+    parts: parts.map((part) => ({
+      ...part,
+      label: normalizePresentationPartLabel(part.label),
+      text: normalizeDisplayText(part.text),
+    })),
+    contextEntries,
+  };
+}
+
+function groupSolutionStepsForPresentation(solution) {
+  const steps = normalizeSteps(solution?.steps);
+  const groups = [];
+
+  steps.forEach((step, stepIndex) => {
+    const label = getSolutionStepPresentationLabel(step);
+
+    /*
+     * Une étape sans label explicite reste dans le groupe précédent.
+     * On ne crée jamais une fausse question pour une sous-étape pédagogique.
+     */
+    if (!label) {
+      if (groups.length > 0) {
+        groups[groups.length - 1].steps.push(step);
+      } else {
+        groups.push({
+          label: "",
+          steps: [step],
+          firstStepIndex: stepIndex,
+        });
+      }
+      return;
+    }
+
+    const previous = groups[groups.length - 1];
+
+    if (previous?.label === label) {
+      previous.steps.push(step);
+      return;
+    }
+
+    groups.push({
+      label,
+      steps: [step],
+      firstStepIndex: stepIndex,
+    });
+  });
+
+  return groups;
+}
+
+function mergeParentSolutionGroupsForPresentation(rawGroups) {
+  const groups = asArray(rawGroups).map((group) => ({
+    ...group,
+    steps: [...asArray(group?.steps)],
+  }));
+
+  const result = [];
+
+  for (let index = 0; index < groups.length; index += 1) {
+    const current = groups[index];
+    const next = groups[index + 1];
+
+    /*
+     * Exemple 2012:
+     *   "أولاً/1 — تطبيق القانون الثاني"
+     *   "أولاً/1-أ — المعادلتان الزمنيتان"
+     *
+     * Le premier item est une étape d'introduction du 1-أ, pas une question
+     * indépendante. On la conserve en la fusionnant avec le premier enfant.
+     */
+    if (
+      hasText(current?.label) &&
+      hasText(next?.label) &&
+      String(next.label).startsWith(`${current.label}-`)
+    ) {
+      groups[index + 1] = {
+        ...next,
+        steps: [...asArray(current.steps), ...asArray(next.steps)],
+        firstStepIndex:
+          current?.firstStepIndex ??
+          next?.firstStepIndex ??
+          index,
+      };
+      continue;
+    }
+
+    result.push(current);
+  }
+
+  return result;
+}
+
+function buildPresentationDecomposition(question) {
+  const sourceQuestion = question?._source_question || question;
+  const sourceSolution = asObject(sourceQuestion?.solution);
+
+  const parsed = parseCompoundQuestionTextForPresentation(
+    sourceQuestion?.text
+  );
+
+  const groups = mergeParentSolutionGroupsForPresentation(
+    groupSolutionStepsForPresentation(sourceSolution)
+  );
+
+  const partMap = new Map();
+
+  parsed.parts.forEach((part) => {
+    if (part?.label && !partMap.has(part.label)) {
+      partMap.set(part.label, part);
+    }
+  });
+
+  const labeledGroups = groups.filter((group) => hasText(group?.label));
+  const matchedGroups = labeledGroups.filter((group) =>
+    partMap.has(group.label)
+  );
+
+  const reliableMatch =
+    groups.length >= 2 &&
+    parsed.parts.length >= 2 &&
+    matchedGroups.length >= 2 &&
+    matchedGroups.length / Math.max(labeledGroups.length, 1) >= 0.7;
+
+  return {
+    sourceQuestion,
+    sourceSolution,
+    parsed,
+    groups,
+    partMap,
+    labeledGroups,
+    matchedGroups,
+    reliableMatch,
+  };
+}
+
+function getPresentationContextEntries(decomposition) {
+  if (!decomposition?.reliableMatch) return [];
+
+  const targetLabels = new Set(
+    decomposition.labeledGroups.map((group) => group.label)
+  );
+
+  const entries = [...asArray(decomposition.parsed?.contextEntries)];
+
+  decomposition.parsed.parts.forEach((part) => {
+    if (!part?.label || targetLabels.has(part.label) || !hasText(part.text)) {
+      return;
+    }
+
+    const hasChildren = [...targetLabels].some((label) =>
+      String(label).startsWith(`${part.label}-`)
+    );
+
+    if (!hasChildren) return;
+
+    /*
+     * Un parent sans réponse propre est une consigne/contexte commun:
+     *   "2- ندرس حركة..."
+     *   "3- بالاعتماد على البيان..."
+     * On l'affiche une seule fois dans le texte du sujet.
+     */
+    entries.push({
+      text: part.text,
+      sourceOrder: part.sourceOrder ?? 0,
+      kind: "parent",
+    });
+  });
+
+  const seen = new Set();
+
+  return entries
+    .filter((entry) => hasText(entry?.text))
+    .sort(
+      (left, right) =>
+        Number(left?.sourceOrder ?? 0) -
+        Number(right?.sourceOrder ?? 0)
+    )
+    .filter((entry) => {
+      const key = normalizeStatementSectionForDedup(entry.text);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function getSourceQuestionsFromPresentation(questions) {
+  const result = [];
+  const seenObjects = new Set();
+
+  asArray(questions).forEach((question) => {
+    const source = question?._source_question || question;
+    if (!source || seenObjects.has(source)) return;
+
+    seenObjects.add(source);
+    result.push(source);
+  });
+
+  return result;
+}
+
+function getPresentationStatementContextBlocks(questions) {
+  const sourceQuestions = getSourceQuestionsFromPresentation(questions);
+  const seen = new Set();
+  const blocks = [];
+
+  sourceQuestions.forEach((question) => {
+    const decomposition = buildPresentationDecomposition(question);
+
+    getPresentationContextEntries(decomposition).forEach((entry) => {
+      const clean = normalizeDisplayText(entry?.text);
+      const key = normalizeStatementSectionForDedup(clean);
+
+      if (!clean || !key || seen.has(key)) return;
+      seen.add(key);
+      blocks.push(clean);
+    });
+  });
+
+  return blocks;
+}
+
+function appendPresentationContextsToStatement(statement, contextBlocks) {
+  let result = normalizeDisplayText(statement);
+  let normalizedResult = normalizeStatementSectionForDedup(result);
+
+  asArray(contextBlocks).forEach((block) => {
+    const clean = normalizeDisplayText(block);
+    const key = normalizeStatementSectionForDedup(clean);
+
+    if (!clean || !key) return;
+
+    // Evite de répéter une information déjà présente dans statement.
+    if (normalizedResult && normalizedResult.includes(key)) {
+      return;
+    }
+
+    result = [result, clean].filter(hasText).join("\n\n");
+    normalizedResult = normalizeStatementSectionForDedup(result);
+  });
+
+  return result;
+}
+
+function buildPresentationSolutionSlice(solution, steps, groupIndex, groupCount) {
+  const source = asObject(solution);
+
+  const sliced = {
+    ...source,
+
+    /*
+     * Les vrais step_number du JSON sont conservés pour le backend.
+     * L'interface repart simplement de 1 à l'intérieur de chaque question.
+     */
+    steps: asArray(steps).map((step, index) => ({
+      ...step,
+      _presentation_step_number: index + 1,
+    })),
+  };
+
+  /*
+   * Les champs d'introduction sont globaux. On évite de répéter exactement
+   * la même stratégie sous 1-أ, 1-ب, 1-ج...
+   */
+  if (groupIndex > 0) {
+    [
+      "strategy",
+      "solution_strategy",
+      "main_idea",
+      "detailed_explanation",
+      "methodology",
+      "method",
+    ].forEach((key) => {
+      delete sliced[key];
+    });
+  }
+
+  /*
+   * final_answer est souvent une synthèse de TOUT l'exercice.
+   * Il est affiché une seule fois par ExamPaper sous "خلاصة التمرين".
+   */
+  delete sliced.final_answer;
+
+  /*
+   * Les annexes globales restent attachées au dernier bloc afin qu'aucune
+   * donnée du corrigé ne disparaisse.
+   */
+  if (groupIndex < groupCount - 1) {
+    [
+      "verification",
+      "conclusion",
+      "common_mistakes",
+      "hints",
+      "formal_writing",
+      "writing_method",
+      "alternative_method",
+      "parameter_discussion",
+      "construction_values",
+      "tables",
+      "table",
+      "table_data",
+      "progress_table",
+      "variation_table",
+      "sign_table",
+      "figures",
+      "figure",
+      "graph_data",
+      "graphs",
+      "solution_graphs",
+    ].forEach((key) => {
+      delete sliced[key];
+    });
+  }
+
+  return sliced;
+}
+
+function expandQuestionForSolutionPresentation(question, questionIndex) {
+  /*
+   * Idempotence: une question déjà atomisée ne doit jamais être redécoupée.
+   */
+  if (question?._presentation_atomic || question?._is_virtual_part) {
+    return [question];
+  }
+
+  const decomposition = buildPresentationDecomposition(question);
+
+  if (!decomposition.reliableMatch) {
+    return [
+      {
+        ...question,
+        _presentation_key: `${question?.id ?? questionIndex}-whole`,
+        _source_question_index: questionIndex,
+        _source_question: question,
+        _presentation_atomic: true,
+        _is_virtual_part: false,
+      },
+    ];
+  }
+
+  const virtualQuestions = decomposition.groups
+    .map((group, groupIndex) => {
+      const part = decomposition.partMap.get(group.label);
+
+      if (!part) return null;
+
+      const displayLabel =
+        group.label ||
+        getQuestionDisplayLabel(question, questionIndex + 1);
+
+      return {
+        ...question,
+
+        /*
+         * On garde l'id backend d'origine. question_part_label/text précisera
+         * la sous-question lors de la demande de réexplication.
+         */
+        id: question?.id,
+        question_id: question?.question_id,
+
+        display_label: displayLabel,
+        number: displayLabel,
+        display_order: groupIndex + 1,
+
+        // Seulement la consigne de CETTE question.
+        text: part.text,
+
+        // Plus de bloc "معطيات هذا الجزء" répété sous chaque question.
+        context: "",
+        context_before: "",
+        prelude: "",
+
+        solution: buildPresentationSolutionSlice(
+          decomposition.sourceSolution,
+          group.steps,
+          groupIndex,
+          decomposition.groups.length
+        ),
+
+        _presentation_key: `${
+          question?.id ?? questionIndex
+        }-${displayLabel || groupIndex + 1}`,
+
+        _source_question_index: questionIndex,
+        _source_question: question,
+        _presentation_atomic: true,
+
+        _presentation_first_step_number:
+          group.steps?.[0]?.step_number ??
+          group.steps?.[0]?.order ??
+          groupIndex + 1,
+
+        _is_virtual_part: true,
+        _is_first_virtual_part: groupIndex === 0,
+        _is_last_virtual_part:
+          groupIndex === decomposition.groups.length - 1,
+      };
+    })
+    .filter(Boolean);
+
+  return virtualQuestions.length > 0
+    ? virtualQuestions
+    : [
+        {
+          ...question,
+          _presentation_key: `${question?.id ?? questionIndex}-whole`,
+          _source_question_index: questionIndex,
+          _source_question: question,
+          _presentation_atomic: true,
+          _is_virtual_part: false,
+        },
+      ];
+}
+
+function getSolutionPresentationQuestions(questions) {
+  return asArray(questions).flatMap((question, index) =>
+    expandQuestionForSolutionPresentation(question, index)
   );
 }
 
@@ -5282,6 +7334,14 @@ function FullSolutionDocument({
   const solutionFigureAssignments = useMemo(
     () => buildSolutionFigureAssignments(exercise, questions),
     [exercise, questions]
+  );
+
+  // بعض ملفات البكالوريا القديمة تحفظ جميع المطالب داخل questions[0].text
+  // بينما يكون solution.steps مفصولًا أصلًا إلى 1، 2-أ، 2-ب... إلخ.
+  // نُنشئ هنا فقط تمثيلًا بصريًا ذريًا للحل، دون تعديل JSON الأصلي.
+  const presentationQuestions = useMemo(
+    () => getSolutionPresentationQuestions(questions),
+    [questions]
   );
 
   return (
@@ -5311,7 +7371,10 @@ function FullSolutionDocument({
       </header>
 
       <div className="min-w-0 px-3 py-5 min-[360px]:px-4 sm:px-8 sm:py-8 lg:px-10">
-        {questions.map((question, index) => {
+        {presentationQuestions.map((question, index) => {
+          const sourceQuestionIndex = Number.isInteger(question?._source_question_index)
+            ? question._source_question_index
+            : index;
           const key = questionKey(exercise, question, index);
           const solution = asObject(question?.solution);
           const number = getQuestionDisplayLabel(question, index + 1);
@@ -5325,10 +7388,7 @@ function FullSolutionDocument({
               data-tutor-question-id={question?.id ?? question?.question_id ?? index + 1}
               data-tutor-question-number={question?.number ?? question?.display_order ?? index + 1}
               data-tutor-question-title={question?.title || `السؤال ${index + 1}`}
-              className={cn(
-                "min-w-0 py-6 first:pt-0 last:pb-0 sm:py-8",
-                index > 0 && "border-t border-dashed border-slate-300"
-              )}
+              className="mb-5 min-w-0 rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm last:mb-0 sm:p-6"
             >
               <div className="mb-5 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 sm:gap-4 sm:px-4 sm:py-4">
                 <span className="inline-flex min-h-9 min-w-9 max-w-[8rem] items-center justify-center rounded-xl bg-slate-950 px-2.5 text-xs font-black text-white sm:min-h-10 sm:text-sm">
@@ -5340,7 +7400,7 @@ function FullSolutionDocument({
                       {getQuestionSectionTitle(question)}
                     </p>
                   )}
-                  <p className="mb-1 text-[10px] font-black text-emerald-700 sm:text-xs">حل السؤال</p>
+                  <p className="mb-1 text-[10px] font-black text-emerald-700 sm:text-xs">حل السؤال {number}</p>
                   {!isGenericQuestionText(question?.text) ? (
                     <MathText block className="text-sm font-black leading-8 text-slate-950 sm:text-base sm:leading-9">
                       {getQuestionDisplayText(question, number, exercise?.statement || "")}
@@ -5349,17 +7409,6 @@ function FullSolutionDocument({
                     <p className="text-sm font-black text-slate-950 sm:text-base">
                       الحل النموذجي الكامل للتمرين
                     </p>
-                  )}
-
-                  {hasText(getQuestionContextBefore(question)) && (
-                    <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                      <p className="mb-1 text-[10px] font-black text-slate-500">
-                        معطيات مرتبطة بالسؤال
-                      </p>
-                      <BacStatementText className="text-sm font-semibold leading-7 text-slate-700">
-                        {getQuestionContextBefore(question)}
-                      </BacStatementText>
-                    </div>
                   )}
 
                   {hasText(getQuestionContextAfter(question)) && (
@@ -5375,9 +7424,10 @@ function FullSolutionDocument({
               <StoredSolution
                 exercise={exercise}
                 question={question}
-                questionIndex={index}
+                questionIndex={sourceQuestionIndex}
                 solution={solution}
-                assignedSolutionFigureIds={solutionFigureAssignments.get(index) || new Set()}
+                assignedSolutionFigureIds={solutionFigureAssignments.get(sourceQuestionIndex) || new Set()}
+                showReExplanation={true}
                 stepExplanations={stepExplanations}
                 visibleStepExplanations={visibleStepExplanations}
                 loadingStepKey={loadingStepKey}
@@ -5507,6 +7557,7 @@ function StoredSolution({
   questionIndex,
   solution,
   assignedSolutionFigureIds = null,
+  showReExplanation = true,
   stepExplanations,
   visibleStepExplanations,
   loadingStepKey,
@@ -5844,7 +7895,7 @@ function StoredSolution({
         />
       )}
 
-      {exercise?.id && !exercise?.is_generated && (
+      {showReExplanation && exercise?.id && !exercise?.is_generated && (
         <QuestionReExplanationPanel
           exercise={exercise}
           question={question}
@@ -5918,6 +7969,7 @@ function SolutionStep({
   questionNumber,
 }) {
   const number =
+    step?._presentation_step_number ??
     step?.step_number ??
     step?.order ??
     step?.number ??
@@ -6100,9 +8152,9 @@ function SolutionStep({
                   <p className="mb-1 text-[11px] font-black text-indigo-600">
                     لماذا هذه الخطوة؟
                   </p>
-                  <MathText block className="min-w-0 font-semibold leading-8 text-slate-700">
+                  <RichExerciseText className="min-w-0 font-semibold leading-8 text-slate-700">
                     {why}
-                  </MathText>
+                  </RichExerciseText>
                 </div>
               </div>
             )}
@@ -6117,9 +8169,9 @@ function SolutionStep({
                   <p className="mb-1 text-[11px] font-black text-sky-700">
                     نصيحة للتلميذ
                   </p>
-                  <MathText block className="min-w-0 font-semibold leading-8 text-slate-700">
+                  <RichExerciseText className="min-w-0 font-semibold leading-8 text-slate-700">
                     {studentTip}
-                  </MathText>
+                  </RichExerciseText>
                 </div>
               </div>
             )}
@@ -6159,9 +8211,9 @@ function SolutionStep({
               <p className="mb-1 text-[11px] font-black text-emerald-700">
                 نتيجة هذه الخطوة
               </p>
-              <MathText block className="min-w-0 font-black leading-8 text-emerald-950">
+              <RichExerciseText className="min-w-0 font-black leading-8 text-emerald-950">
                 {result}
-              </MathText>
+              </RichExerciseText>
             </div>
           </div>
         )}
@@ -6211,6 +8263,15 @@ function QuestionReExplanationPanel({
         sm:p-5
       "
     >
+      <div className="mb-3">
+        <p className="text-sm font-black text-violet-950">
+          لم تفهم هذا الحل؟
+        </p>
+        <p className="mt-1 text-xs font-semibold leading-6 text-slate-600 sm:text-sm">
+          اضغط هنا لنشرح حل هذا السؤال من جديد بطريقة أبسط، خطوة بخطوة.
+        </p>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -6250,9 +8311,9 @@ function QuestionReExplanationPanel({
 
           {explanation
             ? explanationVisible
-              ? "إخفاء الشرح المبسط"
-              : "إظهار الشرح المبسط"
-            : "لم أفهم السؤال"}
+              ? "إخفاء الشرح الأبسط"
+              : "إظهار الشرح الأبسط"
+            : "لم أفهم الحل"}
         </button>
 
         {explanation && (
@@ -6270,7 +8331,7 @@ function QuestionReExplanationPanel({
             className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
           >
             <RefreshCcw size={15} />
-            شرح آخر للسؤال
+            اشرح الحل بطريقة أخرى
           </button>
         )}
       </div>
@@ -6278,14 +8339,14 @@ function QuestionReExplanationPanel({
       {loadingSavedExplanations && !explanation && (
         <div className="mt-3 flex items-center gap-2 text-xs font-bold text-slate-500">
           <Loader2 className="animate-spin" size={14} />
-          جاري البحث عن شرح محفوظ لهذا السؤال...
+          جاري البحث عن شرح مبسط محفوظ لهذا الحل...
         </div>
       )}
 
       {history.length > 1 && (
         <div className="mt-4 rounded-xl border border-slate-200 bg-white/80 p-3">
           <p className="mb-2 text-xs font-black text-slate-700">
-            الشروحات المحفوظة لهذا السؤال
+            الشروحات المبسطة المحفوظة لهذا الحل
           </p>
 
           <div className="flex flex-wrap gap-2">
@@ -6334,7 +8395,7 @@ function CalculationBox({ value, order = null }) {
   return (
     <div
       dir="ltr"
-      className="relative min-w-0 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/85 px-4 py-3.5 text-center sm:px-6 sm:py-4"
+      className="relative w-full min-w-0 max-w-full overflow-x-auto overflow-y-hidden rounded-xl border border-slate-200 bg-slate-50/85 px-3 py-3.5 text-center [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-5 sm:py-4"
     >
       {order !== null && (
         <span className="absolute left-2.5 top-2.5 flex h-6 min-w-6 items-center justify-center rounded-md border border-slate-200 bg-white px-1.5 text-[10px] font-black text-slate-600 shadow-sm">
@@ -6344,7 +8405,7 @@ function CalculationBox({ value, order = null }) {
 
       <MathLTR
         block
-        className="min-w-max px-2 text-base font-bold text-slate-950 sm:text-lg"
+        className="w-full min-w-0 max-w-full px-1 text-base font-bold text-slate-950 sm:text-lg"
       >
         {normalized}
       </MathLTR>
@@ -10028,7 +12089,7 @@ function DataTable({ table }) {
       <div className="w-full overflow-x-auto overscroll-x-contain">
         <table
           dir="ltr"
-          className="min-w-max w-full border-collapse text-center text-sm sm:text-base"
+          className="w-max min-w-full border-collapse table-auto text-center text-sm sm:text-base"
         >
           {headers.length > 0 && (
             <thead>
@@ -10036,14 +12097,24 @@ function DataTable({ table }) {
                 {headers.map((header, index) => (
                   <th
                     key={index}
-                    dir={index === 0 ? "rtl" : "ltr"}
+                    dir={ARABIC_RE.test(String(header ?? "")) ? "rtl" : "ltr"}
                     className={cn(
-                      "min-w-20 border border-slate-300 px-3 py-3 font-black text-slate-950",
+                      "min-w-[84px] whitespace-nowrap border border-slate-300 px-4 py-3 font-black text-slate-950",
                       index === 0 &&
-                        "sticky left-0 z-20 min-w-36 bg-slate-100 text-right"
+                        "sticky left-0 z-20 min-w-[220px] bg-slate-100 text-center"
                     )}
                   >
-                    <MathText>{String(header ?? "")}</MathText>
+                    {ARABIC_RE.test(String(header ?? "")) ? (
+                      <MathText>{String(header ?? "")}</MathText>
+                    ) : (
+                      <span
+                        dir="ltr"
+                        className="inline-block max-w-full whitespace-nowrap align-middle"
+                        style={{ direction: "ltr", unicodeBidi: "isolate" }}
+                      >
+                        <MathLTR>{String(header ?? "")}</MathLTR>
+                      </span>
+                    )}
                   </th>
                 ))}
               </tr>
@@ -10115,11 +12186,11 @@ function DataTable({ table }) {
                     return (
                       <td
                         key={cellIndex}
-                        dir={cellIndex === 0 ? "rtl" : "ltr"}
+                        dir={ARABIC_RE.test(String(cell ?? "")) ? "rtl" : "ltr"}
                         className={cn(
-                          "min-w-20 border border-slate-300 px-3 py-3 font-bold text-slate-800",
+                          "min-w-[84px] whitespace-nowrap border border-slate-300 px-4 py-3 font-bold text-slate-800",
                           (cellIndex === 0 || firstColumnWithoutHeader) &&
-                            "sticky left-0 z-10 min-w-40 bg-inherit text-right font-black",
+                            "sticky left-0 z-10 min-w-[220px] bg-inherit text-center font-black",
                           firstColumnWithoutHeader &&
                             "bg-indigo-50 text-indigo-950"
                         )}
@@ -10129,8 +12200,16 @@ function DataTable({ table }) {
                             aria-label="خانة فارغة مطلوبة"
                             className="mx-auto block h-8 min-w-16 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50"
                           />
-                        ) : (
+                        ) : ARABIC_RE.test(String(cell)) ? (
                           <MathText>{String(cell)}</MathText>
+                        ) : (
+                          <span
+                            dir="ltr"
+                            className="inline-block max-w-full whitespace-nowrap align-middle"
+                            style={{ direction: "ltr", unicodeBidi: "isolate" }}
+                          >
+                            <MathLTR>{String(cell)}</MathLTR>
+                          </span>
                         )}
                       </td>
                     );

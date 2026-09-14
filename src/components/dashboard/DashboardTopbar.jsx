@@ -43,6 +43,10 @@ const navigationItems = [
     path: "/tutor",
   },
   {
+    label: "العروض والأسعار",
+    path: "/pricing",
+  },
+  {
     label: "المواد",
     path: "/subjects",
   },

@@ -22,7 +22,6 @@ import axios from "axios";
 import {
   useNavigate,
   useParams,
-  useSearchParams,
 } from "react-router-dom";
 
 import CourseHero from "../components/Course/CourseHero";
@@ -41,14 +40,8 @@ import {
   mathCourse,
 } from "../data/CourseData";
 
-import {
-  buildLessonPath,
-} from "../utils/lessonPath";
-
 export default function MathCoursePage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] =
-    useSearchParams();
 
   const {
     token,
@@ -385,11 +378,8 @@ export default function MathCoursePage() {
                 pack.owned !== true,
               ),
 
-            path: buildLessonPath(
-              id_subjects,
-              chapter.id,
-              chapter.code,
-            ),
+            path:
+              `/subjects/${id_subjects}/lesson/${chapter.id}`,
           };
         });
     }, [
@@ -479,86 +469,18 @@ export default function MathCoursePage() {
     subjectDetails,
   ]);
 
-  /*
-   * If a student manually writes a paid lesson URL,
-   * PaidChapterRoute sends them back here with ?offer=<chapterId>.
-   * Once packs + chapters are loaded, we automatically open
-   * the same purchase popup instead of showing a dead page.
-   */
-  const requestedOfferId =
-    searchParams.get("offer");
-
-  useEffect(() => {
-    if (
-      !requestedOfferId ||
-      loading ||
-      paymentLoading
-    ) {
-      return;
-    }
-
-    const requestedChapter =
-      chapterLessons.find(
-        (chapter) =>
-          String(chapter.id) ===
-          String(requestedOfferId),
-      );
-
-    if (requestedChapter) {
-      if (requestedChapter.locked) {
-        openChapterOffer(
-          requestedChapter,
-        );
-      } else {
-        navigate(
-          requestedChapter.path,
-          {
-            replace: true,
-            state: {
-              courseName:
-                courseData.name,
-              subjectName:
-                courseData.name,
-              subjectId:
-                courseData.id,
-              chapterTitle:
-                requestedChapter.title,
-            },
-          },
-        );
-      }
-    }
-
-    const nextParams =
-      new URLSearchParams(
-        searchParams,
-      );
-
-    nextParams.delete("offer");
-
-    setSearchParams(
-      nextParams,
-      {
-        replace: true,
-      },
-    );
-  }, [
-    chapterLessons,
-    courseData.id,
-    courseData.name,
-    loading,
-    navigate,
-    paymentLoading,
-    requestedOfferId,
-    searchParams,
-    setSearchParams,
-  ]);
-
   const handleChapterClick = (chapter) => {
     if (
       chapter.is_active === false ||
       paymentLoading
     ) {
+      return;
+    }
+
+    if (paymentError) {
+      navigate(
+        `/pricing?subject=${id_subjects}&chapter=${chapter.id}`,
+      );
       return;
     }
 
@@ -568,18 +490,12 @@ export default function MathCoursePage() {
     }
 
     navigate(
-      chapter.path ||
-        buildLessonPath(
-          id_subjects,
-          chapter.id,
-          chapter.code,
-        ),
+      `/subjects/${id_subjects}/lesson/${chapter.id}`,
       {
         state: {
           courseName: courseData.name,
           subjectName: courseData.name,
           subjectId: courseData.id,
-          chapterTitle: chapter.title,
         },
       },
     );
