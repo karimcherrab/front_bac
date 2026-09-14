@@ -30,7 +30,7 @@ import {
 
 import {
   buildLessonPath,
-} from "../utils/lessonPath";
+} from "../Utils/lessonPath";
 
 
 export default function PaidChapterRoute({
